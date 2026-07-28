@@ -1,15 +1,30 @@
 import { useParams } from "wouter";
 import { useGetMarket, getGetMarketQueryKey } from "@workspace/api-client-react";
 import { format } from "date-fns";
-import { ArrowLeft, MapPin, Calendar, Clock, DollarSign, Activity, CheckCircle2, XCircle } from "lucide-react";
+import { ArrowLeft, MapPin, Calendar, Clock, Activity, CheckCircle2, Tag } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "wouter";
 
+const PARSING_BADGE: Record<string, { label: string; variant: "success" | "destructive" | "warning" | "outline" | "secondary" }> = {
+  collected:     { label: "COLLECTED",   variant: "success" },
+  duplicate:     { label: "DUPLICATE",   variant: "secondary" },
+  skipped:       { label: "SKIPPED",     variant: "outline" },
+  rejected:      { label: "REJECTED",    variant: "warning" },
+  parse_failure: { label: "PARSE FAIL",  variant: "destructive" },
+};
+
+const MARKET_TYPE_LABEL: Record<string, string> = {
+  temperature: "🌡️ Temperature",
+  rain: "🌧️ Rain",
+  snow: "❄️ Snow",
+  wind: "💨 Wind",
+};
+
 export default function MarketDetailPage() {
   const { ticker } = useParams<{ ticker: string }>();
-  
+
   const { data: market, isLoading, error } = useGetMarket(ticker || "", {
     query: {
       enabled: !!ticker,
@@ -38,6 +53,8 @@ export default function MarketDetailPage() {
     );
   }
 
+  const ps = market.parsingStatus ? PARSING_BADGE[market.parsingStatus] : undefined;
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div>
@@ -47,20 +64,34 @@ export default function MarketDetailPage() {
         </Link>
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
           <div>
-            <div className="flex items-center gap-3 mb-2">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
               <h1 className="text-3xl font-mono font-bold tracking-tight text-primary">{market.ticker}</h1>
               <Badge variant={market.status === 'active' ? 'success' : 'secondary'} className="uppercase font-mono">
                 {market.status}
               </Badge>
+              {ps && (
+                <Badge variant={ps.variant} className="font-mono text-[10px]">{ps.label}</Badge>
+              )}
               {market.weatherMatched && (
                 <Badge variant="outline" className="border-emerald-500/30 text-emerald-500 font-mono">
                   <CheckCircle2 className="h-3 w-3 mr-1" />
                   WEATHER MATCHED
                 </Badge>
               )}
+              {market.weatherMarketType && (
+                <Badge variant="outline" className="font-mono text-xs border-blue-500/30 text-blue-400">
+                  <Tag className="h-3 w-3 mr-1" />
+                  {MARKET_TYPE_LABEL[market.weatherMarketType] ?? market.weatherMarketType.toUpperCase()}
+                </Badge>
+              )}
             </div>
             <h2 className="text-xl text-foreground font-sans font-medium">{market.title}</h2>
             {market.subtitle && <p className="text-muted-foreground mt-1">{market.subtitle}</p>}
+            {market.parsingReason && (
+              <p className="mt-2 text-xs font-mono text-orange-400 bg-orange-400/5 border border-orange-400/20 px-2 py-1 rounded">
+                ⚠ {market.parsingReason}
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -88,7 +119,7 @@ export default function MarketDetailPage() {
                 </span>
               </div>
               <div className="p-6 flex flex-col justify-center items-center text-center">
-                <span className="text-xs text-muted-foreground mb-2">LAST TRADE</span>
+                <span className="text-xs text-muted-foreground mb-2">YES BID</span>
                 <span className="text-2xl font-bold text-foreground">
                   {market.yesBid !== null && market.yesBid !== undefined ? `${market.yesBid}¢` : '-'}
                 </span>
@@ -108,12 +139,12 @@ export default function MarketDetailPage() {
               EVENT DETAILS
             </CardTitle>
           </CardHeader>
-          <CardContent className="p-6 space-y-6 font-mono text-sm">
+          <CardContent className="p-6 space-y-4 font-mono text-sm">
             <div>
               <span className="text-muted-foreground text-xs block mb-1">CITY TARGET</span>
               <div className="font-bold text-lg">{market.city || 'N/A'}</div>
             </div>
-            
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <span className="text-muted-foreground text-xs block mb-1 flex items-center gap-1">
@@ -140,9 +171,18 @@ export default function MarketDetailPage() {
               <div className="text-primary">{market.eventTicker || 'N/A'}</div>
             </div>
 
+            {market.collectionTimestamp && (
+              <div>
+                <span className="text-muted-foreground text-xs block mb-1">COLLECTED AT</span>
+                <div className="text-muted-foreground text-xs">
+                  {format(new Date(market.collectionTimestamp), "yyyy-MM-dd HH:mm:ss")}
+                </div>
+              </div>
+            )}
+
             <div className="pt-4 border-t border-border/50">
               <span className="text-muted-foreground text-xs block mb-1">LAST UPDATED</span>
-              <div className="text-muted-foreground">
+              <div className="text-muted-foreground text-xs">
                 {market.lastUpdated ? format(new Date(market.lastUpdated), "yyyy-MM-dd HH:mm:ss") : 'N/A'}
               </div>
             </div>

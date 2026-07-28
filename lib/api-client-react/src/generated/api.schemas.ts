@@ -27,6 +27,16 @@ export interface ServiceStatus {
   lastChecked: string | null;
 }
 
+export interface ServiceHealthResponse {
+  services: ServiceStatus[];
+  /** @nullable */
+  lastSuccessfulCollection?: string | null;
+  /** @nullable */
+  lastFailedCollection?: string | null;
+  totalMarketsStored?: number;
+  totalForecastsStored?: number;
+}
+
 export interface LoginInput {
   username: string;
   password: string;
@@ -66,7 +76,21 @@ export interface Market {
   volume?: number | null;
   weatherMatched: boolean;
   /** @nullable */
+  parsingStatus?: string | null;
+  /** @nullable */
+  parsingReason?: string | null;
+  /** @nullable */
+  weatherMarketType?: string | null;
+  /** @nullable */
+  collectionTimestamp?: string | null;
+  /** @nullable */
   lastUpdated?: string | null;
+}
+
+export interface MarketListResponse {
+  markets: Market[];
+  /** @nullable */
+  summary?: string | null;
 }
 
 export interface WeatherForecast {
@@ -93,17 +117,6 @@ export interface AppError {
   occurredAt: string;
 }
 
-export interface Dashboard {
-  totalActiveMarkets: number;
-  marketsWithWeather: number;
-  /** @nullable */
-  lastCollectionTime?: string | null;
-  /** @nullable */
-  lastCollectionStatus?: string | null;
-  markets: Market[];
-  recentErrors: AppError[];
-}
-
 export type JobRunStatus = typeof JobRunStatus[keyof typeof JobRunStatus];
 
 
@@ -123,9 +136,37 @@ export interface JobRun {
   /** @nullable */
   marketsFound?: number | null;
   /** @nullable */
+  marketsSkipped?: number | null;
+  /** @nullable */
+  marketsRejected?: number | null;
+  /** @nullable */
   forecastsRetrieved?: number | null;
   /** @nullable */
+  durationSeconds?: number | null;
+  /** @nullable */
   errorMessage?: string | null;
+}
+
+export interface Dashboard {
+  totalActiveMarkets: number;
+  marketsWithWeather: number;
+  marketsCollected?: number;
+  marketsParseFailures?: number;
+  /** @nullable */
+  lastCollectionTime?: string | null;
+  /** @nullable */
+  lastCollectionStatus?: string | null;
+  /** @nullable */
+  lastCollectionDuration?: number | null;
+  /** @nullable */
+  lastCollectionMarketsFound?: number | null;
+  /** @nullable */
+  lastCollectionMarketsSkipped?: number | null;
+  /** @nullable */
+  collectionSummary?: string | null;
+  markets: Market[];
+  recentErrors: AppError[];
+  lastJob?: JobRun | null;
 }
 
 export type GetErrorsParams = {

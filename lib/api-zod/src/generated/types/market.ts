@@ -35,5 +35,13 @@ export interface Market {
   volume?: number | null;
   weatherMatched: boolean;
   /** @nullable */
+  parsingStatus?: string | null;
+  /** @nullable */
+  parsingReason?: string | null;
+  /** @nullable */
+  weatherMarketType?: string | null;
+  /** @nullable */
+  collectionTimestamp?: string | null;
+  /** @nullable */
   lastUpdated?: string | null;
 }

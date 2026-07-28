@@ -15,6 +15,8 @@ export * from './jobRun';
 export * from './jobRunStatus';
 export * from './loginInput';
 export * from './market';
+export * from './marketListResponse';
+export * from './serviceHealthResponse';
 export * from './serviceStatus';
 export * from './serviceStatusStatus';
 export * from './weatherForecast';

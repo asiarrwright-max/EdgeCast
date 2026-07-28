@@ -29,7 +29,6 @@ paths:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -42,18 +41,16 @@ paths:
     get:
       operationId: getServiceHealth
       tags: [health]
-      summary: Status of each external API
+      summary: Status of each external API, database, and scheduler
       security:
         - bearerAuth: []
       responses:
         "200":
-          description: Service health list
+          description: Service health detail
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ServiceStatus"
+                $ref: "#/components/schemas/ServiceHealthResponse"
 
   /auth/login:
     post:
@@ -80,7 +77,7 @@ paths:
     get:
       operationId: getDashboard
       tags: [dashboard]
-      summary: Dashboard summary
+      summary: Dashboard summary with last-run stats
       security:
         - bearerAuth: []
       responses:
@@ -95,18 +92,16 @@ paths:
     get:
       operationId: getMarkets
       tags: [markets]
-      summary: List active Kalshi weather markets
+      summary: All collected Kalshi weather markets
       security:
         - bearerAuth: []
       responses:
         "200":
-          description: Market list
+          description: Market list with optional summary message
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Market"
+                $ref: "#/components/schemas/MarketListResponse"
 
   /markets/{ticker}:
     get:
@@ -232,6 +227,23 @@ components:
         lastChecked:
           type: ["string", "null"]
 
+    ServiceHealthResponse:
+      type: object
+      required: [services]
+      properties:
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceStatus"
+        lastSuccessfulCollection:
+          type: ["string", "null"]
+        lastFailedCollection:
+          type: ["string", "null"]
+        totalMarketsStored:
+          type: number
+        totalForecastsStored:
+          type: number
+
     LoginInput:
       type: object
       required: [username, password]
@@ -286,7 +298,26 @@ components:
           type: ["number", "null"]
         weatherMatched:
           type: boolean
+        parsingStatus:
+          type: ["string", "null"]
+        parsingReason:
+          type: ["string", "null"]
+        weatherMarketType:
+          type: ["string", "null"]
+        collectionTimestamp:
+          type: ["string", "null"]
         lastUpdated:
+          type: ["string", "null"]
+
+    MarketListResponse:
+      type: object
+      required: [markets]
+      properties:
+        markets:
+          type: array
+          items:
+            $ref: "#/components/schemas/Market"
+        summary:
           type: ["string", "null"]
 
     WeatherForecast:
@@ -318,9 +349,21 @@ components:
           type: number
         marketsWithWeather:
           type: number
+        marketsCollected:
+          type: number
+        marketsParseFailures:
+          type: number
         lastCollectionTime:
           type: ["string", "null"]
         lastCollectionStatus:
+          type: ["string", "null"]
+        lastCollectionDuration:
+          type: ["number", "null"]
+        lastCollectionMarketsFound:
+          type: ["number", "null"]
+        lastCollectionMarketsSkipped:
+          type: ["number", "null"]
+        collectionSummary:
           type: ["string", "null"]
         markets:
           type: array
@@ -330,6 +373,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AppError"
+        lastJob:
+          oneOf:
+            - $ref: "#/components/schemas/JobRun"
+            - type: "null"
 
     JobRun:
       type: object
@@ -348,7 +395,13 @@ components:
           enum: [running, success, failed]
         marketsFound:
           type: ["number", "null"]
+        marketsSkipped:
+          type: ["number", "null"]
+        marketsRejected:
+          type: ["number", "null"]
         forecastsRetrieved:
+          type: ["number", "null"]
+        durationSeconds:
           type: ["number", "null"]
         errorMessage:
           type: ["string", "null"]

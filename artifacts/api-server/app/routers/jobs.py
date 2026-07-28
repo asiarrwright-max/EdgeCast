@@ -26,7 +26,10 @@ def _to_dict(j: JobRun) -> dict:
         "completedAt": j.completed_at.isoformat() if j.completed_at else None,
         "status": j.status,
         "marketsFound": j.markets_found,
+        "marketsSkipped": j.markets_skipped,
+        "marketsRejected": j.markets_rejected,
         "forecastsRetrieved": j.forecasts_retrieved,
+        "durationSeconds": j.duration_seconds,
         "errorMessage": j.error_message,
     }
 
@@ -58,7 +61,7 @@ async def trigger_collection(
         return _to_dict(running)
 
     # Create a job record immediately so the UI can track progress
-    job = JobRun(job_type="manual")
+    job = JobRun(job_type="manual", status="running")
     db.add(job)
     await db.flush()
     await db.refresh(job)

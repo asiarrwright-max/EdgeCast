@@ -1,0 +1,217 @@
+Great work on Phase 1.
+
+Before beginning Phase 2, I want to fully validate the live data pipeline.
+
+The dashboard currently shows:
+
+- 0 active markets
+- 0% weather coverage
+- Last run: Never
+
+However, System Health reports that both Kalshi and Open-Meteo are operational.
+
+This means the application can reach the APIs but is not successfully collecting, parsing, storing, or displaying active weather markets.
+
+DO NOT replace missing live functionality with placeholder or mock data. If live data is unavailable, clearly explain why instead of simulating success.
+
+## Objective
+
+Do not begin probability calculations, settlement mapping, forecasting logic, paper trading, or any new features.
+
+Focus exclusively on making the live market collection pipeline reliable.
+
+---
+
+## 1. Kalshi Market Collection
+
+When "Run Collection Now" is pressed:
+
+- Retrieve all active Kalshi weather markets from the official Kalshi public API.
+- Save every retrieved market into PostgreSQL.
+- Record:
+  - Market ticker
+  - Event ticker
+  - Market title
+  - City
+  - Weather market type
+  - Open time
+  - Close time
+  - YES price
+  - NO price
+  - Volume
+  - Collection timestamp
+
+If the API changes or returns no weather markets, display exactly why.
+
+---
+
+## 2. Weather Collection
+
+For every successfully collected market:
+
+- Match the market to a weather location.
+- Retrieve the appropriate Open-Meteo forecast.
+- Save the forecast.
+- Record whether weather matching succeeded or failed.
+
+Do not silently ignore failed matches.
+
+---
+
+## 3. Logging
+
+Log every step.
+
+For every market, store one of these statuses:
+
+- Collected
+- Skipped
+- Rejected
+- Duplicate
+- Parsing Failure
+
+Include the reason.
+
+Examples:
+
+Skipped:
+Not a weather market
+
+Rejected:
+Missing settlement information
+
+Duplicate:
+Already exists
+
+Parsing Failure:
+Unable to identify city
+
+---
+
+## 4. Dashboard
+
+Update the Dashboard to display:
+
+- Active weather markets
+- Markets collected this run
+- Markets skipped
+- Markets rejected
+- Weather matches
+- Last successful collection time
+- Collection duration
+
+Do not leave "Last Run" as "Never" after a successful run.
+
+---
+
+## 5. Markets Page
+
+Display every collected market.
+
+Columns:
+
+- Market ticker
+- City
+- Market title
+- Open time
+- Close time
+- YES price
+- NO price
+- Collection timestamp
+- Parsing status
+- Weather matched (Yes/No)
+
+---
+
+## 6. Background Jobs
+
+Every collection run should be recorded.
+
+Store:
+
+- Start time
+- Finish time
+- Duration
+- Markets collected
+- Markets skipped
+- Markets rejected
+- Markets matched to weather
+- Errors
+
+Display these under the Jobs page.
+
+---
+
+## 7. Error Handling
+
+If zero markets are collected, DO NOT simply display zero.
+
+Instead display a clear explanation such as:
+
+"No active Kalshi weather markets are currently available."
+
+or
+
+"Markets were returned but none matched weather criteria."
+
+or
+
+"Collection failed because..."
+
+The application should never silently fail.
+
+---
+
+## 8. System Health
+
+Expand the System Health page.
+
+Show:
+
+- Kalshi API status
+- Open-Meteo API status
+- Database status
+- Scheduler status
+- Last successful collection
+- Last failed collection
+- Total markets stored
+- Total weather forecasts stored
+
+---
+
+## 9. Testing
+
+Run automated tests for:
+
+- Kalshi API retrieval
+- Weather retrieval
+- Duplicate prevention
+- Empty API responses
+- Parsing failures
+- Dashboard updates
+- Database inserts
+
+Fix any failing tests before declaring Phase 1.5 complete.
+
+---
+
+## 10. Completion Requirements
+
+Do NOT begin Phase 2 until ALL of the following are true:
+
+- Live Kalshi weather markets are being collected and stored.
+- The Markets page displays collected markets (or clearly explains why none exist).
+- The Dashboard updates after every collection.
+- Jobs are recorded.
+- Errors are logged with useful explanations.
+- Weather forecasts are successfully matched whenever possible.
+- Tests pass.
+
+At the end, provide a summary that includes:
+
+1. What was fixed.
+2. Why markets were previously not appearing.
+3. Whether live market collection is fully operational.
+4. Any remaining issues before Phase 2.
+
+Only after this pipeline is proven reliable should we begin settlement mapping and probability calculations.

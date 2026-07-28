@@ -9,7 +9,6 @@ import * as zod from 'zod';
 
 
 /**
- * Returns server health status
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
@@ -18,15 +17,20 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
- * @summary Status of each external API
+ * @summary Status of each external API, database, and scheduler
  */
-export const GetServiceHealthResponseItem = zod.object({
+export const GetServiceHealthResponse = zod.object({
+  "services": zod.array(zod.object({
   "name": zod.string(),
   "status": zod.enum(['ok', 'error', 'unknown']),
   "message": zod.string().nullable(),
   "lastChecked": zod.string().nullable()
+})),
+  "lastSuccessfulCollection": zod.string().nullish(),
+  "lastFailedCollection": zod.string().nullish(),
+  "totalMarketsStored": zod.number().optional(),
+  "totalForecastsStored": zod.number().optional()
 })
-export const GetServiceHealthResponse = zod.array(GetServiceHealthResponseItem)
 
 
 /**
@@ -44,13 +48,19 @@ export const LoginResponse = zod.object({
 
 
 /**
- * @summary Dashboard summary
+ * @summary Dashboard summary with last-run stats
  */
 export const GetDashboardResponse = zod.object({
   "totalActiveMarkets": zod.number(),
   "marketsWithWeather": zod.number(),
+  "marketsCollected": zod.number().optional(),
+  "marketsParseFailures": zod.number().optional(),
   "lastCollectionTime": zod.string().nullish(),
   "lastCollectionStatus": zod.string().nullish(),
+  "lastCollectionDuration": zod.number().nullish(),
+  "lastCollectionMarketsFound": zod.number().nullish(),
+  "lastCollectionMarketsSkipped": zod.number().nullish(),
+  "collectionSummary": zod.string().nullish(),
   "markets": zod.array(zod.object({
   "id": zod.number(),
   "ticker": zod.string(),
@@ -68,6 +78,10 @@ export const GetDashboardResponse = zod.object({
   "noAsk": zod.number().nullish(),
   "volume": zod.number().nullish(),
   "weatherMatched": zod.boolean(),
+  "parsingStatus": zod.string().nullish(),
+  "parsingReason": zod.string().nullish(),
+  "weatherMarketType": zod.string().nullish(),
+  "collectionTimestamp": zod.string().nullish(),
   "lastUpdated": zod.string().nullish()
 })),
   "recentErrors": zod.array(zod.object({
@@ -76,14 +90,28 @@ export const GetDashboardResponse = zod.object({
   "message": zod.string(),
   "context": zod.string().nullish(),
   "occurredAt": zod.string()
-}))
+})),
+  "lastJob": zod.union([zod.object({
+  "id": zod.number(),
+  "jobType": zod.string(),
+  "startedAt": zod.string(),
+  "completedAt": zod.string().nullish(),
+  "status": zod.enum(['running', 'success', 'failed']),
+  "marketsFound": zod.number().nullish(),
+  "marketsSkipped": zod.number().nullish(),
+  "marketsRejected": zod.number().nullish(),
+  "forecastsRetrieved": zod.number().nullish(),
+  "durationSeconds": zod.number().nullish(),
+  "errorMessage": zod.string().nullish()
+}),zod.null()]).optional()
 })
 
 
 /**
- * @summary List active Kalshi weather markets
+ * @summary All collected Kalshi weather markets
  */
-export const GetMarketsResponseItem = zod.object({
+export const GetMarketsResponse = zod.object({
+  "markets": zod.array(zod.object({
   "id": zod.number(),
   "ticker": zod.string(),
   "eventTicker": zod.string().nullish(),
@@ -100,9 +128,14 @@ export const GetMarketsResponseItem = zod.object({
   "noAsk": zod.number().nullish(),
   "volume": zod.number().nullish(),
   "weatherMatched": zod.boolean(),
+  "parsingStatus": zod.string().nullish(),
+  "parsingReason": zod.string().nullish(),
+  "weatherMarketType": zod.string().nullish(),
+  "collectionTimestamp": zod.string().nullish(),
   "lastUpdated": zod.string().nullish()
+})),
+  "summary": zod.string().nullish()
 })
-export const GetMarketsResponse = zod.array(GetMarketsResponseItem)
 
 
 /**
@@ -129,6 +162,10 @@ export const GetMarketResponse = zod.object({
   "noAsk": zod.number().nullish(),
   "volume": zod.number().nullish(),
   "weatherMatched": zod.boolean(),
+  "parsingStatus": zod.string().nullish(),
+  "parsingReason": zod.string().nullish(),
+  "weatherMarketType": zod.string().nullish(),
+  "collectionTimestamp": zod.string().nullish(),
   "lastUpdated": zod.string().nullish()
 })
 
@@ -159,7 +196,10 @@ export const GetJobsResponseItem = zod.object({
   "completedAt": zod.string().nullish(),
   "status": zod.enum(['running', 'success', 'failed']),
   "marketsFound": zod.number().nullish(),
+  "marketsSkipped": zod.number().nullish(),
+  "marketsRejected": zod.number().nullish(),
   "forecastsRetrieved": zod.number().nullish(),
+  "durationSeconds": zod.number().nullish(),
   "errorMessage": zod.string().nullish()
 })
 export const GetJobsResponse = zod.array(GetJobsResponseItem)
@@ -175,7 +215,10 @@ export const TriggerCollectionResponse = zod.object({
   "completedAt": zod.string().nullish(),
   "status": zod.enum(['running', 'success', 'failed']),
   "marketsFound": zod.number().nullish(),
+  "marketsSkipped": zod.number().nullish(),
+  "marketsRejected": zod.number().nullish(),
   "forecastsRetrieved": zod.number().nullish(),
+  "durationSeconds": zod.number().nullish(),
   "errorMessage": zod.string().nullish()
 })
 

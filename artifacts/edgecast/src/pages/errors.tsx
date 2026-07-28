@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Card } from "@/components/ui/card";
 
 export default function ErrorsPage() {
-  const { data: errors, isLoading, fetchError } = useGetErrors({ limit: 100 });
+  const { data: errors, isLoading, error } = useGetErrors({ limit: 100 });
 
   if (isLoading) {
     return (
@@ -18,7 +18,7 @@ export default function ErrorsPage() {
     );
   }
 
-  if (fetchError || !errors) {
+  if (error || !errors) {
     return (
       <div className="p-6 bg-destructive/10 border border-destructive rounded-md text-destructive font-mono">
         FAILED TO RETRIEVE ERROR LOGS

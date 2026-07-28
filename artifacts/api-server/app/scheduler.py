@@ -46,3 +46,19 @@ async def shutdown_scheduler() -> None:
         except asyncio.CancelledError:
             pass
     _task = None
+
+
+def get_scheduler_status() -> dict:
+    """Return a dict describing the current scheduler state."""
+    if _task is None:
+        return {"running": False, "message": "Scheduler not started"}
+    if _task.done():
+        exc = None
+        try:
+            exc = _task.exception()
+        except (asyncio.CancelledError, asyncio.InvalidStateError):
+            pass
+        if exc:
+            return {"running": False, "message": f"Stopped with error: {exc}"}
+        return {"running": False, "message": "Scheduler stopped (cancelled or finished)"}
+    return {"running": True, "message": f"Running – auto-collection every {INTERVAL_SECONDS // 3600}h"}

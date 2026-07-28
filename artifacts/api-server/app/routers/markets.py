@@ -29,6 +29,10 @@ def _to_dict(m: KalshiMarket) -> dict:
         "noAsk": m.no_ask,
         "volume": m.volume,
         "weatherMatched": m.weather_matched,
+        "parsingStatus": m.parsing_status,
+        "parsingReason": m.parsing_reason,
+        "weatherMarketType": m.weather_market_type,
+        "collectionTimestamp": m.collection_timestamp.isoformat() if m.collection_timestamp else None,
         "lastUpdated": m.updated_at.isoformat() if m.updated_at else None,
     }
 
@@ -40,10 +44,38 @@ async def get_markets(
 ):
     result = await db.execute(
         select(KalshiMarket)
-        .where(KalshiMarket.status == "active")
         .order_by(KalshiMarket.close_time.asc().nullslast())
     )
-    return [_to_dict(m) for m in result.scalars().all()]
+    markets = result.scalars().all()
+
+    if not markets:
+        return {
+            "markets": [],
+            "summary": (
+                "No markets have been collected yet. "
+                "Use the dashboard to trigger a data collection run."
+            ),
+        }
+
+    collected = [m for m in markets if m.parsing_status == "collected"]
+    failures = [m for m in markets if m.parsing_status == "parsing_failure"]
+
+    summary: str | None = None
+    if not collected and failures:
+        summary = (
+            f"{len(failures)} weather market(s) were found but could not be matched to a city. "
+            "Weather forecast data cannot be retrieved without a known city."
+        )
+    elif not collected:
+        summary = (
+            "Markets were returned by Kalshi but none matched weather criteria. "
+            "Check the Jobs page for collection details."
+        )
+
+    return {
+        "markets": [_to_dict(m) for m in markets],
+        "summary": summary,
+    }
 
 
 @router.get("/markets/{ticker}")

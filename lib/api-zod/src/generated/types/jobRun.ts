@@ -17,7 +17,13 @@ export interface JobRun {
   /** @nullable */
   marketsFound?: number | null;
   /** @nullable */
+  marketsSkipped?: number | null;
+  /** @nullable */
+  marketsRejected?: number | null;
+  /** @nullable */
   forecastsRetrieved?: number | null;
+  /** @nullable */
+  durationSeconds?: number | null;
   /** @nullable */
   errorMessage?: string | null;
 }

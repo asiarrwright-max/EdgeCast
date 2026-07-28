@@ -6,15 +6,27 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AppError } from './appError';
+import type { JobRun } from './jobRun';
 import type { Market } from './market';
 
 export interface Dashboard {
   totalActiveMarkets: number;
   marketsWithWeather: number;
+  marketsCollected?: number;
+  marketsParseFailures?: number;
   /** @nullable */
   lastCollectionTime?: string | null;
   /** @nullable */
   lastCollectionStatus?: string | null;
+  /** @nullable */
+  lastCollectionDuration?: number | null;
+  /** @nullable */
+  lastCollectionMarketsFound?: number | null;
+  /** @nullable */
+  lastCollectionMarketsSkipped?: number | null;
+  /** @nullable */
+  collectionSummary?: string | null;
   markets: Market[];
   recentErrors: AppError[];
+  lastJob?: JobRun | null;
 }

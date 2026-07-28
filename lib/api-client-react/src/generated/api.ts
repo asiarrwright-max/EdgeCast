@@ -28,7 +28,8 @@ import type {
   JobRun,
   LoginInput,
   Market,
-  ServiceStatus,
+  MarketListResponse,
+  ServiceHealthResponse,
   WeatherForecast
 } from './api.schemas';
 
@@ -68,7 +69,6 @@ export const getHealthCheckUrl = () => {
 }
 
 /**
- * Returns server health status
  * @summary Health check
  */
 export const healthCheck = async ( options?: Parameters<typeof customFetch>[1]): Promise<HealthStatus> => {
@@ -146,11 +146,11 @@ export const getGetServiceHealthUrl = () => {
 }
 
 /**
- * @summary Status of each external API
+ * @summary Status of each external API, database, and scheduler
  */
-export const getServiceHealth = async ( options?: Parameters<typeof customFetch>[1]): Promise<ServiceStatus[]> => {
+export const getServiceHealth = async ( options?: Parameters<typeof customFetch>[1]): Promise<ServiceHealthResponse> => {
 
-  return customFetch<ServiceStatus[]>(getGetServiceHealthUrl(),
+  return customFetch<ServiceHealthResponse>(getGetServiceHealthUrl(),
   {
     ...options,
     method: 'GET'
@@ -193,7 +193,7 @@ export type GetServiceHealthQueryError = ErrorType<unknown>
 
 
 /**
- * @summary Status of each external API
+ * @summary Status of each external API, database, and scheduler
  */
 
 export function useGetServiceHealth<TData = Awaited<ReturnType<typeof getServiceHealth>>, TError = ErrorType<unknown>>(
@@ -294,7 +294,7 @@ export const getGetDashboardUrl = () => {
 }
 
 /**
- * @summary Dashboard summary
+ * @summary Dashboard summary with last-run stats
  */
 export const getDashboard = async ( options?: Parameters<typeof customFetch>[1]): Promise<Dashboard> => {
 
@@ -341,7 +341,7 @@ export type GetDashboardQueryError = ErrorType<unknown>
 
 
 /**
- * @summary Dashboard summary
+ * @summary Dashboard summary with last-run stats
  */
 
 export function useGetDashboard<TData = Awaited<ReturnType<typeof getDashboard>>, TError = ErrorType<unknown>>(
@@ -371,11 +371,11 @@ export const getGetMarketsUrl = () => {
 }
 
 /**
- * @summary List active Kalshi weather markets
+ * @summary All collected Kalshi weather markets
  */
-export const getMarkets = async ( options?: Parameters<typeof customFetch>[1]): Promise<Market[]> => {
+export const getMarkets = async ( options?: Parameters<typeof customFetch>[1]): Promise<MarketListResponse> => {
 
-  return customFetch<Market[]>(getGetMarketsUrl(),
+  return customFetch<MarketListResponse>(getGetMarketsUrl(),
   {
     ...options,
     method: 'GET'
@@ -418,7 +418,7 @@ export type GetMarketsQueryError = ErrorType<unknown>
 
 
 /**
- * @summary List active Kalshi weather markets
+ * @summary All collected Kalshi weather markets
  */
 
 export function useGetMarkets<TData = Awaited<ReturnType<typeof getMarkets>>, TError = ErrorType<unknown>>(

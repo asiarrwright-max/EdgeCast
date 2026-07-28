@@ -43,6 +43,11 @@ class KalshiMarket(Base):
     no_ask: Mapped[float | None] = mapped_column(Float)
     volume: Mapped[float | None] = mapped_column(Float)
     weather_matched: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Per-market parsing metadata
+    parsing_status: Mapped[str | None] = mapped_column(String(50))   # collected | parsing_failure
+    parsing_reason: Mapped[str | None] = mapped_column(Text)
+    weather_market_type: Mapped[str | None] = mapped_column(String(50))  # temperature | rain | snow | wind | weather
+    collection_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     raw_data: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -94,7 +99,10 @@ class JobRun(Base):
         String(50), nullable=False, default="running"
     )
     markets_found: Mapped[int | None] = mapped_column(Integer)
+    markets_skipped: Mapped[int | None] = mapped_column(Integer)
+    markets_rejected: Mapped[int | None] = mapped_column(Integer)
     forecasts_retrieved: Mapped[int | None] = mapped_column(Integer)
+    duration_seconds: Mapped[float | None] = mapped_column(Float)
     error_message: Mapped[str | None] = mapped_column(Text)
 
 
