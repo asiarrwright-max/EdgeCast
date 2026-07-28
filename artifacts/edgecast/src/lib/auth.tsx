@@ -18,10 +18,12 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 }
 
 export function initAuth() {
-  const token = localStorage.getItem('ec_token');
-  if (token) {
-    setAuthTokenGetter(() => localStorage.getItem('ec_token'));
-  }
+  setAuthTokenGetter(() => localStorage.getItem('ec_token'));
+}
+
+export function clearAuth() {
+  localStorage.removeItem('ec_token');
+  setAuthTokenGetter(() => null);
 }
 
 export function useAuth() {

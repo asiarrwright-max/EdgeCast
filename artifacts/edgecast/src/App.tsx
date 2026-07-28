@@ -1,6 +1,6 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Route, Switch, Router as WouterRouter } from 'wouter';
-import { initAuth, AuthGuard } from '@/lib/auth';
+import { initAuth, AuthGuard, clearAuth } from '@/lib/auth';
 import React from 'react';
 
 import LoginPage from '@/pages/login';
@@ -50,9 +50,22 @@ class PageErrorBoundary extends React.Component<
 }
 
 const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (error: any) => {
+      // If any query returns 401 (expired / invalid token), wipe the stale
+      // credential and let the AuthGuard redirect back to the login page.
+      if (error?.status === 401 || error?.response?.status === 401) {
+        clearAuth();
+      }
+    },
+  }),
   defaultOptions: {
     queries: {
-      retry: 1,
+      retry: (failureCount, error: any) => {
+        // Never retry auth failures — they won't resolve on their own.
+        if (error?.status === 401 || error?.response?.status === 401) return false;
+        return failureCount < 1;
+      },
       refetchOnWindowFocus: false,
     },
   },
