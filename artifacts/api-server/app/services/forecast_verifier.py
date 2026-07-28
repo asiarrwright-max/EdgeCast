@@ -224,18 +224,42 @@ async def fetch_and_store_verifications(session: AsyncSession) -> dict[str, int]
         logger.info("Forecast verifier: no settled trades to process.")
         return stats
 
-    # Build city → (lat, lon) from WeatherLocation (city-centre coords, ERA5 fallback)
+    # Build city → (lat, lon).
+    # Primary: WeatherLocation table (city-centre coords).
+    # Fallback: settlement_stations registry (station coords — close enough for
+    # ERA5 grid lookup and irrelevant for GHCND which uses station IDs).
     locs_q = await session.execute(select(WeatherLocation))
     loc_map: dict[str, tuple[float, float]] = {
         loc.city: (loc.latitude, loc.longitude)
         for loc in locs_q.scalars().all()
     }
+    if not loc_map:
+        from app.services.settlement_stations import SETTLEMENT_STATIONS as _SS
+        loc_map = {s.city: (s.lat, s.lon) for s in _SS.values()}
+        logger.info(
+            "weather_locations table is empty — using settlement station "
+            "coordinates as fallback for %d cities.", len(loc_map)
+        )
+    # Also fill in any cities present in CITY_COORDS but missing from loc_map
+    try:
+        from app.services.kalshi import CITY_COORDS as _CC
+        for code, (city_name, lat, lon) in _CC.items():
+            if city_name and city_name not in loc_map:
+                loc_map[city_name] = (lat, lon)
+    except Exception:
+        pass
 
-    # Collect unique (city, weather_variable, target_date) tuples
+    # Collect unique (city, weather_variable, target_date) tuples.
+    # target_settlement_date may be a full ISO timestamp ("2026-07-28T06:05:00Z");
+    # strip to YYYY-MM-DD so GHCND and ERA5 APIs receive a valid date string.
     from app.models import PredictionSnapshot
     seen: dict[tuple[str, str, str], dict] = {}
     for trade in settled_trades:
-        key = (trade.city, trade.weather_variable, trade.target_settlement_date)
+        raw_date = trade.target_settlement_date or ""
+        date_str = raw_date[:10]  # "YYYY-MM-DD" — safe for both plain dates and ISO timestamps
+        if not date_str or len(date_str) < 10:
+            continue
+        key = (trade.city, trade.weather_variable, date_str)
         if key not in seen:
             seen[key] = {
                 "snapshot_id": trade.snapshot_id,
