@@ -1,0 +1,363 @@
+Copy and paste this into Replit:
+
+EdgeCast Phase 3A — Automated Paper Trading
+EdgeCast can now collect Kalshi weather markets, calculate EdgeCast probabilities for supported markets, compare them with market-implied probabilities, assign confidence levels, and store prediction snapshots.
+Build a focused paper-trading system so we can test whether EdgeCast’s identified probability differences perform well over time.
+Priority order:
+1. Accurate trade simulation
+2. Immutable historical records
+3. Correct settlement and profit/loss calculations
+4. Automated testing
+5. Minimal usable interface
+Do not redesign the application.
+Do not place real trades.
+Do not connect to Kalshi trading endpoints.
+Do not request trading API credentials.
+Do not add bankroll recommendations, notifications, machine learning, or additional weather categories.
+This phase must remain entirely simulated.
+## Objective
+Whenever EdgeCast analyzes a supported market, determine whether it would hypothetically:
+- Buy YES
+- Buy NO
+- Skip
+Record that decision as a paper-trading observation.
+After Kalshi settles the market, update the record with the actual result and hypothetical profit or loss.
+The purpose is to evaluate EdgeCast objectively over several weeks without risking real money.
+## 1. Preserve Existing Functionality
+Do not break:
+- Kalshi market collection
+- Weather forecast collection
+- Probability calculations
+- Confidence scoring
+- Prediction snapshots
+- Dashboard
+- Markets page
+- Market detail pages
+- Jobs
+- System Health
+- Errors
+- Authentication
+- Scheduled collection
+- Existing automated tests
+Run the full existing test suite before and after implementation.
+## 2. Paper-Trade Eligibility
+A market is eligible for a paper trade only when:
+- Analysis status is ANALYZED
+- EdgeCast probability is available
+- Market price is available
+- Confidence is High or Very High
+- Absolute probability difference is at least 10 percentage points
+- The market is still open
+- The market has not already received a paper trade under the same strategy version
+Default configuration:
+- Minimum edge: 10 percentage points
+- Minimum confidence: High
+- Simulated stake: $10
+- Paper trading enabled: true
+Make these values configurable later through a simple administrator-only settings section, but use safe defaults first.
+If a market does not qualify, record it as skipped only if doing so does not create excessive duplicate records. Store the skip reason.
+Example skip reasons:
+- Unsupported market
+- Confidence too low
+- Edge below threshold
+- Market price unavailable
+- Market already closed
+- Existing paper trade
+- Forecast unavailable
+## 3. Trade Direction
+Use a transparent decision rule.
+### Buy YES
+Create a simulated YES trade when:
+EdgeCast probability minus YES purchase probability is greater than or equal to the minimum edge.
+Use the actual simulated purchase price available at the decision timestamp.
+Prefer YES ask when available because that represents the price to buy YES.
+### Buy NO
+Create a simulated NO trade when:
+EdgeCast probability is sufficiently below the market’s implied YES probability.
+Compare EdgeCast’s estimated NO probability:
+1 - EdgeCast YES probability
+against the available NO ask price.
+Use NO ask as the simulated purchase price when available.
+Do not infer NO purchase price simply as 100 minus YES ask when a real NO ask is available.
+### Skip
+Skip when neither side meets the configured threshold.
+Store:
+- Selected direction
+- Purchase price source
+- Edge used for the decision
+- Reason for the decision
+- Strategy version
+## 4. PaperTrade Database Record
+Create a PaperTrade table or equivalent persistent model.
+Store at minimum:
+- paper trade ID
+- market ticker
+- event ticker
+- city
+- weather variable
+- contract type
+- target settlement date/time
+- trade creation timestamp
+- prediction snapshot ID
+- strategy version
+- direction: YES or NO
+- EdgeCast YES probability
+- EdgeCast selected-side probability
+- market YES probability
+- selected-side market price
+- selected price source
+- edge in percentage points
+- confidence score
+- confidence label
+- simulated stake
+- simulated contract quantity
+- status: OPEN, SETTLED, VOID, or ERROR
+- Kalshi settlement result
+- trade outcome: WIN, LOSS, VOID
+- settlement timestamp
+- gross payout
+- simulated profit/loss
+- return percentage
+- decision explanation
+- warnings
+Never overwrite the prediction data used when the trade was created.
+A later forecast or market-price update must not change the original simulated entry terms.
+## 5. Simulated Position Calculation
+Use a fixed dollar stake, default $10.
+Kalshi-style contracts pay $1 per winning contract and $0 per losing contract.
+Calculate simulated quantity using:
+stake divided by contract purchase price
+Keep full precision internally.
+For a winning trade:
+profit = total payout minus simulated stake
+For a losing trade:
+profit = negative simulated stake
+Clearly document the assumptions.
+Do not include fees, slippage, partial fills, or liquidity assumptions in Phase 3A unless they are already reliably available.
+Display a warning that paper results may overstate real-world results because fills, spreads, fees, and liquidity are not modeled.
+## 6. Automatic Paper-Trade Creation
+After every successful collection and probability-calculation run:
+1. Review all eligible analyzed markets.
+2. Apply the current paper-trading rules.
+3. Create new qualifying paper trades.
+4. Avoid duplicates.
+5. Record skipped candidates with reasons in job-level statistics or a lightweight decision log.
+6. Continue processing if one market fails.
+Manual “Run Collection Now” should also trigger this process.
+Add paper-trading counts to the job record:
+- candidates reviewed
+- trades created
+- YES trades
+- NO trades
+- skipped
+- errors
+## 7. Settlement Processing
+Create a scheduled settlement-check job.
+For open paper trades:
+- Query the official Kalshi market data for current status and settlement result.
+- When a market has settled, determine whether YES or NO won.
+- Update the paper trade.
+- Calculate gross payout, simulated profit/loss, and return percentage.
+- Store the settlement timestamp and source.
+Do not determine settlement from the weather forecast.
+Do not fabricate a result.
+Kalshi settlement data should be authoritative when available.
+If the market is canceled or voided:
+- mark the trade VOID
+- return the simulated stake
+- set profit/loss to $0
+If settlement cannot be verified:
+- keep the trade open or mark an explicit verification error
+- do not guess
+## 8. Paper Trading Page
+Add a new navigation item:
+Paper Trading
+Keep the existing visual style.
+Display summary cards:
+- Open trades
+- Settled trades
+- Wins
+- Losses
+- Win rate
+- Simulated amount staked
+- Net simulated profit/loss
+- ROI
+Display an important banner:
+“Simulation only. No real trades are placed. Results do not account for all real-world fees, liquidity, slippage, or fill availability.”
+### Open Trades table
+Show:
+- Market
+- City
+- Direction
+- Purchase price
+- EdgeCast probability
+- Edge
+- Confidence
+- Stake
+- Created time
+- Settlement date
+### Settled Trades table
+Show:
+- Market
+- Direction
+- Entry price
+- Result
+- Profit/loss
+- Return
+- Confidence
+- Settlement time
+Allow filtering by:
+- Open or settled
+- YES or NO
+- Confidence
+- City
+- Contract type
+- Date range
+Do not spend significant effort on charts in this phase.
+## 9. Paper Trade Detail
+Allow opening one paper trade.
+Show:
+- Original market
+- Trade direction
+- Why the trade qualified
+- Prediction snapshot used
+- EdgeCast probability
+- Market prices at entry
+- Edge
+- Confidence
+- Stake
+- Quantity
+- Settlement result
+- Profit/loss
+- All warnings
+- Strategy version
+Include a structured explanation such as:
+“EdgeCast estimated a 40.5% probability of YES while the YES purchase price implied 0.5%. The difference was +40.0 percentage points, exceeding the 10-point threshold. Confidence was Very High, so a simulated $10 YES trade was created.”
+Do not call this a guaranteed edge or guaranteed profit.
+## 10. Duplicate Prevention
+Do not create multiple identical paper trades during repeated collection runs.
+Default behavior:
+- One trade per market ticker per strategy version.
+If a market already has a paper trade:
+- do not create another
+- record the reason as Existing paper trade
+Design the schema so future strategies could coexist using different strategy-version identifiers.
+## 11. Metrics
+Calculate:
+- Open trade count
+- Settled trade count
+- Win rate
+- Net simulated profit/loss
+- Total simulated amount staked
+- ROI
+- Average entry edge
+- Average winning-trade edge
+- Average losing-trade edge
+- Performance by direction
+- Performance by confidence label
+- Performance by city
+- Performance by contract type
+Display sample size with every performance breakdown.
+Do not present results as meaningful when the sample is very small.
+Label early results as preliminary.
+## 12. Settings
+Add administrator-only paper-trading settings:
+- Paper trading enabled
+- Minimum edge
+- Minimum confidence
+- Simulated stake
+- Strategy version label
+Validate all settings.
+Record configuration changes.
+Do not expose secrets.
+Changing settings must not modify historical trades.
+## 13. Testing
+Add automated tests for:
+### Eligibility
+- High-confidence qualifying YES trade
+- High-confidence qualifying NO trade
+- Edge below threshold
+- Low-confidence market
+- Unsupported market
+- Missing market price
+- Closed market
+- Duplicate prevention
+### Price selection
+- YES ask used for YES purchase
+- NO ask used for NO purchase
+- Missing ask behavior
+- Correct conversion from cents to dollars
+- Prices are not incorrectly normalized
+### Position math
+- Contract quantity
+- Winning payout
+- Winning profit
+- Losing profit
+- ROI
+- Void trade
+### Settlement
+- YES trade wins
+- YES trade loses
+- NO trade wins
+- NO trade loses
+- Void market
+- Missing settlement result
+- Settlement job retries safely
+### History and integrity
+- Original prediction snapshot remains unchanged
+- Later forecast does not alter an existing trade
+- Later price does not alter entry price
+- One trade per market and strategy version
+- Historical strategy versions remain separate
+### Integration
+- Full collection-to-analysis-to-paper-trade workflow
+- One market failure does not stop the run
+- Paper-trade page API
+- Authentication
+- Dashboard metric consistency
+Run all existing and new tests.
+Fix all failures before declaring Phase 3A complete.
+## 14. Documentation
+Update the README with:
+- Paper-trade eligibility rules
+- YES and NO decision logic
+- Price-source logic
+- Stake and quantity calculations
+- Settlement process
+- Profit/loss formula
+- Duplicate-prevention rules
+- Strategy versioning
+- Known limitations
+- Instructions for manually testing one paper trade
+Clearly state:
+- No real trades are placed.
+- Paper results do not guarantee real-world profitability.
+- Fees, spreads, liquidity, slippage, and fill availability may affect real results.
+- EdgeCast probabilities are experimental.
+- Several weeks of settled trades are required before drawing conclusions.
+## Completion Requirements
+Phase 3A is complete only when:
+- Qualifying analyzed markets automatically create paper trades.
+- YES and NO directions use the correct purchase prices.
+- Repeated collections do not create duplicates.
+- Original entry values remain immutable.
+- Settled Kalshi outcomes update open paper trades.
+- Profit/loss is calculated correctly.
+- The Paper Trading page clearly shows open and settled trades.
+- Performance metrics display correct sample sizes.
+- Existing functionality continues to work.
+- All automated tests pass.
+- No real trading connection exists.
+At completion, provide:
+1. Eligibility rules implemented.
+2. YES and NO decision formulas.
+3. Price fields used.
+4. Simulated position and profit/loss formulas.
+5. Number of paper trades created during validation.
+6. Number skipped and primary reasons.
+7. Whether Kalshi settlement ingestion works.
+8. Duplicate-prevention method.
+9. Final automated test results.
+10. Known limitations before beginning the multi-week paper test.
+Stop after completing and validating Phase 3A.
+Do not begin real trading, alerts, additional weather categories, or Phase 3B.
