@@ -306,7 +306,26 @@ async def run_collection_job(job_id: int | None = None) -> None:
                 except Exception as exc:
                     logger.warning("Analysis step failed (non-fatal): %s", exc)
 
-                # ---- Step 5c: Finalise job ---------------------------------
+                # ---- Step 5c: Paper trading ---------------------------------
+                pt_stats: dict = {
+                    "candidates": 0, "created": 0,
+                    "yes_trades": 0, "no_trades": 0,
+                    "skipped": 0, "errors": 0,
+                }
+                try:
+                    from app.services.paper_trading import run_paper_trading
+                    pt_stats = await run_paper_trading(session)
+                    logger.info(
+                        "Paper trading: %d candidates, %d created (%d YES / %d NO), "
+                        "%d skipped, %d errors",
+                        pt_stats["candidates"], pt_stats["created"],
+                        pt_stats["yes_trades"], pt_stats["no_trades"],
+                        pt_stats["skipped"], pt_stats["errors"],
+                    )
+                except Exception as exc:
+                    logger.warning("Paper trading step failed (non-fatal): %s", exc)
+
+                # ---- Step 5d: Finalise job ---------------------------------
                 duration = round(time.monotonic() - started_mono, 2)
                 job_q = await session.execute(select(JobRun).where(JobRun.id == job.id))
                 job_record = job_q.scalar_one_or_none()
@@ -318,6 +337,12 @@ async def run_collection_job(job_id: int | None = None) -> None:
                     job_record.markets_rejected = 0  # reserved
                     job_record.forecasts_retrieved = forecasts_saved
                     job_record.duration_seconds = duration
+                    job_record.pt_candidates = pt_stats["candidates"]
+                    job_record.pt_created = pt_stats["created"]
+                    job_record.pt_yes_trades = pt_stats["yes_trades"]
+                    job_record.pt_no_trades = pt_stats["no_trades"]
+                    job_record.pt_skipped = pt_stats["skipped"]
+                    job_record.pt_errors = pt_stats["errors"]
                 await session.commit()
 
                 logger.info(

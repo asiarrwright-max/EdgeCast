@@ -22,6 +22,8 @@ tags:
     description: Data collection jobs
   - name: errors
     description: Application errors
+  - name: paper-trades
+    description: Paper trading simulation
 
 paths:
   /healthz:
@@ -197,6 +199,135 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/AppError"
+
+  /paper-trades:
+    get:
+      operationId: listPaperTrades
+      tags: [paper-trades]
+      summary: List paper trades with optional filters
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: direction
+          in: query
+          schema:
+            type: string
+        - name: confidence
+          in: query
+          schema:
+            type: string
+        - name: city
+          in: query
+          schema:
+            type: string
+        - name: contract_type
+          in: query
+          schema:
+            type: string
+        - name: date_from
+          in: query
+          schema:
+            type: string
+        - name: date_to
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: number
+            default: 200
+      responses:
+        "200":
+          description: Trade list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [trades, total]
+                properties:
+                  trades:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PaperTrade"
+                  total:
+                    type: number
+
+  /paper-trades/metrics:
+    get:
+      operationId: getPaperTradeMetrics
+      tags: [paper-trades]
+      summary: Aggregated paper trading summary statistics
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Metrics summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaperTradeSummary"
+
+  /paper-trades/settings:
+    get:
+      operationId: getPaperTradeSettings
+      tags: [paper-trades]
+      summary: Get paper trading settings
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaperTradeSettings"
+    put:
+      operationId: updatePaperTradeSettings
+      tags: [paper-trades]
+      summary: Update paper trading settings
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaperTradeSettings"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaperTradeSettings"
+
+  /paper-trades/{tradeId}:
+    get:
+      operationId: getPaperTrade
+      tags: [paper-trades]
+      summary: Full detail for a single paper trade
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tradeId
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Trade detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaperTrade"
+        "404":
+          description: Not found
 
 components:
   securitySchemes:
@@ -443,6 +574,18 @@ components:
           type: ["number", "null"]
         errorMessage:
           type: ["string", "null"]
+        ptCandidates:
+          type: ["number", "null"]
+        ptCreated:
+          type: ["number", "null"]
+        ptYesTrades:
+          type: ["number", "null"]
+        ptNoTrades:
+          type: ["number", "null"]
+        ptSkipped:
+          type: ["number", "null"]
+        ptErrors:
+          type: ["number", "null"]
 
     AppError:
       type: object
@@ -458,3 +601,204 @@ components:
           type: ["string", "null"]
         occurredAt:
           type: string
+
+    PaperTrade:
+      type: object
+      required: [id, marketTicker, strategyVersion, direction, stake, status]
+      properties:
+        id:
+          type: number
+        createdAt:
+          type: ["string", "null"]
+        marketTicker:
+          type: string
+        eventTicker:
+          type: ["string", "null"]
+        city:
+          type: ["string", "null"]
+        weatherVariable:
+          type: ["string", "null"]
+        contractType:
+          type: ["string", "null"]
+        targetSettlementDate:
+          type: ["string", "null"]
+        snapshotId:
+          type: ["number", "null"]
+        strategyVersion:
+          type: string
+        direction:
+          type: string
+          enum: [YES, NO]
+        ecYesProbability:
+          type: ["number", "null"]
+        ecSideProbability:
+          type: ["number", "null"]
+        marketYesProbability:
+          type: ["number", "null"]
+        sideMarketPrice:
+          type: ["number", "null"]
+        priceSource:
+          type: ["string", "null"]
+        edgePctPoints:
+          type: ["number", "null"]
+        confidenceScore:
+          type: ["number", "null"]
+        confidenceLabel:
+          type: ["string", "null"]
+        stake:
+          type: number
+        quantity:
+          type: ["number", "null"]
+        status:
+          type: string
+          enum: [OPEN, SETTLED, VOID, ERROR]
+        kalshiResult:
+          type: ["string", "null"]
+        outcome:
+          type: ["string", "null"]
+          enum: [WIN, LOSS, VOID, null]
+        settlementTimestamp:
+          type: ["string", "null"]
+        grossPayout:
+          type: ["number", "null"]
+        profitLoss:
+          type: ["number", "null"]
+        returnPct:
+          type: ["number", "null"]
+        decisionExplanation:
+          type: ["string", "null"]
+        warnings:
+          type: ["string", "null"]
+        market:
+          oneOf:
+            - type: "null"
+            - type: object
+              properties:
+                title: { type: ["string", "null"] }
+                subtitle: { type: ["string", "null"] }
+                targetDate: { type: ["string", "null"] }
+                yesBid: { type: ["number", "null"] }
+                yesAsk: { type: ["number", "null"] }
+                noBid: { type: ["number", "null"] }
+                noAsk: { type: ["number", "null"] }
+                weatherMarketType: { type: ["string", "null"] }
+        snapshot:
+          oneOf:
+            - type: "null"
+            - type: object
+              properties:
+                id: { type: ["number", "null"] }
+                createdAt: { type: ["string", "null"] }
+                ecProbability: { type: ["number", "null"] }
+                marketProbability: { type: ["number", "null"] }
+                confidence: { type: ["string", "null"] }
+                explanation: { type: ["string", "null"] }
+                forecastValue: { type: ["number", "null"] }
+                leadTimeDays: { type: ["number", "null"] }
+                settlementVariable: { type: ["string", "null"] }
+                settlementOperator: { type: ["string", "null"] }
+                settlementThreshold: { type: ["number", "null"] }
+                contractType: { type: ["string", "null"] }
+                lowerBound: { type: ["number", "null"] }
+                upperBound: { type: ["number", "null"] }
+
+    PaperTradeSummary:
+      type: object
+      required: [openCount, settledCount, voidCount, totalCount, wins, losses, totalStaked, netProfitLoss, sampleSizeWarning]
+      properties:
+        openCount:
+          type: number
+        settledCount:
+          type: number
+        voidCount:
+          type: number
+        totalCount:
+          type: number
+        wins:
+          type: number
+        losses:
+          type: number
+        winRate:
+          type: ["number", "null"]
+        totalStaked:
+          type: number
+        netProfitLoss:
+          type: number
+        roi:
+          type: ["number", "null"]
+        avgEntryEdge:
+          type: ["number", "null"]
+        avgWinEdge:
+          type: ["number", "null"]
+        avgLossEdge:
+          type: ["number", "null"]
+        byDirection:
+          type: array
+          items:
+            type: object
+            properties:
+              label: { type: string }
+              total: { type: number }
+              open: { type: number }
+              settled: { type: number }
+              wins: { type: number }
+              losses: { type: number }
+              winRate: { type: ["number", "null"] }
+              netProfitLoss: { type: number }
+        byConfidence:
+          type: array
+          items:
+            type: object
+            properties:
+              label: { type: string }
+              total: { type: number }
+              open: { type: number }
+              settled: { type: number }
+              wins: { type: number }
+              losses: { type: number }
+              winRate: { type: ["number", "null"] }
+              netProfitLoss: { type: number }
+        byCity:
+          type: array
+          items:
+            type: object
+            properties:
+              label: { type: string }
+              total: { type: number }
+              open: { type: number }
+              settled: { type: number }
+              wins: { type: number }
+              losses: { type: number }
+              winRate: { type: ["number", "null"] }
+              netProfitLoss: { type: number }
+        byContractType:
+          type: array
+          items:
+            type: object
+            properties:
+              label: { type: string }
+              total: { type: number }
+              open: { type: number }
+              settled: { type: number }
+              wins: { type: number }
+              losses: { type: number }
+              winRate: { type: ["number", "null"] }
+              netProfitLoss: { type: number }
+        sampleSizeWarning:
+          type: boolean
+        preliminaryNote:
+          type: ["string", "null"]
+
+    PaperTradeSettings:
+      type: object
+      properties:
+        enabled:
+          type: ["boolean", "null"]
+        min_edge_pct:
+          type: ["number", "null"]
+        min_confidence:
+          type: ["string", "null"]
+        stake:
+          type: ["number", "null"]
+        strategy_version:
+          type: ["string", "null"]

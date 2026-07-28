@@ -26,9 +26,14 @@ import type {
   GetErrorsParams,
   HealthStatus,
   JobRun,
+  ListPaperTrades200,
+  ListPaperTradesParams,
   LoginInput,
   Market,
   MarketListResponse,
+  PaperTrade,
+  PaperTradeSettings,
+  PaperTradeSummary,
   ServiceHealthResponse,
   WeatherForecast
 } from './api.schemas';
@@ -813,6 +818,392 @@ export function useGetErrors<TData = Awaited<ReturnType<typeof getErrors>>, TErr
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetErrorsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListPaperTradesUrl = (params?: ListPaperTradesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/paper-trades?${stringifiedParams}` : `/api/paper-trades`
+}
+
+/**
+ * @summary List paper trades with optional filters
+ */
+export const listPaperTrades = async (params?: ListPaperTradesParams, options?: Parameters<typeof customFetch>[1]): Promise<ListPaperTrades200> => {
+
+  return customFetch<ListPaperTrades200>(getListPaperTradesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPaperTradesQueryKey = (params?: ListPaperTradesParams,) => {
+    return [
+    `/api/paper-trades`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListPaperTradesQueryOptions = <TData = Awaited<ReturnType<typeof listPaperTrades>>, TError = ErrorType<unknown>>(params?: ListPaperTradesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPaperTrades>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPaperTradesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPaperTrades>>> = ({ signal }) => listPaperTrades(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPaperTrades>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListPaperTradesQueryResult = NonNullable<Awaited<ReturnType<typeof listPaperTrades>>>
+export type ListPaperTradesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List paper trades with optional filters
+ */
+
+export function useListPaperTrades<TData = Awaited<ReturnType<typeof listPaperTrades>>, TError = ErrorType<unknown>>(
+ params?: ListPaperTradesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPaperTrades>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListPaperTradesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetPaperTradeMetricsUrl = () => {
+
+
+
+
+  return `/api/paper-trades/metrics`
+}
+
+/**
+ * @summary Aggregated paper trading summary statistics
+ */
+export const getPaperTradeMetrics = async ( options?: Parameters<typeof customFetch>[1]): Promise<PaperTradeSummary> => {
+
+  return customFetch<PaperTradeSummary>(getGetPaperTradeMetricsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPaperTradeMetricsQueryKey = () => {
+    return [
+    `/api/paper-trades/metrics`
+    ] as const;
+    }
+
+
+export const getGetPaperTradeMetricsQueryOptions = <TData = Awaited<ReturnType<typeof getPaperTradeMetrics>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPaperTradeMetrics>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPaperTradeMetricsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPaperTradeMetrics>>> = ({ signal }) => getPaperTradeMetrics({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPaperTradeMetrics>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPaperTradeMetricsQueryResult = NonNullable<Awaited<ReturnType<typeof getPaperTradeMetrics>>>
+export type GetPaperTradeMetricsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Aggregated paper trading summary statistics
+ */
+
+export function useGetPaperTradeMetrics<TData = Awaited<ReturnType<typeof getPaperTradeMetrics>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPaperTradeMetrics>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPaperTradeMetricsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetPaperTradeSettingsUrl = () => {
+
+
+
+
+  return `/api/paper-trades/settings`
+}
+
+/**
+ * @summary Get paper trading settings
+ */
+export const getPaperTradeSettings = async ( options?: Parameters<typeof customFetch>[1]): Promise<PaperTradeSettings> => {
+
+  return customFetch<PaperTradeSettings>(getGetPaperTradeSettingsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPaperTradeSettingsQueryKey = () => {
+    return [
+    `/api/paper-trades/settings`
+    ] as const;
+    }
+
+
+export const getGetPaperTradeSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getPaperTradeSettings>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPaperTradeSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPaperTradeSettingsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPaperTradeSettings>>> = ({ signal }) => getPaperTradeSettings({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPaperTradeSettings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPaperTradeSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getPaperTradeSettings>>>
+export type GetPaperTradeSettingsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get paper trading settings
+ */
+
+export function useGetPaperTradeSettings<TData = Awaited<ReturnType<typeof getPaperTradeSettings>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPaperTradeSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPaperTradeSettingsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdatePaperTradeSettingsUrl = () => {
+
+
+
+
+  return `/api/paper-trades/settings`
+}
+
+/**
+ * @summary Update paper trading settings
+ */
+export const updatePaperTradeSettings = async (paperTradeSettings: PaperTradeSettings, options?: Parameters<typeof customFetch>[1]): Promise<PaperTradeSettings> => {
+
+  return customFetch<PaperTradeSettings>(getUpdatePaperTradeSettingsUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(paperTradeSettings)
+  }
+);}
+
+
+
+
+
+export const getUpdatePaperTradeSettingsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePaperTradeSettings>>, TError,{data: BodyType<PaperTradeSettings>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updatePaperTradeSettings>>, TError,{data: BodyType<PaperTradeSettings>}, TContext> => {
+
+const mutationKey = ['updatePaperTradeSettings'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updatePaperTradeSettings>>, {data: BodyType<PaperTradeSettings>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updatePaperTradeSettings(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdatePaperTradeSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updatePaperTradeSettings>>>
+    export type UpdatePaperTradeSettingsMutationBody = BodyType<PaperTradeSettings>
+    export type UpdatePaperTradeSettingsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update paper trading settings
+ */
+export const useUpdatePaperTradeSettings = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePaperTradeSettings>>, TError,{data: BodyType<PaperTradeSettings>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updatePaperTradeSettings>>,
+        TError,
+        {data: BodyType<PaperTradeSettings>},
+        TContext
+      > => {
+      return useMutation(getUpdatePaperTradeSettingsMutationOptions(options));
+    }
+
+export const getGetPaperTradeUrl = (tradeId: number,) => {
+
+
+
+
+  return `/api/paper-trades/${tradeId}`
+}
+
+/**
+ * @summary Full detail for a single paper trade
+ */
+export const getPaperTrade = async (tradeId: number, options?: Parameters<typeof customFetch>[1]): Promise<PaperTrade> => {
+
+  return customFetch<PaperTrade>(getGetPaperTradeUrl(tradeId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPaperTradeQueryKey = (tradeId: number,) => {
+    return [
+    `/api/paper-trades/${tradeId}`
+    ] as const;
+    }
+
+
+export const getGetPaperTradeQueryOptions = <TData = Awaited<ReturnType<typeof getPaperTrade>>, TError = ErrorType<void>>(tradeId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPaperTrade>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPaperTradeQueryKey(tradeId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPaperTrade>>> = ({ signal }) => getPaperTrade(tradeId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: tradeId !== null && tradeId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPaperTrade>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPaperTradeQueryResult = NonNullable<Awaited<ReturnType<typeof getPaperTrade>>>
+export type GetPaperTradeQueryError = ErrorType<void>
+
+
+/**
+ * @summary Full detail for a single paper trade
+ */
+
+export function useGetPaperTrade<TData = Awaited<ReturnType<typeof getPaperTrade>>, TError = ErrorType<void>>(
+ tradeId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPaperTrade>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPaperTradeQueryOptions(tradeId,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

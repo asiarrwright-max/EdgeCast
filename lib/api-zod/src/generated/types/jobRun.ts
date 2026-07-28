@@ -26,4 +26,16 @@ export interface JobRun {
   durationSeconds?: number | null;
   /** @nullable */
   errorMessage?: string | null;
+  /** @nullable */
+  ptCandidates?: number | null;
+  /** @nullable */
+  ptCreated?: number | null;
+  /** @nullable */
+  ptYesTrades?: number | null;
+  /** @nullable */
+  ptNoTrades?: number | null;
+  /** @nullable */
+  ptSkipped?: number | null;
+  /** @nullable */
+  ptErrors?: number | null;
 }

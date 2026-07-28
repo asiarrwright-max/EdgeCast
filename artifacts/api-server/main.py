@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db
 from app.scheduler import start_scheduler, shutdown_scheduler
-from app.routers import health, auth, dashboard, markets, weather, jobs, errors, analysis
+from app.routers import health, auth, dashboard, markets, weather, jobs, errors, analysis, paper_trades
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,3 +49,4 @@ app.include_router(weather.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
 app.include_router(errors.router, prefix="/api")
 app.include_router(analysis.router, prefix="/api")
+app.include_router(paper_trades.router, prefix="/api")

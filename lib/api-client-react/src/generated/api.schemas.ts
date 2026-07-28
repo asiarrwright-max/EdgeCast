@@ -181,6 +181,18 @@ export interface JobRun {
   durationSeconds?: number | null;
   /** @nullable */
   errorMessage?: string | null;
+  /** @nullable */
+  ptCandidates?: number | null;
+  /** @nullable */
+  ptCreated?: number | null;
+  /** @nullable */
+  ptYesTrades?: number | null;
+  /** @nullable */
+  ptNoTrades?: number | null;
+  /** @nullable */
+  ptSkipped?: number | null;
+  /** @nullable */
+  ptErrors?: number | null;
 }
 
 export interface Dashboard {
@@ -205,7 +217,251 @@ export interface Dashboard {
   lastJob?: JobRun | null;
 }
 
+export type PaperTradeDirection = typeof PaperTradeDirection[keyof typeof PaperTradeDirection];
+
+
+export const PaperTradeDirection = {
+  YES: 'YES',
+  NO: 'NO',
+} as const;
+
+export type PaperTradeStatus = typeof PaperTradeStatus[keyof typeof PaperTradeStatus];
+
+
+export const PaperTradeStatus = {
+  OPEN: 'OPEN',
+  SETTLED: 'SETTLED',
+  VOID: 'VOID',
+  ERROR: 'ERROR',
+} as const;
+
+/**
+ * @nullable
+ */
+export type PaperTradeOutcome = typeof PaperTradeOutcome[keyof typeof PaperTradeOutcome] | null;
+
+
+export const PaperTradeOutcome = {
+  WIN: 'WIN',
+  LOSS: 'LOSS',
+  VOID: 'VOID',
+} as const;
+
+export type PaperTradeMarket = {
+  /** @nullable */
+  title?: string | null;
+  /** @nullable */
+  subtitle?: string | null;
+  /** @nullable */
+  targetDate?: string | null;
+  /** @nullable */
+  yesBid?: number | null;
+  /** @nullable */
+  yesAsk?: number | null;
+  /** @nullable */
+  noBid?: number | null;
+  /** @nullable */
+  noAsk?: number | null;
+  /** @nullable */
+  weatherMarketType?: string | null;
+} | null;
+
+export type PaperTradeSnapshot = {
+  /** @nullable */
+  id?: number | null;
+  /** @nullable */
+  createdAt?: string | null;
+  /** @nullable */
+  ecProbability?: number | null;
+  /** @nullable */
+  marketProbability?: number | null;
+  /** @nullable */
+  confidence?: string | null;
+  /** @nullable */
+  explanation?: string | null;
+  /** @nullable */
+  forecastValue?: number | null;
+  /** @nullable */
+  leadTimeDays?: number | null;
+  /** @nullable */
+  settlementVariable?: string | null;
+  /** @nullable */
+  settlementOperator?: string | null;
+  /** @nullable */
+  settlementThreshold?: number | null;
+  /** @nullable */
+  contractType?: string | null;
+  /** @nullable */
+  lowerBound?: number | null;
+  /** @nullable */
+  upperBound?: number | null;
+} | null;
+
+export interface PaperTrade {
+  id: number;
+  /** @nullable */
+  createdAt?: string | null;
+  marketTicker: string;
+  /** @nullable */
+  eventTicker?: string | null;
+  /** @nullable */
+  city?: string | null;
+  /** @nullable */
+  weatherVariable?: string | null;
+  /** @nullable */
+  contractType?: string | null;
+  /** @nullable */
+  targetSettlementDate?: string | null;
+  /** @nullable */
+  snapshotId?: number | null;
+  strategyVersion: string;
+  direction: PaperTradeDirection;
+  /** @nullable */
+  ecYesProbability?: number | null;
+  /** @nullable */
+  ecSideProbability?: number | null;
+  /** @nullable */
+  marketYesProbability?: number | null;
+  /** @nullable */
+  sideMarketPrice?: number | null;
+  /** @nullable */
+  priceSource?: string | null;
+  /** @nullable */
+  edgePctPoints?: number | null;
+  /** @nullable */
+  confidenceScore?: number | null;
+  /** @nullable */
+  confidenceLabel?: string | null;
+  stake: number;
+  /** @nullable */
+  quantity?: number | null;
+  status: PaperTradeStatus;
+  /** @nullable */
+  kalshiResult?: string | null;
+  /** @nullable */
+  outcome?: PaperTradeOutcome;
+  /** @nullable */
+  settlementTimestamp?: string | null;
+  /** @nullable */
+  grossPayout?: number | null;
+  /** @nullable */
+  profitLoss?: number | null;
+  /** @nullable */
+  returnPct?: number | null;
+  /** @nullable */
+  decisionExplanation?: string | null;
+  /** @nullable */
+  warnings?: string | null;
+  market?: PaperTradeMarket;
+  snapshot?: PaperTradeSnapshot;
+}
+
+export type PaperTradeSummaryByDirectionItem = {
+  label?: string;
+  total?: number;
+  open?: number;
+  settled?: number;
+  wins?: number;
+  losses?: number;
+  /** @nullable */
+  winRate?: number | null;
+  netProfitLoss?: number;
+};
+
+export type PaperTradeSummaryByConfidenceItem = {
+  label?: string;
+  total?: number;
+  open?: number;
+  settled?: number;
+  wins?: number;
+  losses?: number;
+  /** @nullable */
+  winRate?: number | null;
+  netProfitLoss?: number;
+};
+
+export type PaperTradeSummaryByCityItem = {
+  label?: string;
+  total?: number;
+  open?: number;
+  settled?: number;
+  wins?: number;
+  losses?: number;
+  /** @nullable */
+  winRate?: number | null;
+  netProfitLoss?: number;
+};
+
+export type PaperTradeSummaryByContractTypeItem = {
+  label?: string;
+  total?: number;
+  open?: number;
+  settled?: number;
+  wins?: number;
+  losses?: number;
+  /** @nullable */
+  winRate?: number | null;
+  netProfitLoss?: number;
+};
+
+export interface PaperTradeSummary {
+  openCount: number;
+  settledCount: number;
+  voidCount: number;
+  totalCount: number;
+  wins: number;
+  losses: number;
+  /** @nullable */
+  winRate?: number | null;
+  totalStaked: number;
+  netProfitLoss: number;
+  /** @nullable */
+  roi?: number | null;
+  /** @nullable */
+  avgEntryEdge?: number | null;
+  /** @nullable */
+  avgWinEdge?: number | null;
+  /** @nullable */
+  avgLossEdge?: number | null;
+  byDirection?: PaperTradeSummaryByDirectionItem[];
+  byConfidence?: PaperTradeSummaryByConfidenceItem[];
+  byCity?: PaperTradeSummaryByCityItem[];
+  byContractType?: PaperTradeSummaryByContractTypeItem[];
+  sampleSizeWarning: boolean;
+  /** @nullable */
+  preliminaryNote?: string | null;
+}
+
+export interface PaperTradeSettings {
+  /** @nullable */
+  enabled?: boolean | null;
+  /** @nullable */
+  min_edge_pct?: number | null;
+  /** @nullable */
+  min_confidence?: string | null;
+  /** @nullable */
+  stake?: number | null;
+  /** @nullable */
+  strategy_version?: string | null;
+}
+
 export type GetErrorsParams = {
 limit?: number;
+};
+
+export type ListPaperTradesParams = {
+status?: string;
+direction?: string;
+confidence?: string;
+city?: string;
+contract_type?: string;
+date_from?: string;
+date_to?: string;
+limit?: number;
+};
+
+export type ListPaperTrades200 = {
+  trades: PaperTrade[];
+  total: number;
 };
 

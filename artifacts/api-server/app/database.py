@@ -60,6 +60,13 @@ async def _apply_migrations(conn) -> None:
         "ALTER TABLE prediction_snapshots ADD COLUMN IF NOT EXISTS upper_bound FLOAT",
         # Widen settlement_variable to accommodate 'hourly_temperature'
         "ALTER TABLE prediction_snapshots ALTER COLUMN settlement_variable TYPE VARCHAR(30)",
+        # Phase 3A: JobRun paper-trading counts
+        "ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS pt_candidates INTEGER",
+        "ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS pt_created INTEGER",
+        "ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS pt_yes_trades INTEGER",
+        "ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS pt_no_trades INTEGER",
+        "ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS pt_skipped INTEGER",
+        "ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS pt_errors INTEGER",
     ]
     for stmt in migrations:
         try:

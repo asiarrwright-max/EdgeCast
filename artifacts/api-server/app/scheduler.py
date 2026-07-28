@@ -1,7 +1,8 @@
 """
-Background scheduler: runs data collection every 3 hours.
-Uses a plain asyncio task so there are no third-party scheduler dependencies.
-A running-job check prevents overlapping executions.
+Background scheduler: runs data collection every 3 hours, and a settlement
+check job every 3 hours (offset by 1.5 hours so they don't overlap).
+
+Uses plain asyncio tasks — no third-party scheduler dependencies.
 """
 from __future__ import annotations
 
@@ -10,12 +11,14 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-INTERVAL_SECONDS = 3 * 60 * 60  # 3 hours
+INTERVAL_SECONDS = 3 * 60 * 60      # 3 hours
+SETTLEMENT_OFFSET = 90 * 60          # 1.5 hours offset for settlement loop
 
-_task: asyncio.Task | None = None
+_collection_task: asyncio.Task | None = None
+_settlement_task: asyncio.Task | None = None
 
 
-async def _loop() -> None:
+async def _collection_loop() -> None:
     # Delay first auto-run by one full interval so startup is clean.
     logger.info("Scheduler started – first auto-collection in 3 hours.")
     await asyncio.sleep(INTERVAL_SECONDS)
@@ -23,7 +26,6 @@ async def _loop() -> None:
         try:
             logger.info("Scheduler: triggering automatic data collection.")
             from app.services.collector import run_collection_job
-
             await run_collection_job()
         except asyncio.CancelledError:
             break
@@ -32,33 +34,50 @@ async def _loop() -> None:
         await asyncio.sleep(INTERVAL_SECONDS)
 
 
+async def _settlement_loop() -> None:
+    # Offset by 1.5 h so settlement checks don't overlap with collection.
+    await asyncio.sleep(SETTLEMENT_OFFSET)
+    while True:
+        try:
+            logger.info("Scheduler: running settlement check.")
+            from app.services.settlement import run_settlement_job
+            await run_settlement_job()
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logger.exception("Scheduler settlement failed: %s", exc)
+        await asyncio.sleep(INTERVAL_SECONDS)
+
+
 async def start_scheduler() -> None:
-    global _task
-    _task = asyncio.create_task(_loop())
+    global _collection_task, _settlement_task
+    _collection_task = asyncio.create_task(_collection_loop())
+    _settlement_task = asyncio.create_task(_settlement_loop())
 
 
 async def shutdown_scheduler() -> None:
-    global _task
-    if _task and not _task.done():
-        _task.cancel()
-        try:
-            await _task
-        except asyncio.CancelledError:
-            pass
-    _task = None
+    global _collection_task, _settlement_task
+    for task in [_collection_task, _settlement_task]:
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+    _collection_task = None
+    _settlement_task = None
 
 
 def get_scheduler_status() -> dict:
     """Return a dict describing the current scheduler state."""
-    if _task is None:
-        return {"running": False, "message": "Scheduler not started"}
-    if _task.done():
-        exc = None
-        try:
-            exc = _task.exception()
-        except (asyncio.CancelledError, asyncio.InvalidStateError):
-            pass
-        if exc:
-            return {"running": False, "message": f"Stopped with error: {exc}"}
-        return {"running": False, "message": "Scheduler stopped (cancelled or finished)"}
-    return {"running": True, "message": f"Running – auto-collection every {INTERVAL_SECONDS // 3600}h"}
+    col_running = bool(_collection_task and not _collection_task.done())
+    set_running = bool(_settlement_task and not _settlement_task.done())
+    if col_running or set_running:
+        return {
+            "running": True,
+            "message": (
+                f"Running – auto-collection every {INTERVAL_SECONDS // 3600}h, "
+                f"settlement check offset {SETTLEMENT_OFFSET // 60}min"
+            ),
+        }
+    return {"running": False, "message": "Scheduler stopped"}

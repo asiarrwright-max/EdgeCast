@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, JSON, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -106,6 +106,13 @@ class JobRun(Base):
     forecasts_retrieved: Mapped[int | None] = mapped_column(Integer)
     duration_seconds: Mapped[float | None] = mapped_column(Float)
     error_message: Mapped[str | None] = mapped_column(Text)
+    # Phase 3A paper-trading counts
+    pt_candidates: Mapped[int | None] = mapped_column(Integer)
+    pt_created: Mapped[int | None] = mapped_column(Integer)
+    pt_yes_trades: Mapped[int | None] = mapped_column(Integer)
+    pt_no_trades: Mapped[int | None] = mapped_column(Integer)
+    pt_skipped: Mapped[int | None] = mapped_column(Integer)
+    pt_errors: Mapped[int | None] = mapped_column(Integer)
 
 
 class AppError(Base):
@@ -175,3 +182,74 @@ class PredictionSnapshot(Base):
         String(50), nullable=False, default="unsupported"
     )
     analysis_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class PaperTrade(Base):
+    """
+    Simulated paper trade record.  Created automatically after each collection
+    run for every market that meets the EdgeCast eligibility criteria.
+
+    IMPORTANT: original entry values (prices, probabilities, stake) are NEVER
+    updated after creation.  Only status/settlement fields are written later.
+    No real trades are placed.  No Kalshi trading credentials are used.
+    """
+
+    __tablename__ = "paper_trades"
+    __table_args__ = (
+        UniqueConstraint(
+            "market_ticker", "strategy_version",
+            name="uq_paper_trade_ticker_strategy",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    # Market / contract identification
+    market_ticker: Mapped[str] = mapped_column(String(300), nullable=False, index=True)
+    event_ticker: Mapped[str | None] = mapped_column(String(300))
+    city: Mapped[str | None] = mapped_column(String(200))
+    weather_variable: Mapped[str | None] = mapped_column(String(30))    # 'high' | 'low' | 'hourly_temperature'
+    contract_type: Mapped[str | None] = mapped_column(String(30))       # 'threshold' | 'range' | 'hourly_threshold'
+    target_settlement_date: Mapped[str | None] = mapped_column(String(50))
+
+    # Snapshot link (immutable — never updated after creation)
+    snapshot_id: Mapped[int | None] = mapped_column(Integer)
+
+    # Strategy
+    strategy_version: Mapped[str] = mapped_column(String(50), nullable=False, default="v1.0")
+
+    # Trade decision (immutable)
+    direction: Mapped[str] = mapped_column(String(10), nullable=False)   # 'YES' | 'NO'
+    ec_yes_probability: Mapped[float | None] = mapped_column(Float)
+    ec_side_probability: Mapped[float | None] = mapped_column(Float)
+    market_yes_probability: Mapped[float | None] = mapped_column(Float)
+    side_market_price: Mapped[float | None] = mapped_column(Float)       # purchase price in [0,1]
+    price_source: Mapped[str | None] = mapped_column(String(20))         # 'YES_ASK' | 'YES_BID' | 'NO_ASK' | 'NO_BID'
+    edge_pct_points: Mapped[float | None] = mapped_column(Float)         # percentage points, e.g. 15.3
+
+    # Confidence (immutable)
+    confidence_score: Mapped[float | None] = mapped_column(Float)
+    confidence_label: Mapped[str | None] = mapped_column(String(20))
+
+    # Position (immutable)
+    stake: Mapped[float] = mapped_column(Float, nullable=False)          # dollars
+    quantity: Mapped[float | None] = mapped_column(Float)                # contracts = stake / price
+
+    # Lifecycle status
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="OPEN")
+    # OPEN → SETTLED | VOID | ERROR
+
+    # Settlement (written after Kalshi finalizes)
+    kalshi_result: Mapped[str | None] = mapped_column(String(10))        # 'yes' | 'no' | 'void'
+    outcome: Mapped[str | None] = mapped_column(String(10))              # 'WIN' | 'LOSS' | 'VOID'
+    settlement_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    gross_payout: Mapped[float | None] = mapped_column(Float)            # dollars
+    profit_loss: Mapped[float | None] = mapped_column(Float)             # dollars (negative = loss)
+    return_pct: Mapped[float | None] = mapped_column(Float)              # percentage, e.g. -100.0
+
+    # Explanation and warnings
+    decision_explanation: Mapped[str | None] = mapped_column(Text)
+    warnings: Mapped[str | None] = mapped_column(Text)                  # semicolon-separated list

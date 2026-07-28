@@ -31,6 +31,13 @@ def _to_dict(j: JobRun) -> dict:
         "forecastsRetrieved": j.forecasts_retrieved,
         "durationSeconds": j.duration_seconds,
         "errorMessage": j.error_message,
+        # Phase 3A paper-trading counts
+        "ptCandidates": j.pt_candidates,
+        "ptCreated": j.pt_created,
+        "ptYesTrades": j.pt_yes_trades,
+        "ptNoTrades": j.pt_no_trades,
+        "ptSkipped": j.pt_skipped,
+        "ptErrors": j.pt_errors,
     }
 
 
