@@ -1,0 +1,230 @@
+Build one final monitoring feature called “V2 Learning Progress.”
+
+Important constraints:
+- Do not change Strategy v1 or v2 prediction logic.
+- Do not change trade-entry rules.
+- Do not recalculate historical predictions or trades.
+- Do not reset or delete any data.
+- This is a monitoring and transparency feature only.
+
+GOAL
+
+Create a clear dashboard showing how much verified forecast-performance data Strategy v2 has learned and where it is still using fallback assumptions.
+
+1. Add a V2 Learning Progress section
+
+Add this to the Strategy Audit page or Paper Trading analytics page.
+
+Show summary cards for:
+
+- Total verified observations
+- Verified observations using official GHCND station data
+- Observations using ERA5 fallback
+- Cities with sufficient data
+- Cities still using fallback assumptions
+- Forecast-error statistical groups created
+- Date of most recent successful verification
+- Number of verification errors or unresolved records
+
+2. City-level learning table
+
+For every supported city, show:
+
+- City
+- Settlement station name
+- GHCND station ID
+- Station verification status
+- Observation source currently used
+- Verified observation count
+- Mean forecast error
+- Median forecast error
+- Mean absolute error
+- Forecast-error standard deviation
+- Lead-time groups available
+- Most recent verified date
+- Whether v2 has enough data to use learned statistics
+- Whether v2 is currently using:
+  - station-specific learned statistics
+  - city-level statistics
+  - global fallback
+  - v1 fixed-sigma fallback
+- Any data-quality warning
+
+3. Readiness status
+
+Give every city one clear status:
+
+- Not collecting
+- Collecting
+- Insufficient sample
+- Partially learned
+- Learned
+- Data-quality issue
+
+Use explicit rules and display them in the UI.
+
+Suggested rules:
+
+- Not collecting:
+  no verification records
+
+- Collecting:
+  verification records exist but fewer than 5 usable observations
+
+- Insufficient sample:
+  5 or more observations exist, but required lead-time or seasonal groups are still too small
+
+- Partially learned:
+  at least one station or lead-time group is using learned bias or sigma, but fallback is still used for some predictions
+
+- Learned:
+  current predictions are using station-specific learned statistics with a sufficient sample
+
+- Data-quality issue:
+  missing station mapping, API errors, invalid observations, or excessive fallback use
+
+Do not label a city “Learned” merely because records exist.
+
+4. Forecast-error group table
+
+Show the actual groups used by v2.
+
+For each group display:
+
+- City
+- Station
+- Lead-time bucket
+- Month or season
+- Sample size
+- Mean bias
+- Median bias
+- MAE
+- Standard deviation
+- Minimum error
+- Maximum error
+- Source quality
+- Whether this group is active in v2
+- Fallback reason when inactive
+
+5. Source-quality transparency
+
+Clearly distinguish:
+
+- Official GHCND station observation
+- ERA5 reanalysis fallback
+- Missing or unresolved observation
+
+Add filters to view:
+
+- GHCND only
+- ERA5 fallback only
+- Unresolved only
+- Verified stations only
+- Unverified stations only
+- Cities using learned statistics
+- Cities still using fallback
+
+Do not mix GHCND and ERA5 records into the same learned error statistics unless the UI and database explicitly identify that mixture.
+
+Preferably, only official GHCND observations should qualify for station-specific learned statistics.
+
+6. Progress indicators
+
+Show progress for each city toward:
+
+- 5 verified observations
+- 15 verified observations
+- 30 verified observations
+- 50 verified observations
+- 100 verified observations
+
+Also show the next milestone and how many more verified observations are needed.
+
+7. V1 versus v2 activation information
+
+Show:
+
+- Number of v2 predictions using learned statistics
+- Number using fallback
+- Percentage of v2 predictions using learned statistics
+- Number of markets where v2 probability differed from v1 by more than:
+  - 1 percentage point
+  - 5 percentage points
+  - 10 percentage points
+- Most recent market where v2 used a learned adjustment
+
+8. Verification controls
+
+Include:
+
+- Run Verification button
+- Last run timestamp
+- Run status
+- Records checked
+- Records created
+- Records skipped
+- Errors
+- Statistical groups recomputed
+
+Prevent duplicate verification records when the job is run repeatedly.
+
+9. Drill-down
+
+Clicking a city should open a detail view showing:
+
+- verification history
+- forecast values
+- official observed values
+- individual forecast errors
+- source used
+- station used
+- lead time
+- prediction snapshot
+- associated market or trade
+- whether each record contributed to v2 learning
+
+10. Mobile usability
+
+The current dashboard is often viewed on an iPhone.
+
+Make this section mobile-friendly:
+
+- summary cards stack cleanly
+- tables support horizontal scrolling
+- important status and counts remain visible
+- expandable city rows may be used instead of excessively wide tables
+- no clipped values or unusably small text
+
+11. Testing
+
+Add tests for:
+
+- readiness-status rules
+- GHCND versus ERA5 source separation
+- milestone calculations
+- learned versus fallback counts
+- city-level aggregation
+- group-level aggregation
+- duplicate prevention
+- empty-data states
+- verification-error states
+- mobile rendering where practical
+
+Before coding:
+
+- inspect the existing ForecastVerification, ForecastErrorStats, PredictionSnapshot, settlement-station registry, and strategy-comparison logic
+- provide a concise implementation plan
+- identify whether any database migrations are required
+
+After coding:
+
+- run all tests
+- run verification once
+- confirm that the current 11 verification records and 11 statistical groups appear correctly
+- provide a plain-English summary of:
+  - which cities have learned anything
+  - which cities are still using fallback
+  - whether any current v2 predictions are actually using learned statistics
+  - what milestone must be reached next
+
+Do not add any new forecasting model, historical backtest, real-money trading, or trade-selection logic in this phase.
