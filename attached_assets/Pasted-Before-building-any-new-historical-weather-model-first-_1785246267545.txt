@@ -1,0 +1,176 @@
+Before building any new historical-weather model, first research and validate the historical data sources EdgeCast can realistically use.
+
+Do not change Strategy v1, v2, paper-trading logic, thresholds, or existing trades yet.
+
+The goal of this phase is to determine whether we can obtain reliable historical observations and true archived forecasts without introducing hindsight or look-ahead bias.
+
+1. Identify historical observation sources
+
+Research sources that can provide, for each supported Kalshi weather city:
+
+- official daily high and low temperatures
+- hourly observations when needed
+- station identifier
+- observation timestamp
+- time zone
+- unit
+- quality-control flags
+- multiple years of history
+
+Prefer official or well-documented sources such as NOAA/NCEI when practical.
+
+For each source, document:
+
+- API or download method
+- authentication requirements
+- cost
+- rate limits
+- geographic coverage
+- historical depth
+- update delay
+- reliability
+- whether it matches Kalshi’s settlement station and settlement rules
+
+2. Identify archived forecast sources
+
+Research sources that preserve what the forecast actually predicted before the event occurred.
+
+We need, when available:
+
+- forecast issue timestamp
+- target date and hour
+- predicted temperature
+- forecast lead time
+- model or provider
+- location or grid point
+- archived forecast revisions
+
+Important:
+
+- Do not use current forecasts to reconstruct the past.
+- Do not use actual observed temperatures as though they were forecasts.
+- Do not use hindsight-adjusted or reanalysis data as a substitute for a true archived forecast without clearly labeling it.
+- Clearly distinguish archived operational forecasts from reanalysis, climatology, and historical observations.
+
+For each archived forecast source, document:
+
+- whether it contains true point-in-time forecasts
+- years available
+- cities or stations covered
+- hourly versus daily data
+- forecast horizons
+- cost
+- storage size
+- rate limits
+- licensing or usage restrictions
+- technical complexity
+- whether it can be joined reliably to Kalshi markets
+
+3. Verify Kalshi settlement mapping
+
+For each currently supported city, identify:
+
+- Kalshi market city
+- official settlement station or source
+- station ID
+- time zone
+- daily high/low or hourly rule
+- rounding rule
+- observation window
+- any known station changes over time
+
+Do not assume the general city forecast location is identical to the Kalshi settlement location.
+
+Create a mapping table and flag every city where the settlement source is unknown or uncertain.
+
+4. Rank the available approaches
+
+Evaluate at least these options:
+
+A. True archived forecasts plus official observations  
+B. EdgeCast’s own stored live forecasts plus later observations  
+C. Historical observations plus climatology only  
+D. Reanalysis or reconstructed forecast proxies  
+
+Rank them by scientific validity.
+
+State clearly which options are appropriate for:
+
+- true backtesting
+- forward paper testing
+- climatology research
+- approximate research only
+
+5. Recommend a minimum viable historical-data plan
+
+Propose the smallest reliable implementation that can improve v2 without creating false confidence.
+
+The recommendation should include:
+
+- selected data sources
+- cities to support first
+- years of history
+- daily versus hourly scope
+- expected record count
+- storage estimate
+- expected API or data cost
+- ingestion frequency
+- fallback behavior
+- limitations
+
+Prefer starting with 2–3 cities whose Kalshi settlement stations and historical data are easiest to verify, rather than importing every city immediately.
+
+6. Historical-data quality requirements
+
+Any future dataset must store:
+
+- source name
+- source record identifier
+- station or grid identifier
+- issue timestamp for forecasts
+- valid timestamp
+- observation timestamp
+- ingestion timestamp
+- lead time
+- temperature
+- unit
+- time zone
+- quality flags
+- whether the record is an observation, archived forecast, reanalysis value, or climatology value
+
+Add duplicate prevention and validation checks for:
+
+- impossible temperatures
+- missing timestamps
+- incorrect time zones
+- unit mismatches
+- duplicate records
+- forecast timestamps occurring after the target event
+- station mismatches
+- missing settlement-rule mapping
+
+7. Deliverable before coding
+
+Do not implement the new model yet.
+
+First provide a written Historical Data Feasibility Report containing:
+
+- sources researched
+- comparison table
+- recommended source or sources
+- Kalshi station-mapping table
+- data limitations
+- estimated cost and complexity
+- proposed pilot cities
+- proposed database schema
+- implementation phases
+- risks of look-ahead bias or bad joins
+
+End the report with one of these conclusions:
+
+- Ready to build using true archived forecasts
+- Ready to build a limited pilot
+- Only forward collection is scientifically reliable
+- Historical backtesting is not currently reliable with available data
+
+Wait for approval before importing large datasets or changing Strategy v2.
