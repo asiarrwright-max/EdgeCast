@@ -1,25 +1,29 @@
 """
-Probability Engine v1 — deterministic Gaussian temperature forecast model.
+Probability Engine v2 — deterministic Gaussian temperature forecast model.
 
 Model
 -----
-We model the true daily temperature T as a Gaussian random variable centred
+We model the true temperature T as a Gaussian random variable centred
 on the Open-Meteo point forecast:
 
     T ~ N(μ, σ²)
 
 where:
-    μ = Open-Meteo forecast value (daily high or low, °F)
+    μ = Open-Meteo forecast value (daily high, daily low, or hourly temp, °F)
     σ = forecast uncertainty in °F, calibrated by lead time (see below)
 
-For operator 'gte'  (market resolves YES if T >= threshold):
+Contract types
+--------------
+threshold (daily high / low):
     P(T >= threshold) = 1 − Φ((threshold − μ) / σ)
-
-For operator 'lte'  (market resolves YES if T <= threshold):
     P(T <= threshold) = Φ((threshold − μ) / σ)
 
-where Φ is the standard normal CDF, implemented via math.erf to avoid
-any external dependencies.
+range (bucket market):
+    P(lo ≤ T ≤ hi) = Φ((hi − μ) / σ) − Φ((lo − μ) / σ)
+
+hourly_threshold:
+    Same as threshold but μ comes from the hourly forecast for the specific
+    settlement hour, not the daily extreme.
 
 Forecast uncertainty (σ) by lead time
 --------------------------------------
@@ -34,26 +38,18 @@ and ECMWF verification statistics for 2m-temperature daily extremes.
     lead 8-10 days: σ = 8.2°F
     lead ≥ 11 days: σ = 9.5°F   (approaching climatological spread)
 
-These values intentionally slightly overestimate uncertainty so that
-edge probabilities (very close to 0 or 1) are not overstated.
-
 Confidence score
 ----------------
 Possible values (in descending order): Very High, High, Medium, Low, Very Low.
 
-Score starts at 5 (Very High) with deductions:
+Score starts at 4 (Very High) with deductions:
     lead_time >  7 days       : −2
     lead_time 4–7 days        : −1
     parse_confidence != 'high': −1
     forecast stale (>12 h old): −1
     market prices unavailable : −0.5 → rounded down
 
-Mapping:
-    5.0 → Very High
-    4.0 → High
-    3.0 → Medium
-    2.0 → Low
-    ≤ 1 → Very Low
+Mapping (floor):  4→Very High  3→High  2→Medium  1→Low  0→Very Low
 """
 
 from __future__ import annotations
@@ -231,6 +227,24 @@ def calculate_probability(
         return round(_normal_cdf(z), 4)
 
 
+def calculate_range_probability(
+    lower_bound: float,    # inclusive lower temperature bound in °F
+    upper_bound: float,    # inclusive upper temperature bound in °F
+    forecast_value: float, # Open-Meteo μ in °F
+    lead_time_days: int,
+) -> float:
+    """
+    Return P(lower_bound ≤ T ≤ upper_bound) using the Gaussian forecast model.
+
+    P(lo ≤ T ≤ hi) = Φ((hi − μ) / σ) − Φ((lo − μ) / σ)
+    """
+    sigma = sigma_for_lead_time(lead_time_days)
+    z_hi = (upper_bound - forecast_value) / sigma
+    z_lo = (lower_bound - forecast_value) / sigma
+    p = _normal_cdf(z_hi) - _normal_cdf(z_lo)
+    return round(max(0.0, p), 4)
+
+
 # ---------------------------------------------------------------------------
 # Main engine entry point
 # ---------------------------------------------------------------------------
@@ -241,8 +255,8 @@ def run_analysis(
     subtitle: str | None,
     city: str | None,
     target_date_str: str | None,  # 'YYYY-MM-DD'
-    weather_variable: str | None,  # 'high' | 'low' (from SettlementContract)
-    operator: str | None,           # 'gte' | 'lte'
+    weather_variable: str | None,  # 'high' | 'low' | 'hourly_temperature'
+    operator: str | None,           # 'gte' | 'lte' | None (for range)
     threshold: float | None,
     parse_confidence: str,
     settlement_status: str,         # 'supported' | 'unsupported' | 'no_data'
@@ -252,6 +266,11 @@ def run_analysis(
     forecast_retrieved_at: datetime | None,
     yes_bid: float | None,
     yes_ask: float | None,
+    # Phase 2B new params (all optional for backward compatibility)
+    contract_type: str = "threshold",       # 'threshold' | 'range' | 'hourly_threshold'
+    lower_bound: float | None = None,       # for range contracts
+    upper_bound: float | None = None,       # for range contracts
+    forecast_hourly_value: float | None = None,  # for hourly_threshold contracts
 ) -> AnalysisResult:
     """
     Full analysis pipeline for one market.
@@ -284,15 +303,31 @@ def run_analysis(
             analysis_reason=unsupported_reason,
         )
 
+    # ---- Select forecast value based on contract type ---------------------
+    if contract_type == "hourly_threshold":
+        forecast_value = forecast_hourly_value
+    elif weather_variable == "high":
+        forecast_value = forecast_high
+    else:
+        forecast_value = forecast_low
+
     # ---- No forecast available ---------------------------------------------
-    forecast_value = forecast_high if weather_variable == "high" else forecast_low
     if forecast_value is None or target_date_str is None:
-        reason = (
-            f"No Open-Meteo {'high' if weather_variable == 'high' else 'low'} temperature "
-            f"forecast available for {city or 'this city'}"
-            + (f" on {target_date_str}" if target_date_str else "")
-            + "."
-        )
+        if contract_type == "hourly_threshold":
+            reason = (
+                f"No hourly temperature forecast available for "
+                f"{city or 'this city'}"
+                + (f" on {target_date_str}" if target_date_str else "")
+                + ". Exact settlement hour unavailable."
+            )
+        else:
+            var_label = "high" if weather_variable == "high" else "low"
+            reason = (
+                f"No Open-Meteo {var_label} temperature forecast available for "
+                f"{city or 'this city'}"
+                + (f" on {target_date_str}" if target_date_str else "")
+                + "."
+            )
         conf = confidence_score(None, parse_confidence, forecast_retrieved_at, mkt_prob)
         explanation = reason
         if mkt_prob is not None:
@@ -319,24 +354,53 @@ def run_analysis(
     sigma = sigma_for_lead_time(lead_time_days if lead_time_days is not None else 99)
 
     # ---- Gaussian probability ----------------------------------------------
-    ec_prob = calculate_probability(
-        operator=operator,
-        threshold=threshold,
-        forecast_value=forecast_value,
-        lead_time_days=lead_time_days if lead_time_days is not None else 99,
-    )
+    if contract_type == "range":
+        assert lower_bound is not None and upper_bound is not None
+        ec_prob = calculate_range_probability(
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+            forecast_value=forecast_value,
+            lead_time_days=lead_time_days if lead_time_days is not None else 99,
+        )
+    else:
+        # threshold or hourly_threshold
+        assert operator is not None and threshold is not None
+        ec_prob = calculate_probability(
+            operator=operator,
+            threshold=threshold,
+            forecast_value=forecast_value,
+            lead_time_days=lead_time_days if lead_time_days is not None else 99,
+        )
 
     conf = confidence_score(lead_time_days, parse_confidence, forecast_retrieved_at, mkt_prob)
 
     # ---- Plain-language explanation ----------------------------------------
-    var_label = "high" if weather_variable == "high" else "low"
-    op_label = "at or above" if operator == "gte" else "at or below"
-    explanation_parts = [
-        f"Open-Meteo forecasts a daily {var_label} of {forecast_value:.1f}°F for {city or 'this city'}.",
-        f"This market resolves YES if the {var_label} temperature is {op_label} {threshold:.0f}°F.",
-        f"Using a {sigma:.1f}°F uncertainty (lead time: {lead_time_days if lead_time_days is not None else '?'} day(s)),",
-        f"EdgeCast estimates a {ec_prob * 100:.1f}% probability of YES.",
-    ]
+    if contract_type == "range":
+        var_label = "high" if weather_variable == "high" else "low"
+        explanation_parts = [
+            f"Open-Meteo forecasts a daily {var_label} of {forecast_value:.1f}°F for {city or 'this city'}.",
+            f"This market resolves YES if the {var_label} temperature is between {lower_bound:.0f}°F and {upper_bound:.0f}°F.",
+            f"Using a {sigma:.1f}°F uncertainty (lead time: {lead_time_days if lead_time_days is not None else '?'} day(s)),",
+            f"EdgeCast estimates a {ec_prob * 100:.1f}% probability of YES.",
+        ]
+    elif contract_type == "hourly_threshold":
+        op_label = "at or above" if operator == "gte" else "at or below"
+        explanation_parts = [
+            f"Open-Meteo hourly forecast: {forecast_value:.1f}°F for {city or 'this city'}.",
+            f"This market resolves YES if the temperature is {op_label} {threshold:.2f}°F at the settlement hour.",
+            f"Using a {sigma:.1f}°F uncertainty (lead time: {lead_time_days if lead_time_days is not None else '?'} day(s)),",
+            f"EdgeCast estimates a {ec_prob * 100:.1f}% probability of YES.",
+        ]
+    else:
+        var_label = "high" if weather_variable == "high" else "low"
+        op_label = "at or above" if operator == "gte" else "at or below"
+        explanation_parts = [
+            f"Open-Meteo forecasts a daily {var_label} of {forecast_value:.1f}°F for {city or 'this city'}.",
+            f"This market resolves YES if the {var_label} temperature is {op_label} {threshold:.0f}°F.",
+            f"Using a {sigma:.1f}°F uncertainty (lead time: {lead_time_days if lead_time_days is not None else '?'} day(s)),",
+            f"EdgeCast estimates a {ec_prob * 100:.1f}% probability of YES.",
+        ]
+
     if mkt_prob is not None:
         gap = (ec_prob - mkt_prob) * 100
         sign = "+" if gap >= 0 else ""

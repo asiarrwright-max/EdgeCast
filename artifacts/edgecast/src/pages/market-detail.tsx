@@ -52,6 +52,14 @@ function diff(v: number | null | undefined): string {
   return `${p >= 0 ? "+" : ""}${p.toFixed(1)}pp`;
 }
 
+/** Format a 24-hour integer as "12am", "3pm", etc. */
+function fmtHour(h: number | null | undefined): string {
+  if (h == null) return "-";
+  if (h === 0) return "12am";
+  if (h === 12) return "12pm";
+  return h < 12 ? `${h}am` : `${h - 12}pm`;
+}
+
 export default function MarketDetailPage() {
   const params = useParams<{ ticker: string }>();
   const ticker = params.ticker;
@@ -79,7 +87,7 @@ export default function MarketDetailPage() {
     );
   }
 
-  // Phase 2A analysis fields (present after a collection run)
+  // Phase 2A + 2B analysis fields (present after a collection run)
   const m = market as typeof market & {
     ecProbability?: number | null;
     marketProbability?: number | null;
@@ -93,6 +101,13 @@ export default function MarketDetailPage() {
     settlementThreshold?: number | null;
     leadTimeDays?: number | null;
     forecastValue?: number | null;
+    priceSource?: string | null;
+    // Phase 2B
+    contractType?: string | null;
+    targetHour?: number | null;
+    targetTimezoneStr?: string | null;
+    lowerBound?: number | null;
+    upperBound?: number | null;
   };
 
   const ps = market.parsingStatus ? PARSING_BADGE[market.parsingStatus] : undefined;
@@ -105,6 +120,43 @@ export default function MarketDetailPage() {
     "text-muted-foreground";
 
   const isSupported = m.analysisStatus === "supported";
+
+  /** Human-readable settlement condition based on contract type */
+  function settlementLabel(): string {
+    const varLabel = m.settlementVariable
+      ? (m.settlementVariable === "hourly_temperature" ? "hourly temp" : `${m.settlementVariable} temp`)
+      : "";
+
+    if (m.contractType === "range" && m.lowerBound != null && m.upperBound != null) {
+      return `${varLabel} ${m.lowerBound}–${m.upperBound}°F`;
+    }
+    if (m.contractType === "hourly_threshold") {
+      const hourStr = fmtHour(m.targetHour);
+      const tzStr = m.targetTimezoneStr ? ` ${m.targetTimezoneStr}` : "";
+      const opStr = m.settlementOperator === "gte" ? "≥" : m.settlementOperator === "lte" ? "≤" : "";
+      const threshStr = m.settlementThreshold != null ? ` ${m.settlementThreshold}°F` : "";
+      return `${varLabel} at ${hourStr}${tzStr} ${opStr}${threshStr}`.trim();
+    }
+    // Default threshold
+    const opStr = m.settlementOperator === "gte" ? "≥" : m.settlementOperator === "lte" ? "≤" : "";
+    const threshStr = m.settlementThreshold != null ? ` ${m.settlementThreshold}°F` : "-";
+    return `${varLabel} ${opStr}${threshStr}`.trim() || "-";
+  }
+
+  /** Contract-type badge */
+  function contractTypeBadge() {
+    if (!m.contractType) return null;
+    const labels: Record<string, string> = {
+      threshold: "THRESHOLD",
+      range: "RANGE",
+      hourly_threshold: "HOURLY",
+    };
+    return (
+      <Badge variant="outline" className="text-[10px] font-mono border-violet-500/30 text-violet-400">
+        {labels[m.contractType] ?? m.contractType.toUpperCase()}
+      </Badge>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -140,6 +192,7 @@ export default function MarketDetailPage() {
                   {MARKET_TYPE_LABEL[market.weatherMarketType] ?? market.weatherMarketType.toUpperCase()}
                 </Badge>
               )}
+              {contractTypeBadge()}
             </div>
             <h2 className="text-xl text-foreground font-sans font-medium">{market.title}</h2>
             {market.subtitle && <p className="text-muted-foreground mt-1">{market.subtitle}</p>}
@@ -176,6 +229,11 @@ export default function MarketDetailPage() {
                 <div className="p-6 flex flex-col items-center text-center">
                   <span className="text-xs text-muted-foreground mb-2">MARKET IMPLIED</span>
                   <span className="text-4xl font-bold text-foreground">{pct(m.marketProbability)}</span>
+                  {m.priceSource && (
+                    <span className="text-[10px] text-muted-foreground/60 mt-1">
+                      via {m.priceSource}
+                    </span>
+                  )}
                 </div>
                 <div className="p-6 flex flex-col items-center text-center">
                   <span className="text-xs text-muted-foreground mb-2">DIFFERENCE</span>
@@ -187,7 +245,9 @@ export default function MarketDetailPage() {
                     {m.forecastValue != null ? `${m.forecastValue.toFixed(1)}°F` : "-"}
                   </span>
                   <span className="text-[10px] text-muted-foreground mt-1">
-                    {m.settlementVariable ? m.settlementVariable.toUpperCase() : ""} TEMP
+                    {m.contractType === "hourly_threshold"
+                      ? `AT ${fmtHour(m.targetHour)}${m.targetTimezoneStr ? ` ${m.targetTimezoneStr}` : ""}`
+                      : m.settlementVariable ? m.settlementVariable.toUpperCase() + " TEMP" : ""}
                   </span>
                 </div>
               </div>
@@ -200,11 +260,7 @@ export default function MarketDetailPage() {
                 <div className="grid grid-cols-3 gap-3 text-xs font-mono text-muted-foreground">
                   <div>
                     <span className="block text-[10px] mb-1 uppercase text-muted-foreground/70">Settlement</span>
-                    <span className="text-foreground">
-                      {m.settlementVariable ? `${m.settlementVariable} temp ` : ""}
-                      {m.settlementOperator === "gte" ? "≥" : m.settlementOperator === "lte" ? "≤" : ""}
-                      {m.settlementThreshold != null ? ` ${m.settlementThreshold}°F` : "-"}
-                    </span>
+                    <span className="text-foreground">{settlementLabel()}</span>
                   </div>
                   <div>
                     <span className="block text-[10px] mb-1 uppercase text-muted-foreground/70">Lead Time</span>
@@ -231,6 +287,9 @@ export default function MarketDetailPage() {
                 {m.marketProbability != null && (
                   <span className="text-xs font-mono text-muted-foreground">
                     Market implied: <span className="text-foreground font-bold">{pct(m.marketProbability)}</span>
+                    {m.priceSource && (
+                      <span className="text-muted-foreground/60"> (via {m.priceSource})</span>
+                    )}
                   </span>
                 )}
               </div>
@@ -249,32 +308,49 @@ export default function MarketDetailPage() {
             <CardTitle className="font-mono text-sm text-muted-foreground flex items-center gap-2">
               <Activity className="h-4 w-4" />
               MARKET PRICES
+              {m.priceSource && (
+                <span className="ml-auto text-[10px] font-mono text-muted-foreground/60">
+                  implied via {m.priceSource}
+                </span>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <div className="grid grid-cols-2 sm:grid-cols-4 font-mono">
               <div className="p-6 flex flex-col items-center text-center">
-                <span className="text-xs text-muted-foreground mb-2">YES ASK</span>
-                <span className="text-4xl font-bold text-emerald-400">
-                  {market.yesAsk != null ? pct(market.yesAsk) : "-"}
-                </span>
-              </div>
-              <div className="p-6 flex flex-col items-center text-center">
-                <span className="text-xs text-muted-foreground mb-2">NO ASK</span>
-                <span className="text-4xl font-bold text-red-400">
-                  {market.noAsk != null ? pct(market.noAsk) : "-"}
-                </span>
-              </div>
-              <div className="p-6 flex flex-col items-center text-center">
                 <span className="text-xs text-muted-foreground mb-2">YES BID</span>
-                <span className="text-2xl font-bold text-foreground">
+                <span className="text-3xl font-bold text-emerald-400">
                   {market.yesBid != null ? pct(market.yesBid) : "-"}
                 </span>
               </div>
               <div className="p-6 flex flex-col items-center text-center">
-                <span className="text-xs text-muted-foreground mb-2">VOLUME</span>
-                <span className="text-2xl font-bold text-foreground">{market.volume ?? 0}</span>
+                <span className="text-xs text-muted-foreground mb-2">YES ASK</span>
+                <span className="text-3xl font-bold text-emerald-300">
+                  {market.yesAsk != null ? pct(market.yesAsk) : "-"}
+                </span>
               </div>
+              <div className="p-6 flex flex-col items-center text-center">
+                <span className="text-xs text-muted-foreground mb-2">NO BID</span>
+                <span className="text-3xl font-bold text-red-400">
+                  {market.noBid != null ? pct(market.noBid) : "-"}
+                </span>
+              </div>
+              <div className="p-6 flex flex-col items-center text-center">
+                <span className="text-xs text-muted-foreground mb-2">NO ASK</span>
+                <span className="text-3xl font-bold text-red-300">
+                  {market.noAsk != null ? pct(market.noAsk) : "-"}
+                </span>
+              </div>
+            </div>
+            <div className="px-6 pb-4 flex items-center justify-between">
+              <span className="text-xs font-mono text-muted-foreground/60">
+                Volume: <span className="text-foreground">{market.volume ?? 0}</span>
+              </span>
+              {m.priceSource && (
+                <span className="text-[10px] font-mono text-muted-foreground/50">
+                  Market-implied probability uses {m.priceSource}
+                </span>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -305,13 +381,25 @@ export default function MarketDetailPage() {
               <div>
                 <span className="text-muted-foreground text-xs flex items-center gap-1 mb-1">
                   <Clock className="h-3 w-3" />
-                  CLOSES
+                  {m.contractType === "hourly_threshold" && m.targetHour != null ? "HOUR" : "CLOSES"}
                 </span>
                 <div className="font-medium">
-                  {safeFmt(market.closeTime, "HH:mm")}
+                  {m.contractType === "hourly_threshold" && m.targetHour != null
+                    ? `${fmtHour(m.targetHour)}${m.targetTimezoneStr ? ` ${m.targetTimezoneStr}` : ""}`
+                    : safeFmt(market.closeTime, "HH:mm")}
                 </div>
               </div>
             </div>
+
+            {/* Range-specific bounds */}
+            {m.contractType === "range" && m.lowerBound != null && m.upperBound != null && (
+              <div>
+                <span className="text-muted-foreground text-xs block mb-1">TEMPERATURE RANGE</span>
+                <div className="font-bold text-primary">
+                  {m.lowerBound}–{m.upperBound}°F
+                </div>
+              </div>
+            )}
 
             <div>
               <span className="text-muted-foreground text-xs block mb-1">EVENT TICKER</span>

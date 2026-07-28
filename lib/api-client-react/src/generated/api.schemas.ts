@@ -86,6 +86,8 @@ export interface Market {
   /** @nullable */
   lastUpdated?: string | null;
   /** @nullable */
+  priceSource?: string | null;
+  /** @nullable */
   ecProbability?: number | null;
   /** @nullable */
   marketProbability?: number | null;
@@ -109,6 +111,16 @@ export interface Market {
   leadTimeDays?: number | null;
   /** @nullable */
   forecastValue?: number | null;
+  /** @nullable */
+  contractType?: string | null;
+  /** @nullable */
+  targetHour?: number | null;
+  /** @nullable */
+  targetTimezoneStr?: string | null;
+  /** @nullable */
+  lowerBound?: number | null;
+  /** @nullable */
+  upperBound?: number | null;
 }
 
 export interface MarketListResponse {

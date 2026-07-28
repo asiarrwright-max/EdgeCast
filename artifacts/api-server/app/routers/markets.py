@@ -27,6 +27,12 @@ def _snap_fields(s: PredictionSnapshot | None) -> dict:
             "settlementThreshold": None,
             "leadTimeDays": None,
             "forecastValue": None,
+            # Phase 2B
+            "contractType": None,
+            "targetHour": None,
+            "targetTimezoneStr": None,
+            "lowerBound": None,
+            "upperBound": None,
         }
     diff: float | None = None
     if s.ec_probability is not None and s.market_probability is not None:
@@ -44,10 +50,26 @@ def _snap_fields(s: PredictionSnapshot | None) -> dict:
         "settlementThreshold": s.settlement_threshold,
         "leadTimeDays": s.lead_time_days,
         "forecastValue": s.forecast_value,
+        # Phase 2B
+        "contractType": s.contract_type,
+        "targetHour": s.target_hour,
+        "targetTimezoneStr": s.target_timezone_str,
+        "lowerBound": s.lower_bound,
+        "upperBound": s.upper_bound,
     }
 
 
 def _to_dict(m: KalshiMarket, snap: PredictionSnapshot | None = None) -> dict:
+    # Derive price source label from available bid/ask prices
+    if m.yes_bid is not None and m.yes_ask is not None:
+        price_source = "YES midpoint"
+    elif m.yes_ask is not None:
+        price_source = "YES ask"
+    elif m.yes_bid is not None:
+        price_source = "YES bid"
+    else:
+        price_source = None
+
     return {
         "id": m.id,
         "ticker": m.ticker,
@@ -70,6 +92,7 @@ def _to_dict(m: KalshiMarket, snap: PredictionSnapshot | None = None) -> dict:
         "weatherMarketType": m.weather_market_type,
         "collectionTimestamp": m.collection_timestamp.isoformat() if m.collection_timestamp else None,
         "lastUpdated": m.updated_at.isoformat() if m.updated_at else None,
+        "priceSource": price_source,
         **_snap_fields(snap),
     }
 

@@ -81,6 +81,8 @@ class WeatherForecast(Base):
     precipitation_prob: Mapped[float | None] = mapped_column(Float)
     wind_speed: Mapped[float | None] = mapped_column(Float)
     forecast_json: Mapped[dict | None] = mapped_column(JSON)
+    # Phase 2B: list of {hour: int, temperature: float} for each hour of the day
+    hourly_data: Mapped[list | None] = mapped_column(JSON)
     retrieved_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -151,9 +153,16 @@ class PredictionSnapshot(Base):
     lead_time_days: Mapped[int | None] = mapped_column(Integer)
 
     # Settlement contract fields (extracted from market title/subtitle)
-    settlement_variable: Mapped[str | None] = mapped_column(String(20))   # 'high' | 'low'
-    settlement_operator: Mapped[str | None] = mapped_column(String(10))   # 'gte' | 'lte'
+    settlement_variable: Mapped[str | None] = mapped_column(String(30))   # 'high' | 'low' | 'hourly_temperature'
+    settlement_operator: Mapped[str | None] = mapped_column(String(10))   # 'gte' | 'lte' | None (range)
     settlement_threshold: Mapped[float | None] = mapped_column(Float)
+
+    # Phase 2B contract type and range/hourly fields
+    contract_type: Mapped[str | None] = mapped_column(String(30))         # 'threshold' | 'range' | 'hourly_threshold'
+    target_hour: Mapped[int | None] = mapped_column(Integer)              # 0-23 local time for hourly contracts
+    target_timezone_str: Mapped[str | None] = mapped_column(String(20))   # e.g. 'EDT' for hourly contracts
+    lower_bound: Mapped[float | None] = mapped_column(Float)              # lower temp bound for range contracts
+    upper_bound: Mapped[float | None] = mapped_column(Float)              # upper temp bound for range contracts
 
     # Probability outputs
     ec_probability: Mapped[float | None] = mapped_column(Float)

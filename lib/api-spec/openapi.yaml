@@ -308,6 +308,8 @@ components:
           type: ["string", "null"]
         lastUpdated:
           type: ["string", "null"]
+        priceSource:
+          type: ["string", "null"]
         # Phase 2A analysis fields (populated after a collection run)
         ecProbability:
           type: ["number", "null"]
@@ -332,6 +334,17 @@ components:
         leadTimeDays:
           type: ["number", "null"]
         forecastValue:
+          type: ["number", "null"]
+        # Phase 2B contract type and extended fields
+        contractType:
+          type: ["string", "null"]
+        targetHour:
+          type: ["number", "null"]
+        targetTimezoneStr:
+          type: ["string", "null"]
+        lowerBound:
+          type: ["number", "null"]
+        upperBound:
           type: ["number", "null"]
 
     MarketListResponse:

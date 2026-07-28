@@ -238,6 +238,7 @@ async def run_collection_job(job_id: int | None = None) -> None:
                                 precipitation_prob=row["precipitation_prob"],
                                 wind_speed=row["wind_speed"],
                                 forecast_json=row["forecast_json"],
+                                hourly_data=row.get("hourly_data"),
                             )
                         )
                     forecasts_saved += len(rows)
