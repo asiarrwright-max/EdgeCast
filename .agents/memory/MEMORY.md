@@ -1,0 +1,4 @@
+- [asyncpg-sslmode-fix](asyncpg-sslmode-fix.md) — Replit DATABASE_URL includes sslmode= which asyncpg rejects; must strip it and convert to connect_args.
+- [sqlalchemy-python-defaults](sqlalchemy-python-defaults.md) — mapped_column(default=X) applies at INSERT time, not Python instantiation; tests must pass values explicitly.
+- [auth-ts-to-tsx](auth-ts-to-tsx.md) — Files containing JSX must use .tsx extension; Vite caches old resolution, requires workflow restart after rename.
+- [orval-zod-integer](orval-zod-integer.md) — Orval generates zod.int() for type:integer which doesn't exist in Zod v3; use type:number in OpenAPI spec instead.

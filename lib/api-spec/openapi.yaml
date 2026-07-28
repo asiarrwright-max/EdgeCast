@@ -3,13 +3,26 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: EdgeCast – Kalshi weather market monitoring API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication
+  - name: dashboard
+    description: Dashboard summary
+  - name: markets
+    description: Kalshi weather markets
+  - name: weather
+    description: Weather forecasts
+  - name: jobs
+    description: Data collection jobs
+  - name: errors
+    description: Application errors
+
 paths:
   /healthz:
     get:
@@ -24,7 +37,178 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /health/services:
+    get:
+      operationId: getServiceHealth
+      tags: [health]
+      summary: Status of each external API
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Service health list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ServiceStatus"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Admin login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: JWT token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthToken"
+        "401":
+          description: Invalid credentials
+
+  /dashboard:
+    get:
+      operationId: getDashboard
+      tags: [dashboard]
+      summary: Dashboard summary
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Dashboard data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dashboard"
+
+  /markets:
+    get:
+      operationId: getMarkets
+      tags: [markets]
+      summary: List active Kalshi weather markets
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Market list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Market"
+
+  /markets/{ticker}:
+    get:
+      operationId: getMarket
+      tags: [markets]
+      summary: Get single market by ticker
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: ticker
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Market detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Market"
+        "404":
+          description: Not found
+
+  /weather/forecasts:
+    get:
+      operationId: getWeatherForecasts
+      tags: [weather]
+      summary: Stored weather forecast snapshots
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Forecast list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WeatherForecast"
+
+  /jobs:
+    get:
+      operationId: getJobs
+      tags: [jobs]
+      summary: List recent job runs
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Job run list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/JobRun"
+
+  /jobs/collect:
+    post:
+      operationId: triggerCollection
+      tags: [jobs]
+      summary: Trigger manual data collection now
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Job started or already running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobRun"
+
+  /errors:
+    get:
+      operationId: getErrors
+      tags: [errors]
+      summary: Recent application errors
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: number
+            default: 50
+      responses:
+        "200":
+          description: Error list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AppError"
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
   schemas:
     HealthStatus:
       type: object
@@ -34,3 +218,152 @@ components:
       required:
         - status
 
+    ServiceStatus:
+      type: object
+      required: [name, status, message, lastChecked]
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [ok, error, unknown]
+        message:
+          type: ["string", "null"]
+        lastChecked:
+          type: ["string", "null"]
+
+    LoginInput:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+
+    AuthToken:
+      type: object
+      required: [accessToken, tokenType]
+      properties:
+        accessToken:
+          type: string
+        tokenType:
+          type: string
+
+    Market:
+      type: object
+      required: [id, ticker, title, status, weatherMatched]
+      properties:
+        id:
+          type: number
+        ticker:
+          type: string
+        eventTicker:
+          type: ["string", "null"]
+        title:
+          type: string
+        subtitle:
+          type: ["string", "null"]
+        city:
+          type: ["string", "null"]
+        targetDate:
+          type: ["string", "null"]
+        openTime:
+          type: ["string", "null"]
+        closeTime:
+          type: ["string", "null"]
+        status:
+          type: string
+        yesBid:
+          type: ["number", "null"]
+        yesAsk:
+          type: ["number", "null"]
+        noBid:
+          type: ["number", "null"]
+        noAsk:
+          type: ["number", "null"]
+        volume:
+          type: ["number", "null"]
+        weatherMatched:
+          type: boolean
+        lastUpdated:
+          type: ["string", "null"]
+
+    WeatherForecast:
+      type: object
+      required: [id, city, forecastDate, retrievedAt]
+      properties:
+        id:
+          type: number
+        city:
+          type: string
+        forecastDate:
+          type: string
+        temperatureHigh:
+          type: ["number", "null"]
+        temperatureLow:
+          type: ["number", "null"]
+        precipitationProb:
+          type: ["number", "null"]
+        windSpeed:
+          type: ["number", "null"]
+        retrievedAt:
+          type: string
+
+    Dashboard:
+      type: object
+      required: [totalActiveMarkets, marketsWithWeather, markets, recentErrors]
+      properties:
+        totalActiveMarkets:
+          type: number
+        marketsWithWeather:
+          type: number
+        lastCollectionTime:
+          type: ["string", "null"]
+        lastCollectionStatus:
+          type: ["string", "null"]
+        markets:
+          type: array
+          items:
+            $ref: "#/components/schemas/Market"
+        recentErrors:
+          type: array
+          items:
+            $ref: "#/components/schemas/AppError"
+
+    JobRun:
+      type: object
+      required: [id, jobType, startedAt, status]
+      properties:
+        id:
+          type: number
+        jobType:
+          type: string
+        startedAt:
+          type: string
+        completedAt:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [running, success, failed]
+        marketsFound:
+          type: ["number", "null"]
+        forecastsRetrieved:
+          type: ["number", "null"]
+        errorMessage:
+          type: ["string", "null"]
+
+    AppError:
+      type: object
+      required: [id, errorType, message, occurredAt]
+      properties:
+        id:
+          type: number
+        errorType:
+          type: string
+        message:
+          type: string
+        context:
+          type: ["string", "null"]
+        occurredAt:
+          type: string

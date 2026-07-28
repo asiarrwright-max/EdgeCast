@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "EdgeCast"
+version = "1.0.0"
+id = "artifacts/edgecast"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24405
+
+[services.development]
+run = "pnpm --filter @workspace/edgecast run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/edgecast", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/edgecast/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24405"
+BASE_PATH = "/"

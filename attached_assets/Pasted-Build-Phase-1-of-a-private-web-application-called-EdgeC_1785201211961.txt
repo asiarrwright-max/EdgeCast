@@ -1,0 +1,73 @@
+Build Phase 1 of a private web application called EdgeCast.
+
+EdgeCast will eventually evaluate Kalshi weather markets, but this first phase is only intended to create a stable foundation and prove that live public data can be retrieved.
+
+For Phase 1, build:
+
+1. A Python FastAPI backend.
+2. A React and TypeScript frontend.
+3. A PostgreSQL database.
+4. Simple password-protected access for one administrator.
+5. A mobile-responsive dashboard.
+6. A live connection to Kalshi’s public API.
+7. A live connection to Open-Meteo.
+8. Discovery of currently active Kalshi weather markets.
+9. Storage of retrieved market records and weather forecasts.
+10. A data-health screen showing whether each API is working.
+11. Automated tests for API parsing and database storage.
+12. A complete README with setup and deployment instructions.
+
+The dashboard should show:
+
+* Number of active Kalshi weather markets found
+* Market title
+* Market ticker
+* City
+* Target date
+* Current YES and NO prices when available
+* Market closing time
+* Whether weather data was successfully matched
+* Last successful update time
+* Any parsing or data-source errors
+
+Important restrictions:
+
+* Do not place trades.
+* Do not request Kalshi account credentials.
+* Do not implement automatic trading.
+* Do not invent probability calculations yet.
+* Do not use fake data unless it is clearly labeled as demo data.
+* Do not begin later phases until Phase 1 has been tested and confirmed working.
+* Use environment variables or Replit Secrets for all configuration.
+* Keep the code modular so settlement-station mapping, probability modeling and paper trading can be added later.
+
+Create the database tables needed for:
+
+* Kalshi events
+* Kalshi markets
+* Weather locations
+* Weather forecast snapshots
+* Background-job runs
+* Application errors
+* App settings
+
+Implement one manual button labeled:
+
+“Run data collection now”
+
+When pressed, it should retrieve current Kalshi weather markets, retrieve applicable Open-Meteo forecasts, save the results and refresh the dashboard.
+
+Also schedule data collection every three hours, but ensure jobs cannot overlap.
+
+Before declaring Phase 1 complete:
+
+1. Run all tests.
+2. Confirm that the application starts without errors.
+3. Confirm database migrations work.
+4. Confirm live Kalshi public data can be retrieved.
+5. Confirm live Open-Meteo data can be retrieved.
+6. Confirm retrieved data is actually saved.
+7. Confirm the deployed application opens outside the development preview.
+8. Explain any active limitations.
+
+Stop after Phase 1 and ask me to review the live application before adding probability calculations or paper trading.
