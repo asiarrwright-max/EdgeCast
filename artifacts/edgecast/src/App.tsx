@@ -93,8 +93,9 @@ function App() {
       <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
         <Switch>
           <Route path="/login" component={LoginPage} />
-          <Route path="/" component={() => <ProtectedRoutes />} />
-          <Route path="/:rest*" component={() => <ProtectedRoutes />} />
+          {/* (.*) is required — /:rest* only matches single-segment paths and
+              silently drops multi-segment routes like /markets/:ticker */}
+          <Route path="(.*)" component={() => <ProtectedRoutes />} />
         </Switch>
       </WouterRouter>
     </QueryClientProvider>

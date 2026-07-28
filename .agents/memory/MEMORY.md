@@ -1,3 +1,4 @@
+- [wouter-catchall-routing](wouter-catchall-routing.md) — /:rest* only matches single-segment paths; use (.*) for multi-segment SPA catch-all in outer Switch.
 - [asyncpg-sslmode-fix](asyncpg-sslmode-fix.md) — Replit DATABASE_URL includes sslmode= which asyncpg rejects; must strip it and convert to connect_args.
 - [mock-patch-module-singleton](mock-patch-module-singleton.md) — Patch app.database.engine directly, not the getter function reference, when testing get_engine() callers.
 - [kalshi-price-field-names](kalshi-price-field-names.md) — Kalshi REST API returns prices as yes_bid_dollars/yes_ask_dollars (not yes_bid/yes_ask); parse_market() now reads both with fallback.
