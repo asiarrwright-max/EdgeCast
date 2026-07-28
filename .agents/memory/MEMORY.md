@@ -1,4 +1,5 @@
 - [asyncpg-sslmode-fix](asyncpg-sslmode-fix.md) — Replit DATABASE_URL includes sslmode= which asyncpg rejects; must strip it and convert to connect_args.
+- [mock-patch-module-singleton](mock-patch-module-singleton.md) — Patch app.database.engine directly, not the getter function reference, when testing get_engine() callers.
 - [kalshi-event-ticker-fallback](kalshi-event-ticker-fallback.md) — Kalshi API often omits series_ticker in response bodies; derive from event_ticker by stripping the date segment.
 - [sqlalchemy-python-defaults](sqlalchemy-python-defaults.md) — mapped_column(default=X) applies at INSERT time, not Python instantiation; tests must pass values explicitly.
 - [auth-ts-to-tsx](auth-ts-to-tsx.md) — Files containing JSX must use .tsx extension; Vite caches old resolution, requires workflow restart after rename.

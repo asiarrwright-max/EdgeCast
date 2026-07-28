@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
-from app.database import get_db, engine
+from app.database import get_db, get_engine
 from app.models import AppError, JobRun, KalshiMarket, WeatherForecast
 from app.scheduler import get_scheduler_status
 from app.services.kalshi import check_kalshi_health
@@ -86,11 +86,29 @@ async def _parallel_checks():
 
 
 async def _check_db_status(now: str) -> dict:
+    """
+    Test the database by running SELECT 1 through a fresh connection.
+    Uses get_engine() called at request time so the AsyncEngine assigned
+    by init_db() is visible — unlike a module-level import of `engine`
+    which would capture the None value that existed at import time.
+    """
+    from sqlalchemy import text as sa_text
+    eng = get_engine()
     try:
-        if engine is None:
-            return {"name": "Database", "status": "error", "message": "Engine not initialised", "lastChecked": now}
-        async with engine.connect() as conn:
-            await conn.execute(__import__("sqlalchemy", fromlist=["text"]).text("SELECT 1"))
+        if eng is None:
+            return {
+                "name": "Database",
+                "status": "error",
+                "message": "Engine not initialised",
+                "lastChecked": now,
+            }
+        async with eng.connect() as conn:
+            await conn.execute(sa_text("SELECT 1"))
         return {"name": "Database", "status": "ok", "message": None, "lastChecked": now}
     except Exception as exc:
-        return {"name": "Database", "status": "error", "message": str(exc)[:200], "lastChecked": now}
+        return {
+            "name": "Database",
+            "status": "error",
+            "message": str(exc)[:200],
+            "lastChecked": now,
+        }

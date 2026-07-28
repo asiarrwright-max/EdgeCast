@@ -1,0 +1,134 @@
+EdgeCast Phase 1.6 — Pipeline Validation and Parser Cleanup
+
+Phase 1.5 successfully established live Kalshi market collection and Open-Meteo forecast storage.
+
+Before beginning the probability engine, complete a focused validation and cleanup pass.
+
+Priority order:
+
+1. Backend correctness
+2. Data integrity
+3. Automated testing
+4. Logging and observability
+5. User interface
+
+Do not redesign the application or add new product features.
+
+## 1. Fix the Database Health Check
+
+The System Health page currently reports:
+
+Database: ERROR
+
+However, the application is successfully reading and writing markets, forecasts, and job records.
+
+Investigate the database health check and determine whether:
+
+- The health-check query is incorrect
+- The database connection is being tested improperly
+- The result is being serialized incorrectly
+- The frontend is misreading the health response
+- There is a genuine intermittent database issue
+
+Fix the underlying problem.
+
+The database should display OK only after a real query succeeds.
+
+Use a lightweight query such as SELECT 1 or the appropriate SQLAlchemy equivalent.
+
+Do not hard-code the status.
+
+Add automated tests for:
+
+- Successful database connection
+- Failed database connection
+- Correct health response structure
+- Correct frontend status rendering
+
+## 2. Investigate All “No City Match” Parse Failures
+
+There are currently approximately 24 markets marked as:
+
+Parse Fail — No City Match
+
+Create a diagnostic report containing:
+
+- Market ticker
+- Event ticker
+- Series ticker
+- Market title
+- Subtitle or rules text, if available
+- Current parser result
+- Exact reason the city could not be identified
+
+Group failures by common pattern.
+
+Examples may include:
+
+- Missing city lookup entry
+- Airport or weather-station code
+- Regional market instead of city market
+- New Kalshi ticker format
+- Non-temperature weather market
+- City contained in title but not ticker
+- Unsupported location
+
+Improve the parser for legitimate city-based weather markets.
+
+Do not force a city match when the location is uncertain.
+
+For markets that genuinely do not map to a supported city, retain the parse failure and provide a clear reason.
+
+## 3. Validate Forecast Matching
+
+For every market currently marked as weather matched:
+
+- Confirm the city is correct
+- Confirm latitude and longitude are correct
+- Confirm the forecast date matches the market settlement date
+- Confirm temperature units are correct
+- Confirm the correct weather variable is being requested
+
+Add validation safeguards so an incorrect city match cannot silently receive a forecast.
+
+## 4. Reconcile Dashboard Counts
+
+The Dashboard, Markets page, Jobs page, and System Health page must use consistent definitions for:
+
+- Active markets
+- Markets stored
+- Markets collected this run
+- Markets found
+- Markets skipped
+- Parse failures
+- Weather matched
+- Forecast rows stored
+
+Document what each metric means.
+
+Fix any inconsistencies between the reported values.
+
+## 5. Mobile Usability — Minimal Changes Only
+
+Do not redesign the visual style.
+
+Make only the responsive changes required so the existing pages are usable on a phone:
+
+- Content should fit within the screen
+- Tables may scroll horizontally
+- Headings and buttons should not be cut off
+- The sidebar should collapse or become a mobile menu
+- Status cards should wrap appropriately
+
+Do not spend significant effort on visual polish.
+
+## 6. Testing
+
+Run and expand automated tests for:
+
+- Database health
+- City extraction
+- Series ticker fallback
+- Known failed ticker formats
+- Unsupported locations
+- Correct location coordinates

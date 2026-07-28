@@ -3,8 +3,22 @@ Data collection orchestrator.
   1. Fetch active weather markets from Kalshi.
   2. Upsert markets into kalshi_markets with parsing_status.
   3. For each city, fetch Open-Meteo forecast and upsert into weather_forecasts.
-  4. Update weather_matched flag on each market.
+  4. Update weather_matched flag on each market, validating forecast date alignment.
   5. Record job run result with full stats.
+
+Metric definitions
+------------------
+markets_found       Total weather markets returned by Kalshi this run
+                    (= markets_collected + parse_failures for this run).
+markets_collected   Weather markets that were successfully city-matched and stored.
+                    Stored as parsing_status='collected' in kalshi_markets.
+markets_skipped     Non-weather markets that were scanned and discarded.
+markets_rejected    Markets explicitly rejected (reserved; currently 0).
+parse_failures      Weather markets where city extraction failed.
+                    Stored as parsing_status='parsing_failure'.
+weather_matched     Markets where a forecast row exists for the correct city
+                    AND the forecast covers the market's settlement date.
+forecasts_retrieved Total WeatherForecast rows inserted this run.
 """
 from __future__ import annotations
 
@@ -29,6 +43,17 @@ _collect_lock = asyncio.Lock()
 async def _log_error(session, error_type: str, message: str, context: str | None = None):
     err = AppError(error_type=error_type, message=message, context=context)
     session.add(err)
+
+
+def _target_date_str(target_date: str | None) -> str | None:
+    """
+    Extract the YYYY-MM-DD portion from a stored target_date string.
+    target_date is stored as str(datetime), e.g. '2026-07-28 14:00:00+00:00'.
+    Returns just '2026-07-28', or None if target_date is absent.
+    """
+    if not target_date:
+        return None
+    return str(target_date)[:10]
 
 
 async def run_collection_job(job_id: int | None = None) -> None:
@@ -104,10 +129,6 @@ async def run_collection_job(job_id: int | None = None) -> None:
                 # ---- Step 2: Upsert markets --------------------------------
                 now = datetime.now(timezone.utc)
                 cities_needed: dict[str, tuple[float, float]] = {}
-
-                def _upsert_market(mkt: dict, p_status: str, p_reason: str | None) -> None:
-                    """Update or insert a single market record."""
-                    nonlocal session
 
                 # Upsert collected markets (with city)
                 for mkt in result.markets:
@@ -227,23 +248,48 @@ async def run_collection_job(job_id: int | None = None) -> None:
                 await session.commit()
 
                 # ---- Step 4: Update weather_matched flag -------------------
+                # A market is weather_matched only when:
+                #   a) its city is known, AND
+                #   b) a forecast row exists for that city on the market's settlement date.
+                # This prevents a silent match when a forecast exists for the city
+                # but does not cover the specific date the market settles on.
                 mkts_q = await session.execute(select(KalshiMarket))
-                for m in mkts_q.scalars().all():
-                    if m.city:
+                all_markets = mkts_q.scalars().all()
+
+                for m in all_markets:
+                    if not m.city:
+                        m.weather_matched = False
+                        continue
+
+                    target_ds = _target_date_str(m.target_date)
+
+                    if target_ds:
+                        # Prefer date-specific match
+                        fc_q = await session.execute(
+                            select(WeatherForecast).where(
+                                WeatherForecast.city == m.city,
+                                WeatherForecast.forecast_date == target_ds,
+                            ).limit(1)
+                        )
+                        matched = fc_q.scalar_one_or_none() is not None
+                        if not matched:
+                            logger.debug(
+                                "No forecast for %s on %s (city=%s) – weather_matched=False",
+                                m.ticker, target_ds, m.city,
+                            )
+                    else:
+                        # No settlement date stored – fall back to any-forecast check
                         fc_q = await session.execute(
                             select(WeatherForecast).where(
                                 WeatherForecast.city == m.city
                             ).limit(1)
                         )
-                        m.weather_matched = fc_q.scalar_one_or_none() is not None
-                    else:
-                        m.weather_matched = False
+                        matched = fc_q.scalar_one_or_none() is not None
+
+                    m.weather_matched = matched
 
                 await session.commit()
-                weather_matched_count = sum(
-                    1 for m in mkts_q.scalars()  # already loaded above
-                    if m.weather_matched
-                )
+                weather_matched_count = sum(1 for m in all_markets if m.weather_matched)
 
                 # ---- Step 5: Finalise job ----------------------------------
                 duration = round(time.monotonic() - started_mono, 2)
@@ -254,15 +300,16 @@ async def run_collection_job(job_id: int | None = None) -> None:
                     job_record.completed_at = datetime.now(timezone.utc)
                     job_record.markets_found = markets_found
                     job_record.markets_skipped = markets_skipped
-                    job_record.markets_rejected = 0  # not currently used
+                    job_record.markets_rejected = 0  # reserved
                     job_record.forecasts_retrieved = forecasts_saved
                     job_record.duration_seconds = duration
                 await session.commit()
 
                 logger.info(
                     "Collection complete in %.1fs. Collected: %d, parse failures: %d, "
-                    "skipped: %d, forecast rows: %d",
-                    duration, markets_collected, parse_failures, markets_skipped, forecasts_saved,
+                    "skipped: %d, weather matched: %d, forecast rows: %d",
+                    duration, markets_collected, parse_failures,
+                    markets_skipped, weather_matched_count, forecasts_saved,
                 )
 
             except Exception as exc:

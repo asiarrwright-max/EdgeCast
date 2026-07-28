@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import AsyncGenerator
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -22,6 +22,16 @@ AsyncSessionLocal: async_sessionmaker | None = None
 
 class Base(DeclarativeBase):
     pass
+
+
+def get_engine():
+    """
+    Return the module-level engine singleton at call time.
+    Must be used instead of 'from app.database import engine' in other modules,
+    because a direct import captures None (the value at import time) and never
+    sees the AsyncEngine assigned later by init_db().
+    """
+    return engine
 
 
 async def _apply_migrations(conn) -> None:
@@ -48,6 +58,45 @@ async def _apply_migrations(conn) -> None:
             logger.warning("Migration skipped (%s): %s", stmt[:60], exc)
 
 
+async def repair_stale_parse_failures() -> int:
+    """
+    Re-run city extraction on stored parsing_failure markets using their
+    event_ticker field (always stored, even when series_ticker was empty).
+    Returns the number of markets repaired. Safe to call on every startup.
+    """
+    if AsyncSessionLocal is None:
+        return 0
+    from app.models import KalshiMarket  # local import – models depend on Base
+    from app.services.kalshi import extract_city  # local import – avoids circular
+
+    repaired = 0
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(KalshiMarket).where(KalshiMarket.parsing_status == "parsing_failure")
+        )
+        markets = result.scalars().all()
+        for m in markets:
+            raw = {
+                "ticker": m.ticker,
+                "series_ticker": "",
+                "event_ticker": m.event_ticker or "",
+                "title": m.title or "",
+                "subtitle": m.subtitle or "",
+            }
+            city, _lat, _lon = extract_city(raw)
+            if city:
+                m.city = city
+                m.parsing_status = "collected"
+                m.parsing_reason = None
+                repaired += 1
+        if repaired:
+            await session.commit()
+            logger.info(
+                "Startup repair: resolved city for %d previously-failed market(s).", repaired
+            )
+    return repaired
+
+
 async def init_db() -> None:
     global engine, AsyncSessionLocal
     settings = get_settings()
@@ -64,6 +113,9 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _apply_migrations(conn)
+    # Repair any markets that failed city extraction in a previous run
+    # because the Kalshi API omitted series_ticker from the response body.
+    await repair_stale_parse_failures()
     logger.info("Database ready.")
 
 

@@ -120,12 +120,12 @@ export default function DashboardPage() {
 
         <Card className="border-border/50 bg-card/50 backdrop-blur">
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-xs font-mono text-muted-foreground">COLLECTED</CardTitle>
+            <CardTitle className="text-xs font-mono text-muted-foreground">FOUND</CardTitle>
             <TrendingUp className="h-3 w-3 text-emerald-400" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-mono font-bold">{marketsCollected ?? 0}</div>
-            <p className="text-[10px] text-muted-foreground font-mono">THIS RUN</p>
+            <p className="text-[10px] text-muted-foreground font-mono">LAST RUN</p>
           </CardContent>
         </Card>
 

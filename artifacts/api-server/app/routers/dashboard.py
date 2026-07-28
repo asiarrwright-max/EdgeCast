@@ -1,7 +1,26 @@
+"""
+Dashboard endpoint.
+
+Metric definitions
+------------------
+totalActiveMarkets    Active markets in DB with parsing_status != 'parsing_failure'.
+                      Reflects what is currently stored and usable.
+marketsWithWeather    Subset of totalActiveMarkets with weather_matched=True.
+totalStoredMarkets    All markets in DB regardless of parsing status.
+marketsParseFailures  Markets in DB with parsing_status='parsing_failure'.
+                      These are weather markets where city extraction failed.
+lastCollectionTime    Completed-at timestamp of the most recent job run.
+lastCollectionStatus  Status ('success' | 'failed') of the most recent job.
+lastCollectionDuration  Wall-clock seconds of the most recent job run.
+lastCollectionMarketsFound   Weather markets found in last run (= collected + parse failures).
+lastCollectionMarketsSkipped Non-weather markets scanned and discarded in last run.
+collectionSummary     Human-readable message when zero markets were collected.
+lastJob               Full JobRun record for the most recent run.
+"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
@@ -68,6 +87,7 @@ async def get_dashboard(
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(get_current_user),
 ):
+    # All active markets ordered by close time
     markets_q = await db.execute(
         select(KalshiMarket)
         .where(KalshiMarket.status == "active")
@@ -75,22 +95,39 @@ async def get_dashboard(
     )
     markets = markets_q.scalars().all()
 
+    # Most recent job run
     job_q = await db.execute(
         select(JobRun).order_by(JobRun.started_at.desc()).limit(1)
     )
     last_job = job_q.scalar_one_or_none()
 
+    # Recent errors
     errors_q = await db.execute(
         select(AppError).order_by(AppError.occurred_at.desc()).limit(5)
     )
     recent_errors = errors_q.scalars().all()
 
+    # Total market rows stored (all statuses, active only)
+    total_stored_q = await db.execute(
+        select(func.count())
+        .select_from(KalshiMarket)
+        .where(KalshiMarket.status == "active")
+    )
+    total_stored = total_stored_q.scalar() or 0
+
+    # Derived counts
+    # totalActiveMarkets  = active markets that were successfully city-matched
+    # marketsWithWeather  = active matched markets that have a forecast
+    # marketsParseFailures = active markets where city extraction failed
     active_markets = [m for m in markets if m.parsing_status != "parsing_failure"]
     markets_with_weather = sum(1 for m in active_markets if m.weather_matched)
-    markets_collected = sum(1 for m in markets if m.parsing_status == "collected")
     markets_parse_failures = sum(1 for m in markets if m.parsing_status == "parsing_failure")
 
-    # Build a human-readable summary when zero markets collected
+    # marketsCollected = markets found in the last run (weather markets seen, with or without city)
+    # Use last_job.markets_found which = collected + parse_failures for that run.
+    markets_collected = last_job.markets_found if last_job else 0
+
+    # Human-readable summary when zero markets were collected in last run
     collection_summary: str | None = None
     if last_job and last_job.status == "success" and (last_job.markets_found or 0) == 0:
         collection_summary = (
