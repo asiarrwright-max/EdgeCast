@@ -1,0 +1,268 @@
+EdgeCast Phase 2B — Temperature Contract Parser Expansion
+
+Phase 2A is partially working.
+
+The Market Detail page now loads correctly, but many temperature markets are still marked unsupported because EdgeCast cannot determine the temperature variable, comparison operator, or range logic.
+
+Do not redesign the application.
+
+Priority order:
+
+1. Correct market interpretation
+2. Correct probability math
+3. Data integrity
+4. Automated testing
+5. Minimal UI wiring
+
+Do not add trading, recommendations, alerts, bankroll tools, machine learning, or new weather categories.
+
+## Objective
+
+Expand EdgeCast so it can correctly interpret and analyze the active Kalshi temperature-market formats currently being collected.
+
+Focus only on temperature markets.
+
+## 1. Inspect Real Unsupported Markets
+
+Use the actual unsupported market records already stored in the database.
+
+Create a diagnostic summary grouped by:
+
+- series ticker
+- event ticker pattern
+- title pattern
+- subtitle pattern
+- rules text pattern
+- unsupported reason
+
+Do not guess based only on ticker names.
+
+Use the market title, subtitle, rules, settlement text, event metadata, and ticker together.
+
+## 2. Support Hourly Temperature Markets
+
+Markets such as:
+
+KXTEMPCHIH-26JUL2800-T70.99
+
+may represent temperature at a specific time rather than a daily high or low.
+
+Determine the true settlement definition from Kalshi metadata and rules.
+
+Store:
+
+- weather variable: hourly_temperature
+- target local date
+- target local time
+- target timezone
+- threshold
+- comparison operator
+- settlement station or observation source
+- inclusive or exclusive boundary
+
+Example:
+
+“Will the temperature in Chicago be above 70.99°F on Jul 28, 2026 at 12am EDT?”
+
+should become a structured hourly-temperature contract only if the rules confirm that interpretation.
+
+Do not force these markets into daily high or daily low.
+
+## 3. Support Daily High and Daily Low Markets
+
+Correctly parse:
+
+- maximum temperature
+- minimum temperature
+- high temperature
+- low temperature
+
+Supported operators:
+
+- above
+- below
+- greater than
+- greater than or equal
+- less than
+- less than or equal
+
+Use rules as authoritative when wording conflicts.
+
+## 4. Support Range and Bucket Markets
+
+Add probability support for ranges such as:
+
+- 99°F to 100°F
+- 87°F to 88°F
+- below 70°F
+- above 95°F
+- exact one-degree buckets
+
+Store:
+
+- lower bound
+- upper bound
+- lower-bound inclusivity
+- upper-bound inclusivity
+- rounding convention
+- observed-temperature precision
+
+Use the normal-distribution model already implemented.
+
+Calculate range probability using the difference between cumulative probabilities at the upper and lower bounds.
+
+Account for Kalshi settlement rounding rules.
+
+Do not calculate a range probability until the interval boundaries are unambiguous.
+
+## 5. Forecast Matching by Variable
+
+Use the correct forecast field:
+
+- hourly temperature for hourly contracts
+- daily maximum temperature for high contracts
+- daily minimum temperature for low contracts
+
+For hourly contracts:
+
+- match the exact local target hour
+- convert timezones correctly
+- verify daylight-saving time
+- reject the analysis if the exact hour is unavailable
+
+For daily contracts:
+
+- match the correct local settlement date
+
+Do not substitute a daily high forecast for an hourly-temperature contract.
+
+## 6. Settlement-Date Validation
+
+The screenshots show possible confusion between:
+
+- market title date
+- event details date
+- collection date
+- close time
+- target observation date
+
+Create one canonical target settlement datetime.
+
+Validate it against:
+
+- title
+- event ticker
+- rules text
+- close time
+- market metadata
+
+If conflicting values remain unresolved, mark the market unsupported and show the conflict.
+
+## 7. Market Price Validation
+
+The UI currently shows examples such as:
+
+- YES ask: 100%
+- NO ask: 4%
+- market implied: 98%
+
+These values may be valid bid/ask data, but they should not be presented as if they must sum to 100%.
+
+Clearly label:
+
+- YES bid
+- YES ask
+- NO bid
+- NO ask
+- last trade, if available
+- comparison price used
+
+For EdgeCast comparison, use the configured price source and state it explicitly.
+
+Do not average or normalize prices unless documented.
+
+## 8. Analysis Output
+
+For every newly supported market, display:
+
+- analysis status
+- contract type
+- target date/time
+- timezone
+- weather variable
+- threshold or range
+- forecast value
+- forecast source
+- assumed standard deviation
+- EdgeCast probability
+- market implied probability
+- difference
+- confidence
+- explanation
+- warnings
+
+Example explanation:
+
+“This market settles on Chicago’s observed temperature at 12:00 AM local time. Open-Meteo forecasts 72.4°F for that hour. The YES condition is above 70.99°F. Using a 2.0°F forecast-error standard deviation, EdgeCast estimates a 76% probability of YES.”
+
+## 9. Unsupported Markets
+
+Unsupported markets must show a specific reason, such as:
+
+- hourly settlement time not available
+- station not confirmed
+- ambiguous threshold boundary
+- rules conflict with title
+- forecast target hour unavailable
+- unsupported precision or rounding convention
+
+Do not use the generic message “could not determine variable or operator” when a more specific reason is available.
+
+## 10. Testing
+
+Add tests using real representative market patterns for:
+
+- hourly temperature above threshold
+- hourly temperature below threshold
+- daily high threshold
+- daily low threshold
+- one-degree range
+- two-degree range
+- inclusive boundaries
+- exclusive boundaries
+- target timezone conversion
+- daylight-saving handling
+- title/rules conflict
+- missing exact hourly forecast
+- probability for a range
+- price fields that do not sum to 100%
+
+Run all existing tests and new tests.
+
+Fix all failures before completion.
+
+## Completion Requirements
+
+Phase 2B is complete only when:
+
+- Hourly temperature markets are correctly identified and analyzed when rules support them.
+- Daily high and low markets are correctly identified.
+- Range and bucket markets receive correct probabilities.
+- Forecast variable and target time/date are matched correctly.
+- Market prices are clearly labeled and not incorrectly normalized.
+- Unsupported markets show precise reasons.
+- Existing Phase 1 and Phase 2A functionality still works.
+- All automated tests pass.
+
+At completion, provide:
+
+1. Temperature market formats discovered.
+2. Formats now supported.
+3. Formats still unsupported and why.
+4. Number of active markets analyzed before and after the change.
+5. Exact range-probability formula implemented.
+6. How hourly forecasts and timezones are matched.
+7. How market implied probability is selected.
+8. Final automated test results.
+
+Stop after completing and validating Phase 2B.
