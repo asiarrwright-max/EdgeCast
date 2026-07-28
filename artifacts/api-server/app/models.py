@@ -126,3 +126,43 @@ class AppSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class PredictionSnapshot(Base):
+    """
+    Immutable record of EdgeCast's probability estimate for a market at a
+    specific point in time.  A new snapshot is written on every collection
+    run; old snapshots are never overwritten or deleted.  This allows future
+    accuracy tracking and time-series analysis.
+    """
+
+    __tablename__ = "prediction_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    market_ticker: Mapped[str] = mapped_column(String(300), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    # Forecast fields
+    forecast_date: Mapped[str | None] = mapped_column(String(20))
+    forecast_value: Mapped[float | None] = mapped_column(Float)
+    forecast_retrieved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lead_time_days: Mapped[int | None] = mapped_column(Integer)
+
+    # Settlement contract fields (extracted from market title/subtitle)
+    settlement_variable: Mapped[str | None] = mapped_column(String(20))   # 'high' | 'low'
+    settlement_operator: Mapped[str | None] = mapped_column(String(10))   # 'gte' | 'lte'
+    settlement_threshold: Mapped[float | None] = mapped_column(Float)
+
+    # Probability outputs
+    ec_probability: Mapped[float | None] = mapped_column(Float)
+    market_probability: Mapped[float | None] = mapped_column(Float)
+    confidence: Mapped[str | None] = mapped_column(String(20))
+    explanation: Mapped[str | None] = mapped_column(Text)
+
+    # Analysis meta
+    analysis_status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="unsupported"
+    )
+    analysis_reason: Mapped[str | None] = mapped_column(Text)

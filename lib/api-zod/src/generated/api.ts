@@ -82,7 +82,19 @@ export const GetDashboardResponse = zod.object({
   "parsingReason": zod.string().nullish(),
   "weatherMarketType": zod.string().nullish(),
   "collectionTimestamp": zod.string().nullish(),
-  "lastUpdated": zod.string().nullish()
+  "lastUpdated": zod.string().nullish(),
+  "ecProbability": zod.number().nullish(),
+  "marketProbability": zod.number().nullish(),
+  "probabilityDiff": zod.number().nullish(),
+  "confidence": zod.string().nullish(),
+  "analysisStatus": zod.string().nullish(),
+  "analysisReason": zod.string().nullish(),
+  "explanation": zod.string().nullish(),
+  "settlementVariable": zod.string().nullish(),
+  "settlementOperator": zod.string().nullish(),
+  "settlementThreshold": zod.number().nullish(),
+  "leadTimeDays": zod.number().nullish(),
+  "forecastValue": zod.number().nullish()
 })),
   "recentErrors": zod.array(zod.object({
   "id": zod.number(),
@@ -132,7 +144,19 @@ export const GetMarketsResponse = zod.object({
   "parsingReason": zod.string().nullish(),
   "weatherMarketType": zod.string().nullish(),
   "collectionTimestamp": zod.string().nullish(),
-  "lastUpdated": zod.string().nullish()
+  "lastUpdated": zod.string().nullish(),
+  "ecProbability": zod.number().nullish(),
+  "marketProbability": zod.number().nullish(),
+  "probabilityDiff": zod.number().nullish(),
+  "confidence": zod.string().nullish(),
+  "analysisStatus": zod.string().nullish(),
+  "analysisReason": zod.string().nullish(),
+  "explanation": zod.string().nullish(),
+  "settlementVariable": zod.string().nullish(),
+  "settlementOperator": zod.string().nullish(),
+  "settlementThreshold": zod.number().nullish(),
+  "leadTimeDays": zod.number().nullish(),
+  "forecastValue": zod.number().nullish()
 })),
   "summary": zod.string().nullish()
 })
@@ -166,7 +190,19 @@ export const GetMarketResponse = zod.object({
   "parsingReason": zod.string().nullish(),
   "weatherMarketType": zod.string().nullish(),
   "collectionTimestamp": zod.string().nullish(),
-  "lastUpdated": zod.string().nullish()
+  "lastUpdated": zod.string().nullish(),
+  "ecProbability": zod.number().nullish(),
+  "marketProbability": zod.number().nullish(),
+  "probabilityDiff": zod.number().nullish(),
+  "confidence": zod.string().nullish(),
+  "analysisStatus": zod.string().nullish(),
+  "analysisReason": zod.string().nullish(),
+  "explanation": zod.string().nullish(),
+  "settlementVariable": zod.string().nullish(),
+  "settlementOperator": zod.string().nullish(),
+  "settlementThreshold": zod.number().nullish(),
+  "leadTimeDays": zod.number().nullish(),
+  "forecastValue": zod.number().nullish()
 })
 
 

@@ -291,7 +291,21 @@ async def run_collection_job(job_id: int | None = None) -> None:
                 await session.commit()
                 weather_matched_count = sum(1 for m in all_markets if m.weather_matched)
 
-                # ---- Step 5: Finalise job ----------------------------------
+                # ---- Step 5b: Run probability analysis for all markets -----
+                # Imports are local to avoid circular deps at module level.
+                try:
+                    from app.services.analyzer import analyze_all_markets
+                    analysis_summary = await analyze_all_markets(session)
+                    logger.info(
+                        "Analysis: %d supported, %d unsupported, %d no-forecast",
+                        analysis_summary["supported"],
+                        analysis_summary["unsupported"],
+                        analysis_summary["no_forecast"],
+                    )
+                except Exception as exc:
+                    logger.warning("Analysis step failed (non-fatal): %s", exc)
+
+                # ---- Step 5c: Finalise job ---------------------------------
                 duration = round(time.monotonic() - started_mono, 2)
                 job_q = await session.execute(select(JobRun).where(JobRun.id == job.id))
                 job_record = job_q.scalar_one_or_none()

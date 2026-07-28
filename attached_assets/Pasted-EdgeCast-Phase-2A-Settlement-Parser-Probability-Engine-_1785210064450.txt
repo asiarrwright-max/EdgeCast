@@ -1,0 +1,245 @@
+EdgeCast Phase 2A — Settlement Parser & Probability Engine
+
+Phase 1 is complete and stable.
+
+Do not redesign the application or add unrelated features.
+
+Priority order:
+
+1. Correct settlement interpretation
+2. Probability calculation correctness
+3. Data integrity
+4. Automated testing
+5. User interface
+
+The goal of this phase is simple:
+
+For every supported temperature market, EdgeCast should estimate the probability that the market resolves YES and explain how that probability was calculated.
+
+This is still a paper-testing system only.
+
+---
+
+## 1. Preserve Existing Functionality
+
+Do not break any working functionality.
+
+The following must continue working:
+
+- Live Kalshi market collection
+- Open-Meteo forecast collection
+- Dashboard
+- Markets page
+- Jobs
+- System Health
+- Authentication
+- Scheduled collection
+- Existing tests
+
+Run the current test suite before and after implementation.
+
+---
+
+## 2. Settlement Parser
+
+Create a structured settlement contract for every supported market.
+
+Extract:
+
+- City
+- Settlement date
+- Weather variable (daily high or daily low)
+- Comparison operator
+- Temperature threshold
+- Temperature unit
+- Settlement status
+- Parse confidence
+
+Supported market types:
+
+- High temperature ≥ X
+- High temperature ≤ X
+- Low temperature ≥ X
+- Low temperature ≤ X
+
+If a market cannot be interpreted reliably:
+
+Do NOT calculate a probability.
+
+Instead display:
+
+Unsupported
+
+and explain exactly why.
+
+---
+
+## 3. Forecast Normalization
+
+Normalize Open-Meteo forecasts into a consistent internal structure.
+
+Store:
+
+- Forecast value
+- Forecast issue time
+- Retrieval time
+- Forecast target date
+- Forecast lead time
+- Forecast units
+
+---
+
+## 4. Probability Engine v1
+
+Implement a deterministic probability model.
+
+Use the normalized forecast together with a documented forecast uncertainty assumption based on forecast lead time.
+
+The probability engine should correctly calculate:
+
+- Probability temperature is greater than a threshold
+- Probability temperature is less than a threshold
+
+Do not use random numbers.
+
+Do not use AI.
+
+Do not use hard-coded probabilities.
+
+Document the calculation in code.
+
+---
+
+## 5. Confidence Score
+
+Create a confidence rating.
+
+Possible values:
+
+- Very High
+- High
+- Medium
+- Low
+- Very Low
+
+Confidence should depend on:
+
+- Forecast freshness
+- Settlement parsing confidence
+- Forecast lead time
+- Data completeness
+
+---
+
+## 6. Explanation
+
+Every calculated probability should include a plain-language explanation.
+
+Example:
+
+"Open-Meteo forecasts a high of 93.8°F. This market resolves YES at 94°F or above. Based on forecast uncertainty and the current lead time, EdgeCast estimates a 48% probability of YES."
+
+If a market cannot be analyzed, explain why.
+
+---
+
+## 7. Market Prices
+
+Investigate the missing YES and NO prices currently shown in the UI.
+
+If the Kalshi API provides:
+
+- YES bid
+- YES ask
+- NO bid
+- NO ask
+
+store and display them correctly.
+
+Calculate:
+
+Market implied probability
+
+using the appropriate market price.
+
+If pricing is unavailable, explain why instead of displaying incorrect values.
+
+---
+
+## 8. Markets Page
+
+Add the following columns:
+
+- EdgeCast Probability
+- Market Probability
+- Difference
+- Confidence
+- Analysis Status
+
+Allow sorting by:
+
+- Probability difference
+- Confidence
+- Settlement date
+
+Do not redesign the page.
+
+---
+
+## 9. Prediction History
+
+Store every prediction as a new snapshot.
+
+Never overwrite previous predictions.
+
+Each snapshot should include:
+
+- Timestamp
+- Forecast
+- EdgeCast probability
+- Market probability
+- Confidence
+
+This will allow future accuracy testing.
+
+---
+
+## 10. Testing
+
+Add automated tests for:
+
+- Settlement parsing
+- Probability calculations
+- Confidence calculation
+- Market price parsing
+- Snapshot creation
+
+Run all existing tests.
+
+Fix all failures before completion.
+
+---
+
+## Completion Requirements
+
+Phase 2A is complete only when:
+
+- Every supported temperature market receives a probability.
+- Every probability includes a confidence score.
+- Every probability includes an explanation.
+- Market implied probability is displayed when available.
+- Prediction snapshots are stored.
+- Unsupported markets clearly explain why.
+- Existing functionality still works.
+- All automated tests pass.
+
+At completion provide:
+
+1. Probability model implemented.
+2. Forecast uncertainty assumptions.
+3. Market price fields retrieved.
+4. Number of supported markets analyzed.
+5. Number of unsupported markets.
+6. Final test results.
+
+Stop after completing Phase 2A. Do not begin additional phases.

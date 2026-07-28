@@ -85,6 +85,30 @@ export interface Market {
   collectionTimestamp?: string | null;
   /** @nullable */
   lastUpdated?: string | null;
+  /** @nullable */
+  ecProbability?: number | null;
+  /** @nullable */
+  marketProbability?: number | null;
+  /** @nullable */
+  probabilityDiff?: number | null;
+  /** @nullable */
+  confidence?: string | null;
+  /** @nullable */
+  analysisStatus?: string | null;
+  /** @nullable */
+  analysisReason?: string | null;
+  /** @nullable */
+  explanation?: string | null;
+  /** @nullable */
+  settlementVariable?: string | null;
+  /** @nullable */
+  settlementOperator?: string | null;
+  /** @nullable */
+  settlementThreshold?: number | null;
+  /** @nullable */
+  leadTimeDays?: number | null;
+  /** @nullable */
+  forecastValue?: number | null;
 }
 
 export interface MarketListResponse {

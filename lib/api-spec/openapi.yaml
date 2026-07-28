@@ -308,6 +308,31 @@ components:
           type: ["string", "null"]
         lastUpdated:
           type: ["string", "null"]
+        # Phase 2A analysis fields (populated after a collection run)
+        ecProbability:
+          type: ["number", "null"]
+        marketProbability:
+          type: ["number", "null"]
+        probabilityDiff:
+          type: ["number", "null"]
+        confidence:
+          type: ["string", "null"]
+        analysisStatus:
+          type: ["string", "null"]
+        analysisReason:
+          type: ["string", "null"]
+        explanation:
+          type: ["string", "null"]
+        settlementVariable:
+          type: ["string", "null"]
+        settlementOperator:
+          type: ["string", "null"]
+        settlementThreshold:
+          type: ["number", "null"]
+        leadTimeDays:
+          type: ["number", "null"]
+        forecastValue:
+          type: ["number", "null"]
 
     MarketListResponse:
       type: object

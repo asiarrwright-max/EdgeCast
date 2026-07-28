@@ -316,10 +316,12 @@ def parse_market(raw: dict) -> dict:
             raw.get("close_time") or raw.get("expected_expiration_time")
         ),
         "status": raw.get("status", "active"),
-        "yes_bid": _normalise_price(raw.get("yes_bid")),
-        "yes_ask": _normalise_price(raw.get("yes_ask")),
-        "no_bid": _normalise_price(raw.get("no_bid")),
-        "no_ask": _normalise_price(raw.get("no_ask")),
+        # Kalshi's REST API returns prices with the '_dollars' suffix.
+        # Fall back to the bare key names for forward-compatibility.
+        "yes_bid": _normalise_price(raw.get("yes_bid_dollars") or raw.get("yes_bid")),
+        "yes_ask": _normalise_price(raw.get("yes_ask_dollars") or raw.get("yes_ask")),
+        "no_bid": _normalise_price(raw.get("no_bid_dollars") or raw.get("no_bid")),
+        "no_ask": _normalise_price(raw.get("no_ask_dollars") or raw.get("no_ask")),
         "volume": raw.get("volume"),
         "raw_data": raw,
     }
