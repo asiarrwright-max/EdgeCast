@@ -16,12 +16,26 @@ class ForecastVerification(Base):
     """
     One row per (city, weather_variable, target_date[, target_hour]).
     Stores the snapshot forecast value alongside the actual observed
-    temperature retrieved from the Open-Meteo historical archive.
+    temperature.
 
-    NOTE: Open-Meteo /archive returns ERA5 reanalysis data, NOT the original
-    model forecast for a historical date.  forecast_error therefore measures
-    (ERA5-reanalysis − NWP-forecast), which is a proxy for but not identical
-    to station-observation error.
+    Observation sources (see source_label):
+      'ghcnd_observation'            Official NOAA GHCND station reading for a
+                                     *verified* Kalshi settlement station.  This
+                                     is the same data source Kalshi uses.
+      'ghcnd_observation_unverified' GHCND reading for a *probable* settlement
+                                     station that has not been confirmed from
+                                     the Kalshi contract PDF.  Usable for
+                                     approximate calibration; treat with caution.
+      'era5_reanalysis'              Open-Meteo ERA5 reanalysis grid point.
+                                     NOT a station reading; differs from the
+                                     official NWS value by 1–4°F on individual
+                                     days.  Used when no NOAA token is set or
+                                     GHCND fetch fails.
+      'open_meteo_historical'        Legacy label (rows written before GHCND
+                                     integration); equivalent to 'era5_reanalysis'.
+
+    ghcnd_station_id is populated for all GHCND-sourced rows (both verified
+    and unverified) and is NULL for ERA5/legacy rows.
     """
 
     __tablename__ = "forecast_verifications"
@@ -53,7 +67,13 @@ class ForecastVerification(Base):
     # The verified observation (populated asynchronously by fetch_and_store_verifications)
     actual_value: Mapped[float | None] = mapped_column(Float)     # °F; NULL until fetched
     forecast_error: Mapped[float | None] = mapped_column(Float)   # actual − forecast; NULL until fetched
-    source_label: Mapped[str | None] = mapped_column(String(50))  # 'open_meteo_historical' | 'kalshi_implied'
+    source_label: Mapped[str | None] = mapped_column(String(60))
+    # 'ghcnd_observation' | 'ghcnd_observation_unverified' | 'era5_reanalysis'
+    # | 'open_meteo_historical' (legacy) | 'kalshi_implied'
+
+    # NOAA GHCND station ID used to fetch the observation, e.g. "USW00094728".
+    # NULL for ERA5/legacy rows that did not use GHCND.
+    ghcnd_station_id: Mapped[str | None] = mapped_column(String(30))
 
     # Time metadata
     month: Mapped[int | None] = mapped_column(Integer)            # 1–12

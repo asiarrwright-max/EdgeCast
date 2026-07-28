@@ -1,39 +1,61 @@
 """
-Forecast Verifier — Phase v2.
+Forecast Verifier — Phase v2 (GHCND edition).
 
-Fetches actual observed temperatures from the Open-Meteo historical API for
-cities where paper trades have settled, then computes per-city forecast error
-statistics for use by the v2 probability engine.
+For every settled paper trade, fetches the actual observed temperature and
+stores it alongside the original forecast.  The error is then aggregated into
+ForecastErrorStats for use by the v2 probability engine.
 
-Data limitations
-----------------
-- Open-Meteo /archive endpoint returns verified ERA5/ERA5-Land reanalysis data,
-  NOT the original NWP model forecast for a past date.  This means we are
-  measuring (reanalysis − NWP-forecast) error, not (observation − NWP-forecast).
-  The reanalysis is close to observations but is not identical.
+Observation source priority
+----------------------------
+1. **NOAA GHCND via CDO API** (preferred)
+   The same official NWS Daily Climate Report values that Kalshi uses for
+   settlement.  Requires NOAA_CDO_TOKEN env var (free registration).
+   Used when:
+     - The city has an entry in settlement_stations.SETTLEMENT_STATIONS, AND
+     - A NOAA_CDO_TOKEN is configured.
+   ``source_label`` is set to:
+     - ``'ghcnd_observation'``            — station is verified (confirmed from contract PDF)
+     - ``'ghcnd_observation_unverified'`` — station is probable but not yet verified
 
-- City is the finest resolution available.  No per-station obs data is used.
+2. **Open-Meteo ERA5 reanalysis** (fallback)
+   Used when NOAA token is absent, CDO fetch fails, or the city has no
+   station entry.  ERA5 is a retrospective reanalysis, NOT a station reading;
+   it can differ from the NWS Daily Climate Report by 1–4°F on individual days.
+   ``source_label`` is set to ``'era5_reanalysis'``.
 
-- Both functions are idempotent and safe to re-run.
+Existing rows
+-------------
+ForecastVerification rows written before this version have
+``source_label='open_meteo_historical'``.  They are retained as-is.  The
+verifier skips rows that already have ``actual_value`` populated (idempotent).
+
+Both functions are idempotent and safe to re-run.
 """
 from __future__ import annotations
 
 import logging
-import math
 import statistics
 from datetime import datetime, timezone
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models import ForecastVerification, ForecastErrorStats, PaperTrade, WeatherLocation
+from app.services.settlement_stations import get_station
+from app.services.ghcnd_client import fetch_ghcnd_daily
 
 logger = logging.getLogger(__name__)
 
-_MIN_SAMPLE_FOR_GLOBAL = 3   # at least 3 cities before writing a global row
-_HISTORICAL_API = "https://archive-api.open-meteo.com/v1/archive"
+_MIN_SAMPLE_FOR_GLOBAL = 3   # minimum distinct cities before writing a global row
+_ERA5_API = "https://archive-api.open-meteo.com/v1/archive"
+
+# source_label values written by this module
+SRC_GHCND_VERIFIED   = "ghcnd_observation"             # confirmed settlement station
+SRC_GHCND_UNVERIFIED = "ghcnd_observation_unverified"  # probable station, not confirmed
+SRC_ERA5             = "era5_reanalysis"               # Open-Meteo ERA5 fallback
+SRC_LEGACY           = "open_meteo_historical"         # rows from before this version
 
 
 def _season(month: int) -> str:
@@ -58,19 +80,21 @@ def _lead_bucket(days: int | None) -> str:
     return ">7d"
 
 
-async def _fetch_historical_temps(
+async def _fetch_era5_temps(
     lat: float,
     lon: float,
-    date_str: str,  # YYYY-MM-DD
+    date_str: str,
 ) -> dict[str, float | None]:
     """
-    Fetch daily high and low for a single date from the Open-Meteo archive.
+    Fallback: fetch daily high/low from the Open-Meteo ERA5 archive.
+
     Returns {"high": float|None, "low": float|None}.
+    This is ERA5 reanalysis data, NOT an official station reading.
     """
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(
-                _HISTORICAL_API,
+                _ERA5_API,
                 params={
                     "latitude": lat,
                     "longitude": lon,
@@ -90,8 +114,78 @@ async def _fetch_historical_temps(
         low = float(lows[0]) if lows and lows[0] is not None else None
         return {"high": high, "low": low}
     except Exception as exc:
-        logger.warning("Open-Meteo archive fetch failed for %s (%s, %s): %s", date_str, lat, lon, exc)
+        logger.warning(
+            "ERA5 archive fetch failed for %s (%s, %s): %s", date_str, lat, lon, exc
+        )
         return {"high": None, "low": None}
+
+
+async def _fetch_observation(
+    city: str,
+    lat: float,
+    lon: float,
+    date_str: str,
+    noaa_token: str,
+) -> tuple[dict[str, float | None], str, str | None]:
+    """
+    Fetch a temperature observation for *city* on *date_str*.
+
+    Resolution order:
+      1. GHCND CDO API (if station entry exists and NOAA token is configured)
+      2. ERA5 reanalysis fallback
+
+    Returns
+    -------
+    (temps, source_label, ghcnd_station_id)
+      - temps            ``{"high": float|None, "low": float|None}``
+      - source_label     one of the SRC_* constants
+      - ghcnd_station_id GHCND station ID used, or None if ERA5 was used
+    """
+    station = get_station(city)
+
+    if station is not None and noaa_token:
+        temps = await fetch_ghcnd_daily(station.ghcnd_station_id, date_str, noaa_token)
+        if temps["high"] is not None or temps["low"] is not None:
+            src = SRC_GHCND_VERIFIED if station.verified else SRC_GHCND_UNVERIFIED
+            if not station.verified:
+                logger.debug(
+                    "GHCND data fetched for unverified station %s (%s): %s. "
+                    "Assumption: %s",
+                    station.ghcnd_station_id,
+                    city,
+                    date_str,
+                    station.notes or "see settlement_stations.py for details",
+                )
+            return temps, src, station.ghcnd_station_id
+
+        # GHCND returned nothing (data not yet published, station gap, etc.)
+        # Fall through to ERA5.
+        logger.info(
+            "GHCND CDO returned no data for %s station %s on %s — "
+            "falling back to ERA5 reanalysis.",
+            city,
+            station.ghcnd_station_id,
+            date_str,
+        )
+
+    elif station is not None and not noaa_token:
+        logger.debug(
+            "NOAA_CDO_TOKEN not set — using ERA5 fallback for %s on %s. "
+            "Set NOAA_CDO_TOKEN to use official GHCND station %s.",
+            city,
+            date_str,
+            station.ghcnd_station_id,
+        )
+    else:
+        logger.debug(
+            "No settlement station entry for city '%s' — using ERA5 fallback for %s.",
+            city,
+            date_str,
+        )
+
+    # ERA5 fallback uses city-centre coordinates from WeatherLocation table
+    temps = await _fetch_era5_temps(lat, lon, date_str)
+    return temps, SRC_ERA5, None
 
 
 async def fetch_and_store_verifications(session: AsyncSession) -> dict[str, int]:
@@ -104,6 +198,16 @@ async def fetch_and_store_verifications(session: AsyncSession) -> dict[str, int]
     Returns: {"created": int, "updated": int, "skipped": int, "errors": int}
     """
     stats = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
+    settings = get_settings()
+    noaa_token = settings.noaa_cdo_token.strip()
+
+    if not noaa_token:
+        logger.warning(
+            "NOAA_CDO_TOKEN is not set.  Verification will use ERA5 reanalysis "
+            "for all cities.  ERA5 values differ from official NWS station readings "
+            "by 1–4°F on individual days.  Register for a free token at "
+            "https://www.ncdc.noaa.gov/cdo-web/token and set NOAA_CDO_TOKEN."
+        )
 
     # All settled trades (v1 and v2)
     q = await session.execute(
@@ -120,7 +224,7 @@ async def fetch_and_store_verifications(session: AsyncSession) -> dict[str, int]
         logger.info("Forecast verifier: no settled trades to process.")
         return stats
 
-    # Build city → (lat, lon) mapping
+    # Build city → (lat, lon) from WeatherLocation (city-centre coords, ERA5 fallback)
     locs_q = await session.execute(select(WeatherLocation))
     loc_map: dict[str, tuple[float, float]] = {
         loc.city: (loc.latitude, loc.longitude)
@@ -128,19 +232,18 @@ async def fetch_and_store_verifications(session: AsyncSession) -> dict[str, int]
     }
 
     # Collect unique (city, weather_variable, target_date) tuples
-    # Map to the snapshot_id + forecast_value from one representative trade
+    from app.models import PredictionSnapshot
     seen: dict[tuple[str, str, str], dict] = {}
     for trade in settled_trades:
         key = (trade.city, trade.weather_variable, trade.target_settlement_date)
         if key not in seen:
             seen[key] = {
                 "snapshot_id": trade.snapshot_id,
-                "forecast_value": None,  # will be sourced from snapshot
+                "forecast_value": None,
                 "lead_time_days": trade.lead_time_days,
             }
 
-    # Load snapshot forecast values for these keys
-    from app.models import PredictionSnapshot
+    # Load snapshot forecast values
     snap_ids = [v["snapshot_id"] for v in seen.values() if v["snapshot_id"] is not None]
     if snap_ids:
         snaps_q = await session.execute(
@@ -151,11 +254,7 @@ async def fetch_and_store_verifications(session: AsyncSession) -> dict[str, int]
             sid = meta["snapshot_id"]
             if sid and sid in snap_map:
                 snap = snap_map[sid]
-                city, var, _date = key
-                if var == "high":
-                    meta["forecast_value"] = snap.forecast_value
-                else:
-                    meta["forecast_value"] = snap.forecast_value
+                meta["forecast_value"] = snap.forecast_value
 
     # Check existing verification rows
     existing_q = await session.execute(
@@ -174,6 +273,7 @@ async def fetch_and_store_verifications(session: AsyncSession) -> dict[str, int]
     for (city, var, date_str), meta in seen.items():
         loc = loc_map.get(city)
         if loc is None:
+            logger.warning("No WeatherLocation entry for city '%s' — skipping verification.", city)
             stats["skipped"] += 1
             continue
 
@@ -185,7 +285,9 @@ async def fetch_and_store_verifications(session: AsyncSession) -> dict[str, int]
             continue
 
         try:
-            temps = await _fetch_historical_temps(loc[0], loc[1], date_str)
+            temps, source_label, ghcnd_station_id = await _fetch_observation(
+                city, loc[0], loc[1], date_str, noaa_token
+            )
             actual = temps.get(var)  # "high" or "low"
 
             # Parse date for month/season
@@ -214,7 +316,8 @@ async def fetch_and_store_verifications(session: AsyncSession) -> dict[str, int]
                         if row.forecast_value is not None
                         else None
                     )
-                    row.source_label = "open_meteo_historical"
+                    row.source_label = source_label
+                    row.ghcnd_station_id = ghcnd_station_id
                     stats["updated"] += 1
             else:
                 # Create new row
@@ -230,7 +333,8 @@ async def fetch_and_store_verifications(session: AsyncSession) -> dict[str, int]
                     lead_time_days=meta.get("lead_time_days"),
                     actual_value=actual,
                     forecast_error=ferr,
-                    source_label="open_meteo_historical" if actual is not None else None,
+                    source_label=source_label if actual is not None else None,
+                    ghcnd_station_id=ghcnd_station_id,
                     month=month,
                     season=season,
                 )
@@ -268,8 +372,11 @@ async def recompute_error_stats(session: AsyncSession) -> dict[str, int]:
       - (city, variable, lead_bucket, month=None)  — city-level all-season
       - (city="__global__", variable, lead_bucket, month=None) — global fallback
 
-    Upserts into ForecastErrorStats (delete + re-insert per group for simplicity).
+    All source_label values are included (ghcnd_observation, era5_reanalysis,
+    and the legacy 'open_meteo_historical').  Callers can inspect the
+    source_label distribution via the /audit endpoints.
 
+    Upserts via delete + re-insert per group.
     Returns: {"groups_computed": int}
     """
     stats = {"groups_computed": 0}
@@ -286,7 +393,6 @@ async def recompute_error_stats(session: AsyncSession) -> dict[str, int]:
         logger.info("recompute_error_stats: no verified rows yet.")
         return stats
 
-    # Group by (city, variable, lead_bucket)
     from collections import defaultdict
     groups: dict[tuple[str, str, str], list[float]] = defaultdict(list)
     global_groups: dict[tuple[str, str], list[float]] = defaultdict(list)
@@ -300,7 +406,7 @@ async def recompute_error_stats(session: AsyncSession) -> dict[str, int]:
 
     now = datetime.now(timezone.utc)
 
-    # Delete and re-insert all non-global stats
+    # Delete and re-insert all stats
     existing_q = await session.execute(select(ForecastErrorStats))
     for row in existing_q.scalars().all():
         await session.delete(row)
@@ -325,7 +431,7 @@ async def recompute_error_stats(session: AsyncSession) -> dict[str, int]:
         session.add(row)
         stats["groups_computed"] += 1
 
-    # Global fallback rows (across all cities, same variable + lead_bucket)
+    # Global fallback rows
     city_counts: dict[tuple[str, str], set[str]] = defaultdict(set)
     for (city, var, lb) in groups:
         city_counts[(var, lb)].add(city)

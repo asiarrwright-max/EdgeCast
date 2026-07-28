@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     kalshi_base_url: str = "https://api.elections.kalshi.com/trade-api/v2"
     openmeteo_base_url: str = "https://api.open-meteo.com/v1"
 
+    # NOAA Climate Data Online (CDO) API token.
+    # Free registration at https://www.ncdc.noaa.gov/cdo-web/token
+    # When absent the forecast verifier falls back to Open-Meteo ERA5 reanalysis
+    # for all cities (same behaviour as before this setting existed).
+    noaa_cdo_token: str = ""
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
     def get_async_db_url(self) -> tuple[str, dict]:

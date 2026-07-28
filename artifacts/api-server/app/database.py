@@ -78,6 +78,10 @@ async def _apply_migrations(conn) -> None:
         # Phase v2: JobRun v2 paper-trading counts
         "ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS pt_v2_created INTEGER",
         "ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS pt_v2_skipped INTEGER",
+        # GHCND integration: settlement station ID on verification rows
+        "ALTER TABLE forecast_verifications ADD COLUMN IF NOT EXISTS ghcnd_station_id VARCHAR(30)",
+        # Widen source_label to accommodate new label strings (≤ 60 chars)
+        "ALTER TABLE forecast_verifications ALTER COLUMN source_label TYPE VARCHAR(60)",
     ]
     for stmt in migrations:
         try:
