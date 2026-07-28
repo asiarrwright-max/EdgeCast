@@ -14,6 +14,10 @@ export type PaperTradeMarket = {
   /** @nullable */
   targetDate?: string | null;
   /** @nullable */
+  openTime?: string | null;
+  /** @nullable */
+  closeTime?: string | null;
+  /** @nullable */
   yesBid?: number | null;
   /** @nullable */
   yesAsk?: number | null;
@@ -22,5 +26,9 @@ export type PaperTradeMarket = {
   /** @nullable */
   noAsk?: number | null;
   /** @nullable */
+  volume?: number | null;
+  /** @nullable */
   weatherMarketType?: string | null;
+  /** @nullable */
+  collectionTimestamp?: string | null;
 } | null;

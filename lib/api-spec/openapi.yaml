@@ -236,6 +236,26 @@ paths:
           in: query
           schema:
             type: string
+        - name: strategy_version
+          in: query
+          schema:
+            type: string
+        - name: edge_bucket
+          in: query
+          schema:
+            type: string
+        - name: price_bucket
+          in: query
+          schema:
+            type: string
+        - name: is_flagged
+          in: query
+          schema:
+            type: boolean
+        - name: outcome
+          in: query
+          schema:
+            type: string
         - name: limit
           in: query
           schema:
@@ -264,6 +284,11 @@ paths:
       summary: Aggregated paper trading summary statistics
       security:
         - bearerAuth: []
+      parameters:
+        - name: strategy_version
+          in: query
+          schema:
+            type: string
       responses:
         "200":
           description: Metrics summary
@@ -271,6 +296,81 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PaperTradeSummary"
+
+  /paper-trades/analytics:
+    get:
+      operationId: getPaperTradeAnalytics
+      tags: [paper-trades]
+      summary: Performance breakdowns and cumulative P/L time series
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: strategy_version
+          in: query
+          schema:
+            type: string
+        - name: include_flagged
+          in: query
+          schema:
+            type: boolean
+            default: true
+        - name: fee_pct
+          in: query
+          schema:
+            type: number
+            default: 0
+        - name: slippage_pct
+          in: query
+          schema:
+            type: number
+            default: 0
+        - name: spread_adj
+          in: query
+          schema:
+            type: number
+            default: 0
+      responses:
+        "200":
+          description: Analytics data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaperTradeAnalytics"
+
+  /paper-trades/calibration:
+    get:
+      operationId: getPaperTradeCalibration
+      tags: [paper-trades]
+      summary: Probability calibration report and Brier score
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: strategy_version
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Calibration report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalibrationReport"
+
+  /paper-trades/settle-now:
+    post:
+      operationId: settleNow
+      tags: [paper-trades]
+      summary: Trigger immediate settlement check for all open trades
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Settlement run stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettlementRunResult"
 
   /paper-trades/settings:
     get:
@@ -649,6 +749,8 @@ components:
           type: number
         quantity:
           type: ["number", "null"]
+        leadTimeDays:
+          type: ["number", "null"]
         status:
           type: string
           enum: [OPEN, SETTLED, VOID, ERROR]
@@ -669,6 +771,16 @@ components:
           type: ["string", "null"]
         warnings:
           type: ["string", "null"]
+        qualityFlags:
+          type: array
+          items:
+            type: string
+        isFlagged:
+          type: boolean
+        qualityFlagDescriptions:
+          type: object
+          additionalProperties:
+            type: string
         market:
           oneOf:
             - type: "null"
@@ -677,11 +789,15 @@ components:
                 title: { type: ["string", "null"] }
                 subtitle: { type: ["string", "null"] }
                 targetDate: { type: ["string", "null"] }
+                openTime: { type: ["string", "null"] }
+                closeTime: { type: ["string", "null"] }
                 yesBid: { type: ["number", "null"] }
                 yesAsk: { type: ["number", "null"] }
                 noBid: { type: ["number", "null"] }
                 noAsk: { type: ["number", "null"] }
+                volume: { type: ["number", "null"] }
                 weatherMarketType: { type: ["string", "null"] }
+                collectionTimestamp: { type: ["string", "null"] }
         snapshot:
           oneOf:
             - type: "null"
@@ -689,18 +805,152 @@ components:
               properties:
                 id: { type: ["number", "null"] }
                 createdAt: { type: ["string", "null"] }
+                forecastDate: { type: ["string", "null"] }
+                forecastValue: { type: ["number", "null"] }
+                forecastRetrievedAt: { type: ["string", "null"] }
+                leadTimeDays: { type: ["number", "null"] }
                 ecProbability: { type: ["number", "null"] }
                 marketProbability: { type: ["number", "null"] }
                 confidence: { type: ["string", "null"] }
                 explanation: { type: ["string", "null"] }
-                forecastValue: { type: ["number", "null"] }
-                leadTimeDays: { type: ["number", "null"] }
                 settlementVariable: { type: ["string", "null"] }
                 settlementOperator: { type: ["string", "null"] }
                 settlementThreshold: { type: ["number", "null"] }
                 contractType: { type: ["string", "null"] }
+                targetHour: { type: ["number", "null"] }
+                targetTimezoneStr: { type: ["string", "null"] }
                 lowerBound: { type: ["number", "null"] }
                 upperBound: { type: ["number", "null"] }
+                analysisStatus: { type: ["string", "null"] }
+                analysisReason: { type: ["string", "null"] }
+
+    BreakdownRow:
+      type: object
+      required: [label, settledCount, wins, losses, totalStake, profitLoss]
+      properties:
+        label:
+          type: string
+        settledCount:
+          type: number
+        wins:
+          type: number
+        losses:
+          type: number
+        winRate:
+          type: ["number", "null"]
+        totalStake:
+          type: number
+        profitLoss:
+          type: number
+        roi:
+          type: ["number", "null"]
+        adjProfitLoss:
+          type: ["number", "null"]
+        adjRoi:
+          type: ["number", "null"]
+
+    PaperTradeAnalytics:
+      type: object
+      required: [cumulativePl, dailyPl, byDirection, byEdgeBucket, byPriceBucket, byCity, byContractType, byLeadTime]
+      properties:
+        strategyVersion:
+          type: ["string", "null"]
+        includeFlagged:
+          type: boolean
+        realisticAdjustments:
+          type: object
+          properties:
+            feePct: { type: number }
+            slippagePct: { type: number }
+            spreadAdj: { type: number }
+            totalCostPct: { type: number }
+        cumulativePl:
+          type: array
+          items:
+            type: object
+            properties:
+              date: { type: ["string", "null"] }
+              cumulativePl: { type: number }
+              adjCumulativePl: { type: ["number", "null"] }
+              tradeId: { type: number }
+        dailyPl:
+          type: array
+          items:
+            type: object
+            properties:
+              date: { type: string }
+              pl: { type: number }
+              adjPl: { type: ["number", "null"] }
+              count: { type: number }
+        byDirection:
+          type: array
+          items:
+            $ref: "#/components/schemas/BreakdownRow"
+        byEdgeBucket:
+          type: array
+          items:
+            $ref: "#/components/schemas/BreakdownRow"
+        byPriceBucket:
+          type: array
+          items:
+            $ref: "#/components/schemas/BreakdownRow"
+        byCity:
+          type: array
+          items:
+            $ref: "#/components/schemas/BreakdownRow"
+        byContractType:
+          type: array
+          items:
+            $ref: "#/components/schemas/BreakdownRow"
+        byLeadTime:
+          type: array
+          items:
+            $ref: "#/components/schemas/BreakdownRow"
+
+    CalibrationBucket:
+      type: object
+      required: [bucket, count]
+      properties:
+        bucket:
+          type: string
+        count:
+          type: number
+        avgEcProb:
+          type: ["number", "null"]
+        actualYesRate:
+          type: ["number", "null"]
+        calibrationDiff:
+          type: ["number", "null"]
+
+    CalibrationReport:
+      type: object
+      required: [buckets, totalSettled]
+      properties:
+        buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/CalibrationBucket"
+        brierScore:
+          type: ["number", "null"]
+        totalSettled:
+          type: number
+        strategyVersion:
+          type: ["string", "null"]
+
+    SettlementRunResult:
+      type: object
+      required: [checked, settled, voided, errors, stillOpen]
+      properties:
+        checked:
+          type: number
+        settled:
+          type: number
+        voided:
+          type: number
+        errors:
+          type: number
+        stillOpen:
+          type: number
 
     PaperTradeSummary:
       type: object
@@ -727,6 +977,8 @@ components:
         roi:
           type: ["number", "null"]
         avgEntryEdge:
+          type: ["number", "null"]
+        avgEntryPrice:
           type: ["number", "null"]
         avgWinEdge:
           type: ["number", "null"]

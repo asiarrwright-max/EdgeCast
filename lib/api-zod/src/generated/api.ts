@@ -327,6 +327,11 @@ export const ListPaperTradesQueryParams = zod.object({
   "contract_type": zod.coerce.string().optional(),
   "date_from": zod.coerce.string().optional(),
   "date_to": zod.coerce.string().optional(),
+  "strategy_version": zod.coerce.string().optional(),
+  "edge_bucket": zod.coerce.string().optional(),
+  "price_bucket": zod.coerce.string().optional(),
+  "is_flagged": zod.coerce.boolean().optional(),
+  "outcome": zod.coerce.string().optional(),
   "limit": zod.coerce.number().default(listPaperTradesQueryLimitDefault)
 })
 
@@ -353,6 +358,7 @@ export const ListPaperTradesResponse = zod.object({
   "confidenceLabel": zod.string().nullish(),
   "stake": zod.number(),
   "quantity": zod.number().nullish(),
+  "leadTimeDays": zod.number().nullish(),
   "status": zod.enum(['OPEN', 'SETTLED', 'VOID', 'ERROR']),
   "kalshiResult": zod.string().nullish(),
   "outcome": zod.union([zod.literal('WIN'),zod.literal('LOSS'),zod.literal('VOID'),zod.literal(null)]).nullish(),
@@ -362,31 +368,44 @@ export const ListPaperTradesResponse = zod.object({
   "returnPct": zod.number().nullish(),
   "decisionExplanation": zod.string().nullish(),
   "warnings": zod.string().nullish(),
+  "qualityFlags": zod.array(zod.string()).optional(),
+  "isFlagged": zod.boolean().optional(),
+  "qualityFlagDescriptions": zod.record(zod.string(), zod.string()).optional(),
   "market": zod.union([zod.null(),zod.object({
   "title": zod.string().nullish(),
   "subtitle": zod.string().nullish(),
   "targetDate": zod.string().nullish(),
+  "openTime": zod.string().nullish(),
+  "closeTime": zod.string().nullish(),
   "yesBid": zod.number().nullish(),
   "yesAsk": zod.number().nullish(),
   "noBid": zod.number().nullish(),
   "noAsk": zod.number().nullish(),
-  "weatherMarketType": zod.string().nullish()
+  "volume": zod.number().nullish(),
+  "weatherMarketType": zod.string().nullish(),
+  "collectionTimestamp": zod.string().nullish()
 })]).optional(),
   "snapshot": zod.union([zod.null(),zod.object({
   "id": zod.number().nullish(),
   "createdAt": zod.string().nullish(),
+  "forecastDate": zod.string().nullish(),
+  "forecastValue": zod.number().nullish(),
+  "forecastRetrievedAt": zod.string().nullish(),
+  "leadTimeDays": zod.number().nullish(),
   "ecProbability": zod.number().nullish(),
   "marketProbability": zod.number().nullish(),
   "confidence": zod.string().nullish(),
   "explanation": zod.string().nullish(),
-  "forecastValue": zod.number().nullish(),
-  "leadTimeDays": zod.number().nullish(),
   "settlementVariable": zod.string().nullish(),
   "settlementOperator": zod.string().nullish(),
   "settlementThreshold": zod.number().nullish(),
   "contractType": zod.string().nullish(),
+  "targetHour": zod.number().nullish(),
+  "targetTimezoneStr": zod.string().nullish(),
   "lowerBound": zod.number().nullish(),
-  "upperBound": zod.number().nullish()
+  "upperBound": zod.number().nullish(),
+  "analysisStatus": zod.string().nullish(),
+  "analysisReason": zod.string().nullish()
 })]).optional()
 })),
   "total": zod.number()
@@ -396,6 +415,10 @@ export const ListPaperTradesResponse = zod.object({
 /**
  * @summary Aggregated paper trading summary statistics
  */
+export const GetPaperTradeMetricsQueryParams = zod.object({
+  "strategy_version": zod.coerce.string().optional()
+})
+
 export const GetPaperTradeMetricsResponse = zod.object({
   "openCount": zod.number(),
   "settledCount": zod.number(),
@@ -408,6 +431,7 @@ export const GetPaperTradeMetricsResponse = zod.object({
   "netProfitLoss": zod.number(),
   "roi": zod.number().nullish(),
   "avgEntryEdge": zod.number().nullish(),
+  "avgEntryPrice": zod.number().nullish(),
   "avgWinEdge": zod.number().nullish(),
   "avgLossEdge": zod.number().nullish(),
   "byDirection": zod.array(zod.object({
@@ -452,6 +476,151 @@ export const GetPaperTradeMetricsResponse = zod.object({
 })).optional(),
   "sampleSizeWarning": zod.boolean(),
   "preliminaryNote": zod.string().nullish()
+})
+
+
+/**
+ * @summary Performance breakdowns and cumulative P/L time series
+ */
+export const getPaperTradeAnalyticsQueryIncludeFlaggedDefault = true;
+export const getPaperTradeAnalyticsQueryFeePctDefault = 0;
+export const getPaperTradeAnalyticsQuerySlippagePctDefault = 0;
+export const getPaperTradeAnalyticsQuerySpreadAdjDefault = 0;
+
+export const GetPaperTradeAnalyticsQueryParams = zod.object({
+  "strategy_version": zod.coerce.string().optional(),
+  "include_flagged": zod.coerce.boolean().default(getPaperTradeAnalyticsQueryIncludeFlaggedDefault),
+  "fee_pct": zod.coerce.number().default(getPaperTradeAnalyticsQueryFeePctDefault),
+  "slippage_pct": zod.coerce.number().default(getPaperTradeAnalyticsQuerySlippagePctDefault),
+  "spread_adj": zod.coerce.number().default(getPaperTradeAnalyticsQuerySpreadAdjDefault)
+})
+
+export const GetPaperTradeAnalyticsResponse = zod.object({
+  "strategyVersion": zod.string().nullish(),
+  "includeFlagged": zod.boolean().optional(),
+  "realisticAdjustments": zod.object({
+  "feePct": zod.number().optional(),
+  "slippagePct": zod.number().optional(),
+  "spreadAdj": zod.number().optional(),
+  "totalCostPct": zod.number().optional()
+}).optional(),
+  "cumulativePl": zod.array(zod.object({
+  "date": zod.string().nullish(),
+  "cumulativePl": zod.number().optional(),
+  "adjCumulativePl": zod.number().nullish(),
+  "tradeId": zod.number().optional()
+})),
+  "dailyPl": zod.array(zod.object({
+  "date": zod.string().optional(),
+  "pl": zod.number().optional(),
+  "adjPl": zod.number().nullish(),
+  "count": zod.number().optional()
+})),
+  "byDirection": zod.array(zod.object({
+  "label": zod.string(),
+  "settledCount": zod.number(),
+  "wins": zod.number(),
+  "losses": zod.number(),
+  "winRate": zod.number().nullish(),
+  "totalStake": zod.number(),
+  "profitLoss": zod.number(),
+  "roi": zod.number().nullish(),
+  "adjProfitLoss": zod.number().nullish(),
+  "adjRoi": zod.number().nullish()
+})),
+  "byEdgeBucket": zod.array(zod.object({
+  "label": zod.string(),
+  "settledCount": zod.number(),
+  "wins": zod.number(),
+  "losses": zod.number(),
+  "winRate": zod.number().nullish(),
+  "totalStake": zod.number(),
+  "profitLoss": zod.number(),
+  "roi": zod.number().nullish(),
+  "adjProfitLoss": zod.number().nullish(),
+  "adjRoi": zod.number().nullish()
+})),
+  "byPriceBucket": zod.array(zod.object({
+  "label": zod.string(),
+  "settledCount": zod.number(),
+  "wins": zod.number(),
+  "losses": zod.number(),
+  "winRate": zod.number().nullish(),
+  "totalStake": zod.number(),
+  "profitLoss": zod.number(),
+  "roi": zod.number().nullish(),
+  "adjProfitLoss": zod.number().nullish(),
+  "adjRoi": zod.number().nullish()
+})),
+  "byCity": zod.array(zod.object({
+  "label": zod.string(),
+  "settledCount": zod.number(),
+  "wins": zod.number(),
+  "losses": zod.number(),
+  "winRate": zod.number().nullish(),
+  "totalStake": zod.number(),
+  "profitLoss": zod.number(),
+  "roi": zod.number().nullish(),
+  "adjProfitLoss": zod.number().nullish(),
+  "adjRoi": zod.number().nullish()
+})),
+  "byContractType": zod.array(zod.object({
+  "label": zod.string(),
+  "settledCount": zod.number(),
+  "wins": zod.number(),
+  "losses": zod.number(),
+  "winRate": zod.number().nullish(),
+  "totalStake": zod.number(),
+  "profitLoss": zod.number(),
+  "roi": zod.number().nullish(),
+  "adjProfitLoss": zod.number().nullish(),
+  "adjRoi": zod.number().nullish()
+})),
+  "byLeadTime": zod.array(zod.object({
+  "label": zod.string(),
+  "settledCount": zod.number(),
+  "wins": zod.number(),
+  "losses": zod.number(),
+  "winRate": zod.number().nullish(),
+  "totalStake": zod.number(),
+  "profitLoss": zod.number(),
+  "roi": zod.number().nullish(),
+  "adjProfitLoss": zod.number().nullish(),
+  "adjRoi": zod.number().nullish()
+}))
+})
+
+
+/**
+ * @summary Probability calibration report and Brier score
+ */
+export const GetPaperTradeCalibrationQueryParams = zod.object({
+  "strategy_version": zod.coerce.string().optional()
+})
+
+export const GetPaperTradeCalibrationResponse = zod.object({
+  "buckets": zod.array(zod.object({
+  "bucket": zod.string(),
+  "count": zod.number(),
+  "avgEcProb": zod.number().nullish(),
+  "actualYesRate": zod.number().nullish(),
+  "calibrationDiff": zod.number().nullish()
+})),
+  "brierScore": zod.number().nullish(),
+  "totalSettled": zod.number(),
+  "strategyVersion": zod.string().nullish()
+})
+
+
+/**
+ * @summary Trigger immediate settlement check for all open trades
+ */
+export const SettleNowResponse = zod.object({
+  "checked": zod.number(),
+  "settled": zod.number(),
+  "voided": zod.number(),
+  "errors": zod.number(),
+  "stillOpen": zod.number()
 })
 
 
@@ -516,6 +685,7 @@ export const GetPaperTradeResponse = zod.object({
   "confidenceLabel": zod.string().nullish(),
   "stake": zod.number(),
   "quantity": zod.number().nullish(),
+  "leadTimeDays": zod.number().nullish(),
   "status": zod.enum(['OPEN', 'SETTLED', 'VOID', 'ERROR']),
   "kalshiResult": zod.string().nullish(),
   "outcome": zod.union([zod.literal('WIN'),zod.literal('LOSS'),zod.literal('VOID'),zod.literal(null)]).nullish(),
@@ -525,31 +695,44 @@ export const GetPaperTradeResponse = zod.object({
   "returnPct": zod.number().nullish(),
   "decisionExplanation": zod.string().nullish(),
   "warnings": zod.string().nullish(),
+  "qualityFlags": zod.array(zod.string()).optional(),
+  "isFlagged": zod.boolean().optional(),
+  "qualityFlagDescriptions": zod.record(zod.string(), zod.string()).optional(),
   "market": zod.union([zod.null(),zod.object({
   "title": zod.string().nullish(),
   "subtitle": zod.string().nullish(),
   "targetDate": zod.string().nullish(),
+  "openTime": zod.string().nullish(),
+  "closeTime": zod.string().nullish(),
   "yesBid": zod.number().nullish(),
   "yesAsk": zod.number().nullish(),
   "noBid": zod.number().nullish(),
   "noAsk": zod.number().nullish(),
-  "weatherMarketType": zod.string().nullish()
+  "volume": zod.number().nullish(),
+  "weatherMarketType": zod.string().nullish(),
+  "collectionTimestamp": zod.string().nullish()
 })]).optional(),
   "snapshot": zod.union([zod.null(),zod.object({
   "id": zod.number().nullish(),
   "createdAt": zod.string().nullish(),
+  "forecastDate": zod.string().nullish(),
+  "forecastValue": zod.number().nullish(),
+  "forecastRetrievedAt": zod.string().nullish(),
+  "leadTimeDays": zod.number().nullish(),
   "ecProbability": zod.number().nullish(),
   "marketProbability": zod.number().nullish(),
   "confidence": zod.string().nullish(),
   "explanation": zod.string().nullish(),
-  "forecastValue": zod.number().nullish(),
-  "leadTimeDays": zod.number().nullish(),
   "settlementVariable": zod.string().nullish(),
   "settlementOperator": zod.string().nullish(),
   "settlementThreshold": zod.number().nullish(),
   "contractType": zod.string().nullish(),
+  "targetHour": zod.number().nullish(),
+  "targetTimezoneStr": zod.string().nullish(),
   "lowerBound": zod.number().nullish(),
-  "upperBound": zod.number().nullish()
+  "upperBound": zod.number().nullish(),
+  "analysisStatus": zod.string().nullish(),
+  "analysisReason": zod.string().nullish()
 })]).optional()
 })
 

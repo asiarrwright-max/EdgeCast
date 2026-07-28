@@ -26,6 +26,8 @@ export interface PaperTradeSummary {
   /** @nullable */
   avgEntryEdge?: number | null;
   /** @nullable */
+  avgEntryPrice?: number | null;
+  /** @nullable */
   avgWinEdge?: number | null;
   /** @nullable */
   avgLossEdge?: number | null;

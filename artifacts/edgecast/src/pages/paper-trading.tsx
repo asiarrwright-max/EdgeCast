@@ -1,356 +1,138 @@
 import { useState } from "react";
 import { Link } from "wouter";
-import { TrendingUp, AlertTriangle, ExternalLink, ChevronDown, ChevronUp } from "lucide-react";
 import {
   useListPaperTrades,
   useGetPaperTradeMetrics,
   useGetPaperTradeSettings,
   useUpdatePaperTradeSettings,
-  getListPaperTradesQueryKey,
-  getGetPaperTradeMetricsQueryKey,
-  type ListPaperTradesParams,
-  type PaperTrade,
-  type PaperTradeSummary,
-  type PaperTradeSettings,
+  useGetPaperTradeAnalytics,
+  useGetPaperTradeCalibration,
+  useSettleNow,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── small helpers ─────────────────────────────────────────────────────────────
+const pct = (n: number | null | undefined, dec = 1) =>
+  n == null ? "—" : `${(n * 100).toFixed(dec)}%`;
+const pp = (n: number | null | undefined, dec = 1) =>
+  n == null ? "—" : `${n.toFixed(dec)}pp`;
+const money = (n: number | null | undefined) =>
+  n == null ? "—" : `$${n.toFixed(2)}`;
+const fmt = (n: number | null | undefined, dec = 3) =>
+  n == null ? "—" : n.toFixed(dec);
 
-function pct(n: number | null | undefined): string {
-  if (n == null) return "—";
-  return `${(n * 100).toFixed(1)}%`;
-}
+const PROGRESS_MILESTONES = [100, 300, 500];
 
-function pp(n: number | null | undefined, prefix = "+"): string {
-  if (n == null) return "—";
-  return `${n >= 0 ? prefix : ""}${n.toFixed(1)}pp`;
-}
-
-function usd(n: number | null | undefined): string {
-  if (n == null) return "—";
-  const sign = n >= 0 ? "+" : "-";
-  return `${sign}$${Math.abs(n).toFixed(2)}`;
-}
-
-function fmtDate(s: string | null | undefined): string {
-  if (!s) return "—";
-  return s.slice(0, 10);
-}
-
-function ConfidenceBadge({ label }: { label: string | null | undefined }) {
-  if (!label) return <span className="text-muted-foreground text-xs">—</span>;
-  const variant =
-    label === "Very High" ? "outline" :
-    label === "High"      ? "outline" :
-    label === "Medium"    ? "outline" : "outline";
-  const color =
-    label === "Very High" ? "text-emerald-400 border-emerald-500/40" :
-    label === "High"      ? "text-sky-400 border-sky-500/40" :
-    label === "Medium"    ? "text-amber-400 border-amber-500/40" :
-                            "text-rose-400 border-rose-500/40";
+function SampleBar({ settled }: { settled: number }) {
+  const next = PROGRESS_MILESTONES.find((m) => m > settled) ?? 500;
+  const pctProgress = Math.min(settled / next, 1);
   return (
-    <span className={`text-xs px-1.5 py-0.5 rounded border font-medium ${color}`}>
-      {label}
-    </span>
-  );
-}
-
-function DirectionBadge({ direction }: { direction: "YES" | "NO" }) {
-  return (
-    <span className={`text-xs px-2 py-0.5 rounded border font-bold font-mono ${
-      direction === "YES"
-        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-        : "bg-rose-500/10 text-rose-400 border-rose-500/30"
-    }`}>
-      {direction}
-    </span>
-  );
-}
-
-function OutcomeBadge({ outcome }: { outcome: string | null | undefined }) {
-  if (!outcome) return <span className="text-xs text-muted-foreground">—</span>;
-  const color =
-    outcome === "WIN"  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" :
-    outcome === "LOSS" ? "bg-rose-500/10 text-rose-400 border-rose-500/30" :
-                         "bg-muted/50 text-muted-foreground border-border";
-  return (
-    <span className={`text-xs px-1.5 py-0.5 rounded border font-bold font-mono ${color}`}>
-      {outcome}
-    </span>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const color =
-    status === "OPEN"    ? "bg-sky-500/10 text-sky-400 border-sky-500/30" :
-    status === "SETTLED" ? "bg-muted/50 text-muted-foreground border-border" :
-    status === "VOID"    ? "bg-muted/50 text-muted-foreground border-border" :
-                           "bg-destructive/10 text-destructive border-destructive/30";
-  return (
-    <span className={`text-xs px-1.5 py-0.5 rounded border font-medium ${color}`}>
-      {status}
-    </span>
-  );
-}
-
-// ── Summary cards ─────────────────────────────────────────────────────────────
-
-function MetricCard({
-  label, value, sub, accent,
-}: {
-  label: string; value: string; sub?: string;
-  accent?: "green" | "red" | "neutral";
-}) {
-  const valueColor =
-    accent === "green" ? "text-emerald-400" :
-    accent === "red"   ? "text-rose-400" :
-    "text-foreground";
-  return (
-    <Card className="border-border">
-      <CardContent className="pt-4 pb-4 px-4">
-        <p className="text-xs text-muted-foreground uppercase tracking-wide">{label}</p>
-        <p className={`text-2xl font-bold font-mono mt-1 ${valueColor}`}>{value}</p>
-        {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
-      </CardContent>
-    </Card>
-  );
-}
-
-// ── Settings panel ────────────────────────────────────────────────────────────
-
-function SettingsPanel() {
-  const queryClient = useQueryClient();
-  const { data: settings } = useGetPaperTradeSettings();
-  const mutation = useUpdatePaperTradeSettings();
-  const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState<Record<string, string>>({});
-
-  if (!settings) return <Skeleton className="h-32 w-full" />;
-
-  const startEdit = () => {
-    setForm({
-      min_edge_pct: String(settings.min_edge_pct ?? "10"),
-      min_confidence: String(settings.min_confidence ?? "High"),
-      stake: String(settings.stake ?? "10"),
-      strategy_version: String(settings.strategy_version ?? "v1.0"),
-      enabled: String(settings.enabled ?? "true"),
-    });
-    setEditing(true);
-  };
-
-  const save = () => {
-    mutation.mutate(
-      {
-        data: {
-          min_edge_pct: parseFloat(form.min_edge_pct),
-          min_confidence: form.min_confidence,
-          stake: parseFloat(form.stake),
-          strategy_version: form.strategy_version,
-          enabled: form.enabled === "true",
-        },
-      },
-      {
-        onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: getListPaperTradesQueryKey() });
-          queryClient.invalidateQueries({ queryKey: getGetPaperTradeMetricsQueryKey() });
-          setEditing(false);
-        },
-      }
-    );
-  };
-
-  return (
-    <Card className="border-border">
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm">Strategy Settings</CardTitle>
-          {!editing ? (
-            <button onClick={startEdit} className="text-xs text-primary hover:underline">
-              Edit
-            </button>
-          ) : (
-            <div className="flex gap-3">
-              <button onClick={() => setEditing(false)} className="text-xs text-muted-foreground hover:underline">
-                Cancel
-              </button>
-              <button
-                onClick={save}
-                disabled={mutation.isPending}
-                className="text-xs text-primary hover:underline disabled:opacity-50"
-              >
-                {mutation.isPending ? "Saving…" : "Save"}
-              </button>
-            </div>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent className="pt-0">
-        {!editing ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-8 gap-y-1 text-xs">
-            {[
-              ["Enabled",          String(settings.enabled)],
-              ["Min Edge",         `${settings.min_edge_pct}pp`],
-              ["Min Confidence",   String(settings.min_confidence)],
-              ["Stake per Trade",  `$${settings.stake}`],
-              ["Strategy Version", String(settings.strategy_version)],
-            ].map(([k, v]) => (
-              <div key={k} className="flex justify-between border-b border-border/40 py-1.5">
-                <span className="text-muted-foreground">{k}</span>
-                <span className="font-mono font-medium">{v}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-            {[
-              { key: "enabled", label: "Enabled", type: "select", opts: ["true", "false"] },
-              { key: "min_edge_pct", label: "Min Edge (pp)", type: "number" },
-              { key: "min_confidence", label: "Min Confidence", type: "select",
-                opts: ["Very High", "High", "Medium", "Low", "Very Low"] },
-              { key: "stake", label: "Stake per Trade ($)", type: "number" },
-              { key: "strategy_version", label: "Strategy Version", type: "text" },
-            ].map(({ key, label, type, opts }) => (
-              <label key={key} className="flex items-center justify-between gap-4">
-                <span className="text-muted-foreground w-36">{label}</span>
-                {type === "select" ? (
-                  <select
-                    value={form[key]}
-                    onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-                    className="bg-secondary border border-border rounded px-2 py-1 text-xs flex-1"
-                  >
-                    {opts?.map((o) => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                ) : (
-                  <input
-                    type={type}
-                    value={form[key]}
-                    onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-                    className="bg-secondary border border-border rounded px-2 py-1 text-xs flex-1"
-                  />
-                )}
-              </label>
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-// ── Filter bar ────────────────────────────────────────────────────────────────
-
-type ActiveTab = "open" | "settled" | "all";
-
-interface LocalFilters {
-  direction: string;
-  confidence: string;
-  city: string;
-  contractType: string;
-}
-
-const EMPTY: LocalFilters = { direction: "", confidence: "", city: "", contractType: "" };
-
-function FilterBar({ filters, onChange }: { filters: LocalFilters; onChange: (f: LocalFilters) => void }) {
-  const up = (k: keyof LocalFilters, v: string) => onChange({ ...filters, [k]: v });
-  return (
-    <div className="flex flex-wrap gap-2">
-      <select value={filters.direction} onChange={(e) => up("direction", e.target.value)}
-        className="bg-secondary border border-border rounded px-2 py-1 text-xs">
-        <option value="">Both Directions</option>
-        <option value="YES">YES only</option>
-        <option value="NO">NO only</option>
-      </select>
-      <select value={filters.confidence} onChange={(e) => up("confidence", e.target.value)}
-        className="bg-secondary border border-border rounded px-2 py-1 text-xs">
-        <option value="">All Confidence</option>
-        <option value="Very High">Very High</option>
-        <option value="High">High</option>
-        <option value="Medium">Medium</option>
-        <option value="Low">Low</option>
-      </select>
-      <input type="text" placeholder="City…" value={filters.city}
-        onChange={(e) => up("city", e.target.value)}
-        className="bg-secondary border border-border rounded px-2 py-1 text-xs w-24" />
-      <select value={filters.contractType} onChange={(e) => up("contractType", e.target.value)}
-        className="bg-secondary border border-border rounded px-2 py-1 text-xs">
-        <option value="">All Types</option>
-        <option value="threshold">Threshold</option>
-        <option value="range">Range</option>
-        <option value="hourly_threshold">Hourly</option>
-      </select>
-      {Object.values(filters).some(Boolean) && (
-        <button onClick={() => onChange(EMPTY)}
-          className="text-xs text-muted-foreground hover:text-foreground border border-border rounded px-2 py-1">
-          Clear
-        </button>
+    <div className="space-y-1">
+      <p className="text-xs text-gray-500">
+        {settled} settled · progress to {next} trades
+      </p>
+      <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+        <div
+          className="h-full bg-blue-500 rounded-full transition-all"
+          style={{ width: `${pctProgress * 100}%` }}
+        />
+      </div>
+      {settled < 30 && (
+        <p className="text-xs text-amber-600">
+          ⚠ Fewer than 30 settled trades — results are preliminary.
+        </p>
       )}
     </div>
   );
 }
 
-// ── Trades table ──────────────────────────────────────────────────────────────
-
-function TradesTable({ trades }: { trades: PaperTrade[] }) {
-  if (trades.length === 0) {
-    return (
-      <p className="text-muted-foreground text-sm text-center py-10">
-        No trades match the current filters.
+function MetricCard({
+  label,
+  value,
+  sub,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  highlight?: "green" | "red" | "amber";
+}) {
+  const colors = {
+    green: "text-green-600",
+    red: "text-red-600",
+    amber: "text-amber-600",
+  };
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</p>
+      <p className={`mt-1 text-2xl font-semibold ${highlight ? colors[highlight] : "text-gray-900"}`}>
+        {value}
       </p>
-    );
-  }
+      {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
+function Section({
+  title,
+  children,
+  defaultOpen = false,
+}: {
+  title: string;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-gray-800 hover:bg-gray-50 transition-colors"
+      >
+        <span>{title}</span>
+        <span className="text-gray-400">{open ? "▲" : "▼"}</span>
+      </button>
+      {open && <div className="border-t border-gray-100">{children}</div>}
+    </div>
+  );
+}
+
+function BreakdownTable({ rows, adjMode }: { rows: any[]; adjMode: boolean }) {
+  if (!rows || rows.length === 0)
+    return <p className="text-sm text-gray-500 px-4 py-3">No settled trades in this breakdown.</p>;
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+      <table className="min-w-full text-sm">
         <thead>
-          <tr className="border-b border-border text-muted-foreground text-xs uppercase tracking-wide">
-            <th className="text-left py-2 px-2 font-medium">Date</th>
-            <th className="text-left py-2 px-2 font-medium">Ticker</th>
-            <th className="text-left py-2 px-2 font-medium">City</th>
-            <th className="text-left py-2 px-2 font-medium">Dir</th>
-            <th className="text-right py-2 px-2 font-medium">EC%</th>
-            <th className="text-right py-2 px-2 font-medium">Mkt%</th>
-            <th className="text-right py-2 px-2 font-medium">Edge</th>
-            <th className="text-left py-2 px-2 font-medium">Conf</th>
-            <th className="text-right py-2 px-2 font-medium">Stake</th>
-            <th className="text-left py-2 px-2 font-medium">Status</th>
-            <th className="text-left py-2 px-2 font-medium">Outcome</th>
-            <th className="text-right py-2 px-2 font-medium">P/L</th>
-            <th className="py-2 px-2"></th>
+          <tr className="bg-gray-50 text-xs text-gray-500 uppercase">
+            <th className="text-left px-4 py-2">Label</th>
+            <th className="text-right px-4 py-2">Settled</th>
+            <th className="text-right px-4 py-2">Win Rate</th>
+            <th className="text-right px-4 py-2">Stake</th>
+            <th className="text-right px-4 py-2">{adjMode ? "Adj P/L" : "P/L"}</th>
+            <th className="text-right px-4 py-2">{adjMode ? "Adj ROI" : "ROI"}</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-border/50">
-          {trades.map((t) => (
-            <tr key={t.id} className="hover:bg-secondary/30 transition-colors">
-              <td className="py-2 px-2 font-mono text-xs text-muted-foreground">{fmtDate(t.createdAt)}</td>
-              <td className="py-2 px-2 font-mono text-xs max-w-[140px] truncate" title={t.marketTicker}>
-                {t.marketTicker}
-              </td>
-              <td className="py-2 px-2 text-xs">{t.city ?? "—"}</td>
-              <td className="py-2 px-2"><DirectionBadge direction={t.direction} /></td>
-              <td className="py-2 px-2 text-right font-mono text-xs">{pct(t.ecYesProbability)}</td>
-              <td className="py-2 px-2 text-right font-mono text-xs">{pct(t.marketYesProbability)}</td>
-              <td className="py-2 px-2 text-right font-mono text-xs text-primary">
-                {t.edgePctPoints != null ? `+${t.edgePctPoints.toFixed(1)}pp` : "—"}
-              </td>
-              <td className="py-2 px-2"><ConfidenceBadge label={t.confidenceLabel} /></td>
-              <td className="py-2 px-2 text-right font-mono text-xs">${t.stake.toFixed(2)}</td>
-              <td className="py-2 px-2"><StatusBadge status={t.status} /></td>
-              <td className="py-2 px-2"><OutcomeBadge outcome={t.outcome} /></td>
-              <td className={`py-2 px-2 text-right font-mono text-xs ${
-                t.profitLoss == null ? "text-muted-foreground" :
-                t.profitLoss >= 0    ? "text-emerald-400" : "text-rose-400"
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.label} className="border-t border-gray-100 hover:bg-gray-50">
+              <td className="px-4 py-2 font-medium text-gray-800">{r.label}</td>
+              <td className="text-right px-4 py-2 text-gray-600">{r.settledCount}</td>
+              <td className="text-right px-4 py-2">{pct(r.winRate)}</td>
+              <td className="text-right px-4 py-2 text-gray-600">{money(r.totalStake)}</td>
+              <td className={`text-right px-4 py-2 font-medium ${
+                (adjMode ? r.adjProfitLoss ?? r.profitLoss : r.profitLoss) >= 0
+                  ? "text-green-600"
+                  : "text-red-600"
               }`}>
-                {t.profitLoss != null ? usd(t.profitLoss) : "—"}
+                {money(adjMode ? (r.adjProfitLoss ?? r.profitLoss) : r.profitLoss)}
               </td>
-              <td className="py-2 px-2">
-                <Link href={`/paper-trading/${t.id}`}
-                  className="text-primary hover:text-primary/70 transition-colors">
-                  <ExternalLink className="h-3.5 w-3.5" />
-                </Link>
+              <td className={`text-right px-4 py-2 ${
+                (adjMode ? r.adjRoi ?? r.roi : r.roi) != null &&
+                (adjMode ? r.adjRoi ?? r.roi : r.roi) >= 0
+                  ? "text-green-600"
+                  : "text-red-600"
+              }`}>
+                {pct((adjMode ? r.adjRoi ?? r.roi : r.roi) == null ? null : (adjMode ? r.adjRoi ?? r.roi : r.roi) / 100)}
               </td>
             </tr>
           ))}
@@ -360,162 +142,730 @@ function TradesTable({ trades }: { trades: PaperTrade[] }) {
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── main page ─────────────────────────────────────────────────────────────────
 
 export default function PaperTradingPage() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>("open");
-  const [localFilters, setLocalFilters] = useState<LocalFilters>(EMPTY);
-  const [showSettings, setShowSettings] = useState(false);
+  // Filter state
+  const [statusF, setStatusF] = useState("");
+  const [directionF, setDirectionF] = useState("");
+  const [cityF, setCityF] = useState("");
+  const [contractTypeF, setContractTypeF] = useState("");
+  const [dateFromF, setDateFromF] = useState("");
+  const [dateToF, setDateToF] = useState("");
+  const [stratVerF, setStratVerF] = useState("");
+  const [edgeBucketF, setEdgeBucketF] = useState("");
+  const [priceBucketF, setPriceBucketF] = useState("");
+  const [isFlaggedF, setIsFlaggedF] = useState<string>("");
+  const [outcomeF, setOutcomeF] = useState("");
 
-  // Build API query params — status will be applied client-side from activeTab
-  const queryParams: ListPaperTradesParams = {
-    ...(localFilters.direction    ? { direction:     localFilters.direction }    : {}),
-    ...(localFilters.confidence   ? { confidence:    localFilters.confidence }   : {}),
-    ...(localFilters.city         ? { city:          localFilters.city }         : {}),
-    ...(localFilters.contractType ? { contract_type: localFilters.contractType } : {}),
-    limit: 500,
+  // Analytics/calibration state
+  const [analyticsStratVer, setAnalyticsStratVer] = useState("");
+  const [includeFlagged, setIncludeFlagged] = useState(true);
+  const [feePct, setFeePct] = useState(0);
+  const [slippagePct, setSlippagePct] = useState(0);
+  const [spreadAdj, setSpreadAdj] = useState(0);
+  const [adjMode, setAdjMode] = useState(false);
+  const [calibStratVer, setCalibStratVer] = useState("");
+  const [metricsStratVer, setMetricsStratVer] = useState("");
+
+  // Settings edit state
+  const [editSettings, setEditSettings] = useState(false);
+  const [settingsForm, setSettingsForm] = useState<Record<string, any>>({});
+
+  // Settlement state
+  const [settling, setSettling] = useState(false);
+  const [settleResult, setSettleResult] = useState<any>(null);
+
+  // Build query params for list
+  const listParams: Record<string, any> = {};
+  if (statusF) listParams.status = statusF;
+  if (directionF) listParams.direction = directionF;
+  if (cityF) listParams.city = cityF;
+  if (contractTypeF) listParams.contract_type = contractTypeF;
+  if (dateFromF) listParams.date_from = dateFromF;
+  if (dateToF) listParams.date_to = dateToF;
+  if (stratVerF) listParams.strategy_version = stratVerF;
+  if (edgeBucketF) listParams.edge_bucket = edgeBucketF;
+  if (priceBucketF) listParams.price_bucket = priceBucketF;
+  if (isFlaggedF !== "") listParams.is_flagged = isFlaggedF === "true";
+  if (outcomeF) listParams.outcome = outcomeF;
+
+  // Build analytics params
+  const analyticsParams: Record<string, any> = {
+    include_flagged: includeFlagged,
+    fee_pct: adjMode ? feePct : 0,
+    slippage_pct: adjMode ? slippagePct : 0,
+    spread_adj: adjMode ? spreadAdj : 0,
+  };
+  if (analyticsStratVer) analyticsParams.strategy_version = analyticsStratVer;
+  if (calibStratVer) analyticsParams.strategy_version_calib = calibStratVer; // won't be used, separate
+
+  const { data: listData } = useListPaperTrades(listParams);
+  const { data: metrics, refetch: refetchMetrics } = useGetPaperTradeMetrics(
+    metricsStratVer ? { strategy_version: metricsStratVer } : {}
+  );
+  const { data: settings } = useGetPaperTradeSettings();
+  const { data: analytics } = useGetPaperTradeAnalytics(analyticsParams);
+  const { data: calibration } = useGetPaperTradeCalibration(
+    calibStratVer ? { strategy_version: calibStratVer } : {}
+  );
+  const updateSettings = useUpdatePaperTradeSettings();
+  const settleNowMutation = useSettleNow();
+
+  const trades = listData?.trades ?? [];
+  const total = listData?.total ?? 0;
+
+  // CSV export URL
+  const buildExportUrl = () => {
+    const params = new URLSearchParams();
+    Object.entries(listParams).forEach(([k, v]) => params.set(k, String(v)));
+    const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+    return `${base}/api/paper-trades/export.csv?${params.toString()}`;
   };
 
-  const { data: tradesData, isLoading: tradesLoading, error: tradesError } =
-    useListPaperTrades(queryParams, {
-      query: { queryKey: getListPaperTradesQueryKey(queryParams), refetchInterval: 60_000 },
-    });
+  const handleSettleNow = async () => {
+    setSettling(true);
+    setSettleResult(null);
+    try {
+      const r = await settleNowMutation.mutateAsync();
+      setSettleResult(r);
+      refetchMetrics();
+    } catch (e: any) {
+      setSettleResult({ error: e?.message ?? "Unknown error" });
+    } finally {
+      setSettling(false);
+    }
+  };
 
-  const { data: metrics, isLoading: metricsLoading } =
-    useGetPaperTradeMetrics({
-      query: { queryKey: getGetPaperTradeMetricsQueryKey(), refetchInterval: 60_000 },
-    });
+  const handleSaveSettings = async () => {
+    try {
+      await updateSettings.mutateAsync({ data: settingsForm });
+      setEditSettings(false);
+    } catch (e) {
+      console.error("Failed to save settings", e);
+    }
+  };
 
-  const allTrades    = tradesData?.trades ?? [];
-  const openTrades   = allTrades.filter((t) => t.status === "OPEN");
-  const settledTrades = allTrades.filter((t) => t.status === "SETTLED" || t.status === "VOID");
-  const displayTrades =
-    activeTab === "open"    ? openTrades :
-    activeTab === "settled" ? settledTrades :
-    allTrades;
-
-  const m: PaperTradeSummary | undefined = metrics;
+  const settledCount = metrics?.settledCount ?? 0;
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div className="flex items-center gap-3">
-          <TrendingUp className="h-6 w-6 text-primary" />
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Paper Trading</h1>
-            <p className="text-sm text-muted-foreground">Automated simulation — no real trades</p>
-          </div>
-        </div>
-        <button
-          onClick={() => setShowSettings((s) => !s)}
-          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border rounded px-3 py-1.5 transition-colors"
-        >
-          Settings {showSettings ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-        </button>
-      </div>
-
-      {/* Disclaimer */}
-      <div className="flex items-start gap-3 bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
-        <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+      <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-semibold text-amber-300">
-            Simulation Only — No Real Trades Placed
+          <h1 className="text-2xl font-bold text-gray-900">Paper Trading</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Strategy validation — simulated positions, real market prices
           </p>
-          <p className="text-xs text-amber-300/80 mt-1 leading-relaxed">
-            All trades are hypothetical simulations. No real money is at risk and no Kalshi
-            trading credentials are used. Results do not account for fees, spreads, liquidity,
-            or slippage and may overstate real-world performance.
-          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <select
+            value={metricsStratVer}
+            onChange={(e) => setMetricsStratVer(e.target.value)}
+            className="text-sm border border-gray-300 rounded px-2 py-1.5 text-gray-700"
+          >
+            <option value="">All versions</option>
+            <option value="v1.0">v1.0</option>
+            <option value="v2.0">v2.0</option>
+          </select>
+          <button
+            onClick={handleSettleNow}
+            disabled={settling}
+            className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          >
+            {settling ? "Running…" : "Run Settlement Check"}
+          </button>
         </div>
       </div>
 
-      {/* Settings panel (collapsible) */}
-      {showSettings && <SettingsPanel />}
-
-      {/* Summary cards */}
-      {metricsLoading ? (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)}
+      {settleResult && (
+        <div
+          className={`rounded-lg border px-4 py-3 text-sm ${
+            settleResult.error
+              ? "border-red-300 bg-red-50 text-red-800"
+              : "border-green-300 bg-green-50 text-green-800"
+          }`}
+        >
+          {settleResult.error ? (
+            <>Settlement failed: {settleResult.error}</>
+          ) : (
+            <>
+              Settlement complete — checked {settleResult.checked}, settled{" "}
+              {settleResult.settled}, voided {settleResult.voided}, errors{" "}
+              {settleResult.errors}, still open {settleResult.stillOpen}.
+            </>
+          )}
         </div>
-      ) : m ? (
-        <>
-          {m.sampleSizeWarning && (
-            <p className="text-xs text-amber-400/80 bg-amber-500/5 border border-amber-500/20 rounded px-3 py-2">
-              ⚠ Sample size too small for reliable conclusions ({m.settledCount} settled trade
-              {m.settledCount !== 1 ? "s" : ""}).{m.preliminaryNote ? ` ${m.preliminaryNote}` : ""}
+      )}
+
+      {/* Sample size progress */}
+      <SampleBar settled={settledCount} />
+
+      {/* Metric cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <MetricCard label="Open" value={String(metrics?.openCount ?? "—")} />
+        <MetricCard label="Settled" value={String(metrics?.settledCount ?? "—")} />
+        <MetricCard label="Wins" value={String(metrics?.wins ?? "—")} />
+        <MetricCard
+          label="Win Rate"
+          value={pct(metrics?.winRate)}
+          highlight={
+            metrics?.winRate == null
+              ? undefined
+              : metrics.winRate >= 0.55
+              ? "green"
+              : metrics.winRate < 0.45
+              ? "red"
+              : "amber"
+          }
+        />
+        <MetricCard
+          label="Net P/L"
+          value={money(metrics?.netProfitLoss)}
+          highlight={
+            metrics?.netProfitLoss == null
+              ? undefined
+              : metrics.netProfitLoss > 0
+              ? "green"
+              : metrics.netProfitLoss < 0
+              ? "red"
+              : undefined
+          }
+        />
+        <MetricCard label="Total Staked" value={money(metrics?.totalStaked)} />
+        <MetricCard
+          label="ROI"
+          value={pct(metrics?.roi == null ? null : metrics.roi / 100, 2)}
+          highlight={
+            metrics?.roi == null
+              ? undefined
+              : metrics.roi > 0
+              ? "green"
+              : metrics.roi < 0
+              ? "red"
+              : undefined
+          }
+        />
+        <MetricCard label="Avg Edge" value={pp(metrics?.avgEntryEdge)} />
+        <MetricCard label="Avg Entry Price" value={pct(metrics?.avgEntryPrice)} />
+        <MetricCard label="Avg Win Edge" value={pp(metrics?.avgWinEdge)} sub={`Loss: ${pp(metrics?.avgLossEdge)}`} />
+      </div>
+
+      {/* Settings */}
+      <Section title="Settings">
+        <div className="px-4 py-3 space-y-3">
+          {settings && !editSettings && (
+            <div className="flex flex-wrap gap-4 text-sm text-gray-700">
+              <span>
+                Enabled:{" "}
+                <span className={settings.enabled ? "text-green-600 font-medium" : "text-red-600 font-medium"}>
+                  {settings.enabled ? "Yes" : "No"}
+                </span>
+              </span>
+              <span>Min edge: <strong>{settings.min_edge_pct}pp</strong></span>
+              <span>Min confidence: <strong>{settings.min_confidence}</strong></span>
+              <span>Stake: <strong>${settings.stake}</strong></span>
+              <span>Strategy version: <strong>{settings.strategy_version}</strong></span>
+              <button
+                onClick={() => {
+                  setSettingsForm({
+                    enabled: settings.enabled,
+                    min_edge_pct: settings.min_edge_pct,
+                    min_confidence: settings.min_confidence,
+                    stake: settings.stake,
+                    strategy_version: settings.strategy_version,
+                  });
+                  setEditSettings(true);
+                }}
+                className="ml-auto text-blue-600 hover:underline text-xs"
+              >
+                Edit
+              </button>
+            </div>
+          )}
+          {editSettings && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-4 text-sm">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={!!settingsForm.enabled}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, enabled: e.target.checked })}
+                  />
+                  Enabled
+                </label>
+                <label className="flex items-center gap-2">
+                  Min edge (pp):
+                  <input
+                    type="number"
+                    value={settingsForm.min_edge_pct ?? ""}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, min_edge_pct: parseFloat(e.target.value) })}
+                    className="border border-gray-300 rounded px-2 py-1 w-20 text-sm"
+                  />
+                </label>
+                <label className="flex items-center gap-2">
+                  Stake ($):
+                  <input
+                    type="number"
+                    value={settingsForm.stake ?? ""}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, stake: parseFloat(e.target.value) })}
+                    className="border border-gray-300 rounded px-2 py-1 w-20 text-sm"
+                  />
+                </label>
+                <label className="flex items-center gap-2">
+                  Strategy version:
+                  <input
+                    type="text"
+                    value={settingsForm.strategy_version ?? ""}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, strategy_version: e.target.value })}
+                    className="border border-gray-300 rounded px-2 py-1 w-24 text-sm"
+                  />
+                </label>
+              </div>
+              <p className="text-xs text-amber-600">
+                ⚠ Changing strategy version causes future trades to be recorded under the new version.
+                All existing trades are permanently preserved under their original version.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSaveSettings}
+                  className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => setEditSettings(false)}
+                  className="text-sm text-gray-600 hover:underline px-2"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </Section>
+
+      {/* Analytics */}
+      <Section title="Performance Analytics" defaultOpen>
+        <div className="px-4 py-3 space-y-4">
+          {/* Controls */}
+          <div className="flex flex-wrap gap-3 items-end text-sm">
+            <label className="flex items-center gap-2 text-gray-600">
+              Strategy version:
+              <select
+                value={analyticsStratVer}
+                onChange={(e) => setAnalyticsStratVer(e.target.value)}
+                className="border border-gray-300 rounded px-2 py-1 text-sm"
+              >
+                <option value="">All</option>
+                <option value="v1.0">v1.0</option>
+                <option value="v2.0">v2.0</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-gray-600">
+              <input
+                type="checkbox"
+                checked={includeFlagged}
+                onChange={(e) => setIncludeFlagged(e.target.checked)}
+              />
+              Include flagged trades
+            </label>
+            <label className="flex items-center gap-2 text-gray-600">
+              <input type="checkbox" checked={adjMode} onChange={(e) => setAdjMode(e.target.checked)} />
+              Realistic adjustments
+            </label>
+            {adjMode && (
+              <>
+                <label className="flex items-center gap-1 text-xs text-gray-500">
+                  Fee%:
+                  <input
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    value={feePct}
+                    onChange={(e) => setFeePct(parseFloat(e.target.value) || 0)}
+                    className="border border-gray-300 rounded px-1.5 py-1 w-16 text-xs"
+                  />
+                </label>
+                <label className="flex items-center gap-1 text-xs text-gray-500">
+                  Slippage%:
+                  <input
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    value={slippagePct}
+                    onChange={(e) => setSlippagePct(parseFloat(e.target.value) || 0)}
+                    className="border border-gray-300 rounded px-1.5 py-1 w-16 text-xs"
+                  />
+                </label>
+                <label className="flex items-center gap-1 text-xs text-gray-500">
+                  Spread%:
+                  <input
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    value={spreadAdj}
+                    onChange={(e) => setSpreadAdj(parseFloat(e.target.value) || 0)}
+                    className="border border-gray-300 rounded px-1.5 py-1 w-16 text-xs"
+                  />
+                </label>
+              </>
+            )}
+          </div>
+          {adjMode && (
+            <p className="text-xs text-gray-400">
+              Realistic adjustments are simplified model approximations (fee + slippage + spread as % of stake per trade).
+              These are not guaranteed real-world performance figures.
             </p>
           )}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
-            <MetricCard label="Open Trades" value={String(m.openCount)} />
-            <MetricCard label="Settled" value={String(m.settledCount)} />
-            <MetricCard label="Wins" value={String(m.wins)} accent="green" />
-            <MetricCard label="Losses" value={String(m.losses)} accent="red" />
-            <MetricCard
-              label="Win Rate"
-              value={m.winRate != null ? pct(m.winRate) : "—"}
-              sub={`${m.settledCount} settled`}
-            />
-            <MetricCard label="Total Staked" value={`$${m.totalStaked.toFixed(2)}`} />
-            <MetricCard
-              label="Net P/L"
-              value={m.netProfitLoss >= 0 ? `+$${m.netProfitLoss.toFixed(2)}` : `-$${Math.abs(m.netProfitLoss).toFixed(2)}`}
-              accent={m.netProfitLoss >= 0 ? "green" : "red"}
-            />
-            <MetricCard
-              label="ROI"
-              value={m.roi != null ? `${m.roi >= 0 ? "+" : ""}${m.roi.toFixed(1)}%` : "—"}
-              accent={m.roi == null ? "neutral" : m.roi >= 0 ? "green" : "red"}
-              sub="on settled trades"
-            />
-            <MetricCard
-              label="Avg Entry Edge"
-              value={m.avgEntryEdge != null ? `+${m.avgEntryEdge.toFixed(1)}pp` : "—"}
-            />
-          </div>
-        </>
-      ) : null}
 
-      {/* Trades table */}
-      <Card className="border-border overflow-hidden">
-        <CardHeader className="border-b border-border py-3 px-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            {/* Tabs */}
-            <div className="flex gap-1">
-              {(["open", "settled", "all"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`px-3 py-1 text-xs rounded font-medium capitalize transition-colors ${
-                    activeTab === tab
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {tab === "open"    ? `Open (${openTrades.length})` :
-                   tab === "settled" ? `Settled (${settledTrades.length})` :
-                   `All (${allTrades.length})`}
-                </button>
+          {/* Breakdown tables */}
+          {analytics ? (
+            <div className="space-y-4">
+              {[
+                { key: "byDirection", label: "By Direction" },
+                { key: "byEdgeBucket", label: "By Edge Bucket" },
+                { key: "byPriceBucket", label: "By Price Bucket" },
+                { key: "byLeadTime", label: "By Lead Time" },
+                { key: "byCity", label: "By City" },
+                { key: "byContractType", label: "By Contract Type" },
+              ].map(({ key, label }) => (
+                <div key={key}>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1 mb-1">
+                    {label}
+                  </p>
+                  <BreakdownTable rows={(analytics as any)[key] ?? []} adjMode={adjMode} />
+                </div>
               ))}
+
+              {/* Cumulative P/L chart (simple text series) */}
+              {analytics.cumulativePl.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1 mb-2">
+                    Cumulative P/L ({analytics.cumulativePl.length} trades)
+                  </p>
+                  <div className="bg-gray-50 rounded p-3 text-xs text-gray-600 font-mono overflow-x-auto">
+                    {analytics.cumulativePl.slice(-10).map((d: any, i: number) => (
+                      <div key={i} className="flex justify-between gap-4">
+                        <span>{d.date?.slice(0, 10)}</span>
+                        <span
+                          className={
+                            d.cumulativePl >= 0 ? "text-green-600" : "text-red-600"
+                          }
+                        >
+                          {money(d.cumulativePl)}
+                          {adjMode && d.adjCumulativePl != null && (
+                            <> → {money(d.adjCumulativePl)} adj</>
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                    {analytics.cumulativePl.length > 10 && (
+                      <p className="text-gray-400 mt-1">
+                        (showing last 10 of {analytics.cumulativePl.length})
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
-            {/* Filters */}
-            <FilterBar filters={localFilters} onChange={setLocalFilters} />
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {tradesLoading ? (
-            <div className="p-6 space-y-2">
-              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
-            </div>
-          ) : tradesError ? (
-            <p className="text-destructive text-sm text-center p-8">Failed to load trades.</p>
           ) : (
-            <div className="p-4">
-              <TradesTable trades={displayTrades} />
+            <p className="text-sm text-gray-500">Loading analytics…</p>
+          )}
+        </div>
+      </Section>
+
+      {/* Calibration */}
+      <Section title="Probability Calibration">
+        <div className="px-4 py-3 space-y-3">
+          <div className="flex items-center gap-3 text-sm">
+            <label className="flex items-center gap-2 text-gray-600">
+              Strategy version:
+              <select
+                value={calibStratVer}
+                onChange={(e) => setCalibStratVer(e.target.value)}
+                className="border border-gray-300 rounded px-2 py-1 text-sm"
+              >
+                <option value="">All</option>
+                <option value="v1.0">v1.0</option>
+                <option value="v2.0">v2.0</option>
+              </select>
+            </label>
+            {calibration?.brierScore != null && (
+              <span className="text-xs text-gray-500">
+                Brier score:{" "}
+                <span className="font-semibold text-gray-800">
+                  {calibration.brierScore.toFixed(4)}
+                </span>{" "}
+                ({calibration.totalSettled} settled)
+              </span>
+            )}
+          </div>
+
+          {calibration ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-xs text-gray-500 uppercase">
+                    <th className="text-left px-4 py-2">EC Prob Bucket</th>
+                    <th className="text-right px-4 py-2">Trades</th>
+                    <th className="text-right px-4 py-2">Avg EC Prob</th>
+                    <th className="text-right px-4 py-2">Actual YES Rate</th>
+                    <th className="text-right px-4 py-2">Diff</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {calibration.buckets.map((b: any) => (
+                    <tr key={b.bucket} className="border-t border-gray-100 hover:bg-gray-50">
+                      <td className="px-4 py-2 font-medium text-gray-800">{b.bucket}</td>
+                      <td className="text-right px-4 py-2 text-gray-600">{b.count}</td>
+                      <td className="text-right px-4 py-2">{b.avgEcProb != null ? pct(b.avgEcProb) : "—"}</td>
+                      <td className="text-right px-4 py-2">{b.actualYesRate != null ? pct(b.actualYesRate) : "—"}</td>
+                      <td
+                        className={`text-right px-4 py-2 font-medium ${
+                          b.calibrationDiff == null
+                            ? "text-gray-400"
+                            : Math.abs(b.calibrationDiff) < 0.05
+                            ? "text-green-600"
+                            : "text-amber-600"
+                        }`}
+                      >
+                        {b.calibrationDiff != null
+                          ? `${b.calibrationDiff > 0 ? "+" : ""}${(b.calibrationDiff * 100).toFixed(1)}pp`
+                          : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="text-xs text-gray-400 px-4 py-2">
+                Brier score closer to 0 = better calibration (perfect = 0, always-wrong = 1).
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">Loading calibration…</p>
+          )}
+        </div>
+      </Section>
+
+      {/* Trade List */}
+      <Section title={`Trades (${total})`} defaultOpen>
+        <div className="px-4 py-3 space-y-3">
+          {/* Filter bar */}
+          <div className="flex flex-wrap gap-2 items-end text-xs">
+            <select
+              value={statusF}
+              onChange={(e) => setStatusF(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1"
+            >
+              <option value="">All statuses</option>
+              <option value="OPEN">Open</option>
+              <option value="SETTLED">Settled</option>
+              <option value="VOID">Void</option>
+              <option value="ERROR">Error</option>
+            </select>
+            <select
+              value={directionF}
+              onChange={(e) => setDirectionF(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1"
+            >
+              <option value="">All directions</option>
+              <option value="YES">YES</option>
+              <option value="NO">NO</option>
+            </select>
+            <select
+              value={outcomeF}
+              onChange={(e) => setOutcomeF(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1"
+            >
+              <option value="">All outcomes</option>
+              <option value="WIN">WIN</option>
+              <option value="LOSS">LOSS</option>
+              <option value="VOID">VOID</option>
+            </select>
+            <select
+              value={edgeBucketF}
+              onChange={(e) => setEdgeBucketF(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1"
+            >
+              <option value="">All edge buckets</option>
+              <option value="&lt;10pp">&lt;10pp</option>
+              <option value="10-20pp">10-20pp</option>
+              <option value="20-30pp">20-30pp</option>
+              <option value="30-40pp">30-40pp</option>
+              <option value="≥40pp">≥40pp</option>
+            </select>
+            <select
+              value={priceBucketF}
+              onChange={(e) => setPriceBucketF(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1"
+            >
+              <option value="">All price buckets</option>
+              <option value="1-5¢">1-5¢</option>
+              <option value="6-15¢">6-15¢</option>
+              <option value="16-30¢">16-30¢</option>
+              <option value="31-50¢">31-50¢</option>
+              <option value=">50¢">&gt;50¢</option>
+            </select>
+            <select
+              value={isFlaggedF}
+              onChange={(e) => setIsFlaggedF(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1"
+            >
+              <option value="">All (incl. flagged)</option>
+              <option value="false">Clean only</option>
+              <option value="true">Flagged only</option>
+            </select>
+            <input
+              type="text"
+              placeholder="City…"
+              value={cityF}
+              onChange={(e) => setCityF(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1 w-28"
+            />
+            <input
+              type="text"
+              placeholder="Strategy ver…"
+              value={stratVerF}
+              onChange={(e) => setStratVerF(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1 w-28"
+            />
+            <input
+              type="date"
+              value={dateFromF}
+              onChange={(e) => setDateFromF(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1 text-xs"
+            />
+            <input
+              type="date"
+              value={dateToF}
+              onChange={(e) => setDateToF(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1 text-xs"
+            />
+            <a
+              href={buildExportUrl()}
+              download
+              className="ml-auto text-xs text-blue-600 border border-blue-300 rounded px-2 py-1 hover:bg-blue-50 transition-colors"
+            >
+              ↓ Export CSV
+            </a>
+          </div>
+
+          {/* Table */}
+          {trades.length === 0 ? (
+            <p className="text-sm text-gray-500 py-4 text-center">No trades match filters.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-xs text-gray-500 uppercase">
+                    <th className="text-left px-3 py-2">ID</th>
+                    <th className="text-left px-3 py-2">Market</th>
+                    <th className="text-left px-3 py-2">City</th>
+                    <th className="text-left px-3 py-2">Dir</th>
+                    <th className="text-right px-3 py-2">Edge</th>
+                    <th className="text-right px-3 py-2">Price</th>
+                    <th className="text-right px-3 py-2">Stake</th>
+                    <th className="text-left px-3 py-2">Status</th>
+                    <th className="text-left px-3 py-2">Outcome</th>
+                    <th className="text-right px-3 py-2">P/L</th>
+                    <th className="text-left px-3 py-2">Ver</th>
+                    <th className="text-left px-3 py-2">Flags</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trades.map((t: any) => (
+                    <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
+                      <td className="px-3 py-2">
+                        <Link
+                          href={`/paper-trades/${t.id}`}
+                          className="text-blue-600 hover:underline font-medium"
+                        >
+                          #{t.id}
+                        </Link>
+                      </td>
+                      <td className="px-3 py-2 max-w-[160px] truncate text-gray-700 text-xs">
+                        {t.marketTicker}
+                      </td>
+                      <td className="px-3 py-2 text-gray-700">{t.city ?? "—"}</td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded ${
+                            t.direction === "YES"
+                              ? "bg-green-100 text-green-700"
+                              : "bg-red-100 text-red-700"
+                          }`}
+                        >
+                          {t.direction}
+                        </span>
+                      </td>
+                      <td className="text-right px-3 py-2 text-gray-600">{pp(t.edgePctPoints)}</td>
+                      <td className="text-right px-3 py-2 text-gray-600">{pct(t.sideMarketPrice)}</td>
+                      <td className="text-right px-3 py-2 text-gray-600">{money(t.stake)}</td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                            t.status === "SETTLED"
+                              ? "bg-blue-100 text-blue-700"
+                              : t.status === "OPEN"
+                              ? "bg-yellow-100 text-yellow-700"
+                              : t.status === "VOID"
+                              ? "bg-gray-100 text-gray-500"
+                              : "bg-red-100 text-red-700"
+                          }`}
+                        >
+                          {t.status}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        {t.outcome ? (
+                          <span
+                            className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                              t.outcome === "WIN"
+                                ? "bg-green-100 text-green-700"
+                                : t.outcome === "LOSS"
+                                ? "bg-red-100 text-red-700"
+                                : "bg-gray-100 text-gray-500"
+                            }`}
+                          >
+                            {t.outcome}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td
+                        className={`text-right px-3 py-2 font-medium ${
+                          t.profitLoss == null
+                            ? "text-gray-400"
+                            : t.profitLoss >= 0
+                            ? "text-green-600"
+                            : "text-red-600"
+                        }`}
+                      >
+                        {money(t.profitLoss)}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-gray-500">{t.strategyVersion}</td>
+                      <td className="px-3 py-2">
+                        {t.isFlagged ? (
+                          <span
+                            title={(t.qualityFlags ?? []).join(", ")}
+                            className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5"
+                          >
+                            ⚑ {(t.qualityFlags ?? []).length}
+                          </span>
+                        ) : (
+                          <span className="text-gray-300 text-xs">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </Section>
     </div>
   );
 }

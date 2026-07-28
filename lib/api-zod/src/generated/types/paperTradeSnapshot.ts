@@ -12,6 +12,14 @@ export type PaperTradeSnapshot = {
   /** @nullable */
   createdAt?: string | null;
   /** @nullable */
+  forecastDate?: string | null;
+  /** @nullable */
+  forecastValue?: number | null;
+  /** @nullable */
+  forecastRetrievedAt?: string | null;
+  /** @nullable */
+  leadTimeDays?: number | null;
+  /** @nullable */
   ecProbability?: number | null;
   /** @nullable */
   marketProbability?: number | null;
@@ -19,10 +27,6 @@ export type PaperTradeSnapshot = {
   confidence?: string | null;
   /** @nullable */
   explanation?: string | null;
-  /** @nullable */
-  forecastValue?: number | null;
-  /** @nullable */
-  leadTimeDays?: number | null;
   /** @nullable */
   settlementVariable?: string | null;
   /** @nullable */
@@ -32,7 +36,15 @@ export type PaperTradeSnapshot = {
   /** @nullable */
   contractType?: string | null;
   /** @nullable */
+  targetHour?: number | null;
+  /** @nullable */
+  targetTimezoneStr?: string | null;
+  /** @nullable */
   lowerBound?: number | null;
   /** @nullable */
   upperBound?: number | null;
+  /** @nullable */
+  analysisStatus?: string | null;
+  /** @nullable */
+  analysisReason?: string | null;
 } | null;

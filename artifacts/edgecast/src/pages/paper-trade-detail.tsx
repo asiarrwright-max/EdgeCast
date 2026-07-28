@@ -152,6 +152,9 @@ export default function PaperTradeDetailPage({ params }: { params: { id: string 
   const snap = (trade as any).snapshot as Record<string, any> | null;
 
   const warnings = trade.warnings ? trade.warnings.split(";").map((w: string) => w.trim()).filter(Boolean) : [];
+  const qualityFlags: string[] = (trade as any).qualityFlags ?? [];
+  const isFlagged: boolean = (trade as any).isFlagged ?? false;
+  const flagDescriptions: Record<string, string> = (trade as any).qualityFlagDescriptions ?? {};
 
   return (
     <div className="space-y-6">
@@ -168,7 +171,7 @@ export default function PaperTradeDetailPage({ params }: { params: { id: string 
           {mkt?.title && <p className="text-muted-foreground mt-1">{mkt.title}</p>}
           {mkt?.subtitle && <p className="text-xs text-muted-foreground">{mkt.subtitle}</p>}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <DirectionBadge direction={trade.direction} />
           <span className={`text-xs px-1.5 py-0.5 rounded border font-medium ${
             trade.status === "OPEN"    ? "text-sky-400 border-sky-500/30" :
@@ -178,6 +181,11 @@ export default function PaperTradeDetailPage({ params }: { params: { id: string 
           }`}>
             {trade.status}
           </span>
+          {isFlagged && (
+            <span className="text-xs px-1.5 py-0.5 rounded border font-medium text-amber-400 border-amber-500/40 bg-amber-500/10">
+              ⚑ {qualityFlags.length} flag{qualityFlags.length !== 1 ? "s" : ""}
+            </span>
+          )}
         </div>
       </div>
 
@@ -269,6 +277,34 @@ export default function PaperTradeDetailPage({ params }: { params: { id: string 
             <Row label="YES Ask">{mkt.yesAsk != null ? pct(mkt.yesAsk) : "—"}</Row>
             <Row label="NO Bid">{mkt.noBid != null ? pct(mkt.noBid) : "—"}</Row>
             <Row label="NO Ask">{mkt.noAsk != null ? pct(mkt.noAsk) : "—"}</Row>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Quality Flags */}
+      {isFlagged && (
+        <Card className="border-amber-500/30 bg-amber-500/5">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-amber-300 flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4" /> Data Quality Flags
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-amber-300/70 mb-3">
+              These flags were recorded at trade creation and are permanent. They indicate potential
+              data-quality concerns; flagged trades are <strong>not</strong> automatically excluded
+              from metrics — use the "Flagged only / Clean only" filter to control inclusion.
+            </p>
+            <ul className="space-y-2">
+              {qualityFlags.map((flag: string) => (
+                <li key={flag} className="text-xs">
+                  <span className="font-mono text-amber-400 font-semibold">{flag}</span>
+                  {flagDescriptions[flag] && (
+                    <p className="text-amber-300/70 mt-0.5 leading-relaxed">{flagDescriptions[flag]}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
           </CardContent>
         </Card>
       )}

@@ -1,6 +1,6 @@
 """
-EdgeCast Paper Trading Service — Phase 3A
-==========================================
+EdgeCast Paper Trading Service — Phase 3A / 3B
+===============================================
 Simulates paper trades based on EdgeCast probability analysis vs Kalshi market
 prices.  No real trades are placed.  No trading API credentials are used.
 
@@ -35,6 +35,47 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AppSetting, KalshiMarket, PaperTrade, PredictionSnapshot
+
+# ── Phase 3B: quality-flag constants ─────────────────────────────────────────
+
+FLAG_DESCRIPTIONS: dict[str, str] = {
+    "missing_settlement_station": (
+        "Settlement weather station is not identified — outcome attribution may be unclear."
+    ),
+    "missing_expiration_time": (
+        "Market has no recorded expiration time — the trade window is unknown."
+    ),
+    "unsupported_settlement_rule": (
+        "Market settlement rule could not be parsed — edge calculation may be unreliable."
+    ),
+    "zero_volume": (
+        "Reported trading volume is zero — the market may be illiquid."
+    ),
+    "missing_liquidity": (
+        "No bid or ask prices are recorded — entry price reliability is unknown."
+    ),
+    "large_bid_ask_spread": (
+        "The YES bid/ask spread exceeds 20 percentage points — entry cost may be unfavorable."
+    ),
+    "low_entry_price": (
+        "Entry price is below 5 cents — the implied probability is very low."
+    ),
+    "stale_market_quote": (
+        "Market quote may be stale (collected >24 hours before trade creation) — "
+        "prices may not reflect current conditions."
+    ),
+    "forecast_after_trade": (
+        "The forecast data timestamp is later than the trade creation time — "
+        "this forecast may not have been available at the time of entry."
+    ),
+    "correlated_trades": (
+        "Multiple open trades exist for the same city, date, and weather event — "
+        "results across these trades are correlated."
+    ),
+    "low_fillability": (
+        "Entry price is below 3 cents — realistically very difficult to fill at this price."
+    ),
+}
 
 logger = logging.getLogger(__name__)
 
@@ -274,6 +315,188 @@ def _skip(
     }
 
 
+# ── Phase 3B: quality-flag computation ───────────────────────────────────────
+
+def compute_quality_flags(
+    market: KalshiMarket,
+    snap: PredictionSnapshot,
+    side_market_price: float | None,
+    created_at: datetime | None = None,
+    correlated_count: int = 0,
+) -> list[str]:
+    """
+    Compute data-quality warning flags for a paper trade at creation time.
+    Returns a (possibly empty) list of flag-name strings from FLAG_DESCRIPTIONS.
+
+    Flags are informational only.  Flagged trades are NOT auto-excluded from
+    metrics; callers decide the inclusion policy.
+    """
+    flags: list[str] = []
+    now = created_at or datetime.now(timezone.utc)
+
+    # 1. Missing settlement station (no parsed weather variable)
+    if getattr(snap, "settlement_variable", None) is None:
+        flags.append("missing_settlement_station")
+
+    # 2. Missing expiration time
+    if getattr(market, "close_time", None) is None:
+        flags.append("missing_expiration_time")
+
+    # 3. Unsupported settlement rule (defensive — decide_trade already skips these)
+    if getattr(snap, "analysis_status", None) != "supported":
+        flags.append("unsupported_settlement_rule")
+
+    # 4. Zero reported volume
+    vol = getattr(market, "volume", None)
+    if vol is not None and vol == 0:
+        flags.append("zero_volume")
+
+    # 5. Missing liquidity (no bid/ask prices at all)
+    has_prices = any(
+        getattr(market, f, None) is not None
+        for f in ("yes_bid", "yes_ask", "no_bid", "no_ask")
+    )
+    if not has_prices:
+        flags.append("missing_liquidity")
+
+    # 6. Large YES bid/ask spread (> 20pp)
+    yes_bid = getattr(market, "yes_bid", None)
+    yes_ask = getattr(market, "yes_ask", None)
+    if yes_bid is not None and yes_ask is not None and (yes_ask - yes_bid) > 0.20:
+        flags.append("large_bid_ask_spread")
+
+    # 7. Low entry price (< 5 cents)
+    if side_market_price is not None and 0 < side_market_price < 0.05:
+        flags.append("low_entry_price")
+
+    # 8. Stale market quote (collection timestamp > 24h before trade creation)
+    coll_ts = getattr(market, "collection_timestamp", None)
+    if coll_ts is not None and isinstance(coll_ts, datetime):
+        if coll_ts.tzinfo is None:
+            coll_ts = coll_ts.replace(tzinfo=timezone.utc)
+        if (now - coll_ts).total_seconds() > 86_400:
+            flags.append("stale_market_quote")
+
+    # 9. Forecast retrieved after trade creation (data anomaly)
+    fc_ts = getattr(snap, "forecast_retrieved_at", None)
+    if fc_ts is not None and isinstance(fc_ts, datetime):
+        if fc_ts.tzinfo is None:
+            fc_ts = fc_ts.replace(tzinfo=timezone.utc)
+        if fc_ts > now:
+            flags.append("forecast_after_trade")
+
+    # 10. Correlated trades (same city + date + weather_event already open)
+    if correlated_count > 0:
+        flags.append("correlated_trades")
+
+    # 11. Low fillability (< 3 cents — very hard to fill in practice)
+    if side_market_price is not None and 0 < side_market_price < 0.03:
+        flags.append("low_fillability")
+
+    return flags
+
+
+# ── Phase 3B: bucket helpers ──────────────────────────────────────────────────
+
+def edge_bucket(edge_pct: float | None) -> str:
+    if edge_pct is None:
+        return "unknown"
+    if edge_pct < 10:
+        return "<10pp"
+    if edge_pct < 20:
+        return "10-20pp"
+    if edge_pct < 30:
+        return "20-30pp"
+    if edge_pct < 40:
+        return "30-40pp"
+    return "≥40pp"
+
+EDGE_BUCKET_ORDER = ["<10pp", "10-20pp", "20-30pp", "30-40pp", "≥40pp", "unknown"]
+
+
+def price_bucket(price: float | None) -> str:
+    """price in [0, 1] decimal; buckets in cents."""
+    if price is None:
+        return "unknown"
+    cents = price * 100
+    if cents <= 5:
+        return "1-5¢"
+    if cents <= 15:
+        return "6-15¢"
+    if cents <= 30:
+        return "16-30¢"
+    if cents <= 50:
+        return "31-50¢"
+    return ">50¢"
+
+PRICE_BUCKET_ORDER = ["1-5¢", "6-15¢", "16-30¢", "31-50¢", ">50¢", "unknown"]
+
+
+def lead_bucket(days: int | None) -> str:
+    if days is None:
+        return "unknown"
+    if days <= 1:
+        return "0-1d"
+    if days <= 3:
+        return "2-3d"
+    if days <= 7:
+        return "4-7d"
+    return ">7d"
+
+LEAD_BUCKET_ORDER = ["0-1d", "2-3d", "4-7d", ">7d", "unknown"]
+
+
+def _breakdown_row(
+    label: str,
+    group: list[PaperTrade],
+    total_cost_rate: float = 0.0,
+) -> dict:
+    """Single breakdown row for a group of trades."""
+    settled = [t for t in group if t.status == "SETTLED"]
+    wins = [t for t in settled if t.outcome == "WIN"]
+    total_stake = sum(t.stake or 0 for t in settled)
+    raw_pl = sum(t.profit_loss or 0 for t in settled)
+    deductions = sum((t.stake or 0) * total_cost_rate / 100 for t in settled) if total_cost_rate > 0 else 0.0
+    adj_pl = raw_pl - deductions
+    win_rate = len(wins) / len(settled) if settled else None
+    roi = (raw_pl / total_stake * 100) if total_stake > 0 else None
+    adj_roi = (adj_pl / total_stake * 100) if (total_stake > 0 and total_cost_rate > 0) else None
+    return {
+        "label": label,
+        "settledCount": len(settled),
+        "wins": len(wins),
+        "losses": len(settled) - len(wins),
+        "winRate": round(win_rate, 4) if win_rate is not None else None,
+        "totalStake": round(total_stake, 4),
+        "profitLoss": round(raw_pl, 4),
+        "roi": round(roi, 4) if roi is not None else None,
+        "adjProfitLoss": round(adj_pl, 4) if total_cost_rate > 0 else None,
+        "adjRoi": round(adj_roi, 4) if adj_roi is not None else None,
+    }
+
+
+def _build_breakdown(
+    trades: list[PaperTrade],
+    key_fn: Any,
+    order: list[str] | None = None,
+    total_cost_rate: float = 0.0,
+) -> list[dict]:
+    groups: dict[str, list] = {}
+    for t in trades:
+        k = key_fn(t) or "Unknown"
+        groups.setdefault(k, []).append(t)
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for k in (order or []):
+        if k in groups:
+            rows.append(_breakdown_row(k, groups[k], total_cost_rate))
+            seen.add(k)
+    for k in sorted(groups.keys()):
+        if k not in seen:
+            rows.append(_breakdown_row(k, groups[k], total_cost_rate))
+    return rows
+
+
 # ── Position math ─────────────────────────────────────────────────────────────
 
 def calculate_position(stake: float, purchase_price: float) -> dict[str, float]:
@@ -370,6 +593,23 @@ async def maybe_create_paper_trade(
     side_price = decision["side_market_price"]
     pos = calculate_position(stake, side_price)
 
+    # Check for correlated trades (same city + target date + weather event)
+    correlated_count = 0
+    if market.city and market.target_date and snap.settlement_variable:
+        corr_q = await session.execute(
+            select(PaperTrade).where(
+                PaperTrade.city == market.city,
+                PaperTrade.target_settlement_date == market.target_date,
+                PaperTrade.weather_variable == snap.settlement_variable,
+                PaperTrade.status == "OPEN",
+                PaperTrade.strategy_version == strategy_version,
+            ).limit(5)
+        )
+        correlated_count = len(corr_q.scalars().all())
+
+    now = datetime.now(timezone.utc)
+    flags = compute_quality_flags(market, snap, side_price, created_at=now, correlated_count=correlated_count)
+
     trade = PaperTrade(
         market_ticker=market.ticker,
         event_ticker=market.event_ticker,
@@ -390,9 +630,11 @@ async def maybe_create_paper_trade(
         confidence_label=snap.confidence,
         stake=stake,
         quantity=pos["quantity"],
+        lead_time_days=snap.lead_time_days,
         status="OPEN",
         decision_explanation=decision["decision_explanation"],
         warnings="; ".join(decision["warnings"]),
+        quality_flags=flags if flags else None,
     )
     session.add(trade)
     await session.flush()
@@ -483,9 +725,15 @@ async def run_paper_trading(session: AsyncSession) -> dict[str, int]:
 
 # ── Metrics ───────────────────────────────────────────────────────────────────
 
-async def get_paper_trade_metrics(session: AsyncSession) -> dict:
-    """Calculate summary metrics across all paper trades."""
-    trades_q = await session.execute(select(PaperTrade))
+async def get_paper_trade_metrics(
+    session: AsyncSession,
+    strategy_version: str | None = None,
+) -> dict:
+    """Calculate summary metrics. Pass strategy_version to scope to a single version."""
+    q = select(PaperTrade)
+    if strategy_version:
+        q = q.where(PaperTrade.strategy_version == strategy_version)
+    trades_q = await session.execute(q)
     all_trades = trades_q.scalars().all()
 
     if not all_trades:
@@ -509,6 +757,7 @@ async def get_paper_trade_metrics(session: AsyncSession) -> dict:
     all_edges = [t.edge_pct_points for t in all_trades if t.edge_pct_points is not None]
     win_edges = [t.edge_pct_points for t in wins if t.edge_pct_points is not None]
     loss_edges = [t.edge_pct_points for t in losses if t.edge_pct_points is not None]
+    all_prices = [t.side_market_price for t in all_trades if t.side_market_price is not None]
 
     def perf_by(key_fn, trades_list: list) -> list[dict]:
         groups: dict[str, list] = {}
@@ -544,6 +793,7 @@ async def get_paper_trade_metrics(session: AsyncSession) -> dict:
         "netProfitLoss": round(net_pl, 4),
         "roi": round(roi, 4) if roi is not None else None,
         "avgEntryEdge": avg(all_edges),
+        "avgEntryPrice": avg(all_prices),
         "avgWinEdge": avg(win_edges),
         "avgLossEdge": avg(loss_edges),
         "byDirection": perf_by(lambda t: t.direction, all_trades),
@@ -563,8 +813,210 @@ def _empty_metrics() -> dict:
         "openCount": 0, "settledCount": 0, "voidCount": 0, "totalCount": 0,
         "wins": 0, "losses": 0, "winRate": None,
         "totalStaked": 0.0, "netProfitLoss": 0.0, "roi": None,
-        "avgEntryEdge": None, "avgWinEdge": None, "avgLossEdge": None,
+        "avgEntryEdge": None, "avgEntryPrice": None,
+        "avgWinEdge": None, "avgLossEdge": None,
         "byDirection": [], "byConfidence": [], "byCity": [], "byContractType": [],
         "sampleSizeWarning": True,
         "preliminaryNote": "No settled trades yet. Results will appear after markets resolve.",
+    }
+
+
+# ── Phase 3B: analytics ───────────────────────────────────────────────────────
+
+async def get_paper_trade_analytics(
+    session: AsyncSession,
+    strategy_version: str | None = None,
+    include_flagged: bool = True,
+    fee_pct: float = 0.0,
+    slippage_pct: float = 0.0,
+    spread_adj: float = 0.0,
+) -> dict:
+    """
+    Performance breakdowns for settled paper trades.
+
+    Realistic-result adjustments:
+      adj_pl = raw_pl - stake * (fee_pct + slippage_pct + spread_adj) / 100
+    These are simplified model approximations; clearly labelled in the UI.
+    """
+    q = select(PaperTrade)
+    if strategy_version:
+        q = q.where(PaperTrade.strategy_version == strategy_version)
+    result = await session.execute(q)
+    all_trades = result.scalars().all()
+
+    # Optional: exclude flagged trades
+    if not include_flagged:
+        all_trades = [t for t in all_trades if not (t.quality_flags)]
+
+    settled_t = [t for t in all_trades if t.status == "SETTLED"]
+    total_cost_rate = fee_pct + slippage_pct + spread_adj
+
+    # Cumulative P/L time series (settled, sorted by settlement timestamp)
+    settled_by_time = sorted(
+        settled_t,
+        key=lambda t: t.settlement_timestamp or datetime.min.replace(tzinfo=timezone.utc),
+    )
+    cumulative = 0.0
+    adj_cumulative = 0.0
+    cumulative_pl: list[dict] = []
+    for t in settled_by_time:
+        pl = t.profit_loss or 0.0
+        deduction = (t.stake or 0.0) * total_cost_rate / 100
+        cumulative += pl
+        adj_cumulative += pl - deduction
+        cumulative_pl.append({
+            "date": t.settlement_timestamp.isoformat() if t.settlement_timestamp else None,
+            "cumulativePl": round(cumulative, 4),
+            "adjCumulativePl": round(adj_cumulative, 4) if total_cost_rate > 0 else None,
+            "tradeId": t.id,
+        })
+
+    # Daily P/L
+    daily: dict[str, dict] = {}
+    for t in settled_by_time:
+        if not t.settlement_timestamp:
+            continue
+        day = t.settlement_timestamp.strftime("%Y-%m-%d")
+        if day not in daily:
+            daily[day] = {"date": day, "pl": 0.0, "adjPl": 0.0, "count": 0}
+        pl = t.profit_loss or 0.0
+        deduction = (t.stake or 0.0) * total_cost_rate / 100
+        daily[day]["pl"] += pl
+        daily[day]["adjPl"] += pl - deduction
+        daily[day]["count"] += 1
+    daily_pl = [
+        {
+            "date": v["date"],
+            "pl": round(v["pl"], 4),
+            "adjPl": round(v["adjPl"], 4) if total_cost_rate > 0 else None,
+            "count": v["count"],
+        }
+        for v in sorted(daily.values(), key=lambda x: x["date"])
+    ]
+
+    return {
+        "strategyVersion": strategy_version,
+        "includeFlagged": include_flagged,
+        "realisticAdjustments": {
+            "feePct": fee_pct,
+            "slippagePct": slippage_pct,
+            "spreadAdj": spread_adj,
+            "totalCostPct": total_cost_rate,
+        },
+        "cumulativePl": cumulative_pl,
+        "dailyPl": daily_pl,
+        "byDirection": _build_breakdown(
+            settled_t, lambda t: t.direction, total_cost_rate=total_cost_rate,
+        ),
+        "byCity": _build_breakdown(
+            settled_t, lambda t: t.city, total_cost_rate=total_cost_rate,
+        ),
+        "byContractType": _build_breakdown(
+            settled_t, lambda t: t.contract_type, total_cost_rate=total_cost_rate,
+        ),
+        "byEdgeBucket": _build_breakdown(
+            settled_t,
+            lambda t: edge_bucket(t.edge_pct_points),
+            order=EDGE_BUCKET_ORDER,
+            total_cost_rate=total_cost_rate,
+        ),
+        "byPriceBucket": _build_breakdown(
+            settled_t,
+            lambda t: price_bucket(t.side_market_price),
+            order=PRICE_BUCKET_ORDER,
+            total_cost_rate=total_cost_rate,
+        ),
+        "byLeadTime": _build_breakdown(
+            settled_t,
+            lambda t: lead_bucket(t.lead_time_days),
+            order=LEAD_BUCKET_ORDER,
+            total_cost_rate=total_cost_rate,
+        ),
+    }
+
+
+# ── Phase 3B: calibration report ─────────────────────────────────────────────
+
+_CALIBRATION_BUCKETS = [
+    ("0-10%",   0.00, 0.10),
+    ("11-20%",  0.10, 0.20),
+    ("21-30%",  0.20, 0.30),
+    ("31-40%",  0.30, 0.40),
+    ("41-50%",  0.40, 0.50),
+    ("51-60%",  0.50, 0.60),
+    ("61-70%",  0.60, 0.70),
+    ("71-80%",  0.70, 0.80),
+    ("81-90%",  0.80, 0.90),
+    ("91-100%", 0.90, 1.001),  # inclusive of 1.0
+]
+
+
+async def get_calibration_report(
+    session: AsyncSession,
+    strategy_version: str | None = None,
+) -> dict:
+    """
+    Compare EdgeCast YES-probability estimates against actual Kalshi settlement.
+    Uses only SETTLED non-void trades with a known ec_yes_probability.
+
+    Brier score = (1/n) * Σ (ec_prob − actual_yes)²
+    where actual_yes = 1 if market settled YES, 0 if NO.
+    """
+    q = (
+        select(PaperTrade)
+        .where(
+            PaperTrade.status == "SETTLED",
+            PaperTrade.kalshi_result.in_(["yes", "no"]),
+            PaperTrade.ec_yes_probability.isnot(None),
+        )
+    )
+    if strategy_version:
+        q = q.where(PaperTrade.strategy_version == strategy_version)
+    result = await session.execute(q)
+    trades = result.scalars().all()
+
+    if not trades:
+        return {
+            "buckets": [
+                {"bucket": b, "count": 0, "avgEcProb": None, "actualYesRate": None, "calibrationDiff": None}
+                for b, _, _ in _CALIBRATION_BUCKETS
+            ],
+            "brierScore": None,
+            "totalSettled": 0,
+            "strategyVersion": strategy_version,
+        }
+
+    bucket_items: dict[str, list[tuple[float, int]]] = {b: [] for b, _, _ in _CALIBRATION_BUCKETS}
+    brier_sum = 0.0
+
+    for t in trades:
+        ec_prob: float = t.ec_yes_probability  # type: ignore[assignment]
+        actual_yes = 1 if t.kalshi_result == "yes" else 0
+        brier_sum += (ec_prob - actual_yes) ** 2
+        for label, lo, hi in _CALIBRATION_BUCKETS:
+            if lo <= ec_prob < hi:
+                bucket_items[label].append((ec_prob, actual_yes))
+                break
+
+    buckets = []
+    for label, _, _ in _CALIBRATION_BUCKETS:
+        items = bucket_items[label]
+        if not items:
+            buckets.append({"bucket": label, "count": 0, "avgEcProb": None, "actualYesRate": None, "calibrationDiff": None})
+        else:
+            avg_prob = sum(p for p, _ in items) / len(items)
+            yes_rate = sum(o for _, o in items) / len(items)
+            buckets.append({
+                "bucket": label,
+                "count": len(items),
+                "avgEcProb": round(avg_prob, 4),
+                "actualYesRate": round(yes_rate, 4),
+                "calibrationDiff": round(avg_prob - yes_rate, 4),
+            })
+
+    return {
+        "buckets": buckets,
+        "brierScore": round(brier_sum / len(trades), 6),
+        "totalSettled": len(trades),
+        "strategyVersion": strategy_version,
     }

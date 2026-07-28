@@ -250,6 +250,12 @@ class PaperTrade(Base):
     profit_loss: Mapped[float | None] = mapped_column(Float)             # dollars (negative = loss)
     return_pct: Mapped[float | None] = mapped_column(Float)              # percentage, e.g. -100.0
 
+    # Forecast lead time at trade creation (immutable, copied from snapshot)
+    lead_time_days: Mapped[int | None] = mapped_column(Integer)
+
     # Explanation and warnings
     decision_explanation: Mapped[str | None] = mapped_column(Text)
     warnings: Mapped[str | None] = mapped_column(Text)                  # semicolon-separated list
+
+    # Phase 3B: structured data-quality flags (JSON list of flag name strings)
+    quality_flags: Mapped[list | None] = mapped_column(JSON)

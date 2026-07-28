@@ -8,6 +8,7 @@
 import type { PaperTradeDirection } from './paperTradeDirection';
 import type { PaperTradeMarket } from './paperTradeMarket';
 import type { PaperTradeOutcome } from './paperTradeOutcome';
+import type { PaperTradeQualityFlagDescriptions } from './paperTradeQualityFlagDescriptions';
 import type { PaperTradeSnapshot } from './paperTradeSnapshot';
 import type { PaperTradeStatus } from './paperTradeStatus';
 
@@ -49,6 +50,8 @@ export interface PaperTrade {
   stake: number;
   /** @nullable */
   quantity?: number | null;
+  /** @nullable */
+  leadTimeDays?: number | null;
   status: PaperTradeStatus;
   /** @nullable */
   kalshiResult?: string | null;
@@ -66,6 +69,9 @@ export interface PaperTrade {
   decisionExplanation?: string | null;
   /** @nullable */
   warnings?: string | null;
+  qualityFlags?: string[];
+  isFlagged?: boolean;
+  qualityFlagDescriptions?: PaperTradeQualityFlagDescriptions;
   market?: PaperTradeMarket;
   snapshot?: PaperTradeSnapshot;
 }

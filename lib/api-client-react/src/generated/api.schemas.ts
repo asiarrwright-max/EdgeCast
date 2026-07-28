@@ -247,6 +247,8 @@ export const PaperTradeOutcome = {
   VOID: 'VOID',
 } as const;
 
+export type PaperTradeQualityFlagDescriptions = {[key: string]: string};
+
 export type PaperTradeMarket = {
   /** @nullable */
   title?: string | null;
@@ -254,6 +256,10 @@ export type PaperTradeMarket = {
   subtitle?: string | null;
   /** @nullable */
   targetDate?: string | null;
+  /** @nullable */
+  openTime?: string | null;
+  /** @nullable */
+  closeTime?: string | null;
   /** @nullable */
   yesBid?: number | null;
   /** @nullable */
@@ -263,7 +269,11 @@ export type PaperTradeMarket = {
   /** @nullable */
   noAsk?: number | null;
   /** @nullable */
+  volume?: number | null;
+  /** @nullable */
   weatherMarketType?: string | null;
+  /** @nullable */
+  collectionTimestamp?: string | null;
 } | null;
 
 export type PaperTradeSnapshot = {
@@ -271,6 +281,14 @@ export type PaperTradeSnapshot = {
   id?: number | null;
   /** @nullable */
   createdAt?: string | null;
+  /** @nullable */
+  forecastDate?: string | null;
+  /** @nullable */
+  forecastValue?: number | null;
+  /** @nullable */
+  forecastRetrievedAt?: string | null;
+  /** @nullable */
+  leadTimeDays?: number | null;
   /** @nullable */
   ecProbability?: number | null;
   /** @nullable */
@@ -280,10 +298,6 @@ export type PaperTradeSnapshot = {
   /** @nullable */
   explanation?: string | null;
   /** @nullable */
-  forecastValue?: number | null;
-  /** @nullable */
-  leadTimeDays?: number | null;
-  /** @nullable */
   settlementVariable?: string | null;
   /** @nullable */
   settlementOperator?: string | null;
@@ -292,9 +306,17 @@ export type PaperTradeSnapshot = {
   /** @nullable */
   contractType?: string | null;
   /** @nullable */
+  targetHour?: number | null;
+  /** @nullable */
+  targetTimezoneStr?: string | null;
+  /** @nullable */
   lowerBound?: number | null;
   /** @nullable */
   upperBound?: number | null;
+  /** @nullable */
+  analysisStatus?: string | null;
+  /** @nullable */
+  analysisReason?: string | null;
 } | null;
 
 export interface PaperTrade {
@@ -335,6 +357,8 @@ export interface PaperTrade {
   stake: number;
   /** @nullable */
   quantity?: number | null;
+  /** @nullable */
+  leadTimeDays?: number | null;
   status: PaperTradeStatus;
   /** @nullable */
   kalshiResult?: string | null;
@@ -352,8 +376,95 @@ export interface PaperTrade {
   decisionExplanation?: string | null;
   /** @nullable */
   warnings?: string | null;
+  qualityFlags?: string[];
+  isFlagged?: boolean;
+  qualityFlagDescriptions?: PaperTradeQualityFlagDescriptions;
   market?: PaperTradeMarket;
   snapshot?: PaperTradeSnapshot;
+}
+
+export interface BreakdownRow {
+  label: string;
+  settledCount: number;
+  wins: number;
+  losses: number;
+  /** @nullable */
+  winRate?: number | null;
+  totalStake: number;
+  profitLoss: number;
+  /** @nullable */
+  roi?: number | null;
+  /** @nullable */
+  adjProfitLoss?: number | null;
+  /** @nullable */
+  adjRoi?: number | null;
+}
+
+export type PaperTradeAnalyticsRealisticAdjustments = {
+  feePct?: number;
+  slippagePct?: number;
+  spreadAdj?: number;
+  totalCostPct?: number;
+};
+
+export type PaperTradeAnalyticsCumulativePlItem = {
+  /** @nullable */
+  date?: string | null;
+  cumulativePl?: number;
+  /** @nullable */
+  adjCumulativePl?: number | null;
+  tradeId?: number;
+};
+
+export type PaperTradeAnalyticsDailyPlItem = {
+  date?: string;
+  pl?: number;
+  /** @nullable */
+  adjPl?: number | null;
+  count?: number;
+};
+
+export interface PaperTradeAnalytics {
+  /** @nullable */
+  strategyVersion?: string | null;
+  includeFlagged?: boolean;
+  realisticAdjustments?: PaperTradeAnalyticsRealisticAdjustments;
+  cumulativePl: PaperTradeAnalyticsCumulativePlItem[];
+  dailyPl: PaperTradeAnalyticsDailyPlItem[];
+  byDirection: BreakdownRow[];
+  byEdgeBucket: BreakdownRow[];
+  byPriceBucket: BreakdownRow[];
+  byCity: BreakdownRow[];
+  byContractType: BreakdownRow[];
+  byLeadTime: BreakdownRow[];
+}
+
+export interface CalibrationBucket {
+  bucket: string;
+  count: number;
+  /** @nullable */
+  avgEcProb?: number | null;
+  /** @nullable */
+  actualYesRate?: number | null;
+  /** @nullable */
+  calibrationDiff?: number | null;
+}
+
+export interface CalibrationReport {
+  buckets: CalibrationBucket[];
+  /** @nullable */
+  brierScore?: number | null;
+  totalSettled: number;
+  /** @nullable */
+  strategyVersion?: string | null;
+}
+
+export interface SettlementRunResult {
+  checked: number;
+  settled: number;
+  voided: number;
+  errors: number;
+  stillOpen: number;
 }
 
 export type PaperTradeSummaryByDirectionItem = {
@@ -420,6 +531,8 @@ export interface PaperTradeSummary {
   /** @nullable */
   avgEntryEdge?: number | null;
   /** @nullable */
+  avgEntryPrice?: number | null;
+  /** @nullable */
   avgWinEdge?: number | null;
   /** @nullable */
   avgLossEdge?: number | null;
@@ -457,11 +570,32 @@ city?: string;
 contract_type?: string;
 date_from?: string;
 date_to?: string;
+strategy_version?: string;
+edge_bucket?: string;
+price_bucket?: string;
+is_flagged?: boolean;
+outcome?: string;
 limit?: number;
 };
 
 export type ListPaperTrades200 = {
   trades: PaperTrade[];
   total: number;
+};
+
+export type GetPaperTradeMetricsParams = {
+strategy_version?: string;
+};
+
+export type GetPaperTradeAnalyticsParams = {
+strategy_version?: string;
+include_flagged?: boolean;
+fee_pct?: number;
+slippage_pct?: number;
+spread_adj?: number;
+};
+
+export type GetPaperTradeCalibrationParams = {
+strategy_version?: string;
 };
 

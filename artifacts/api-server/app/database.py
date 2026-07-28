@@ -67,6 +67,9 @@ async def _apply_migrations(conn) -> None:
         "ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS pt_no_trades INTEGER",
         "ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS pt_skipped INTEGER",
         "ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS pt_errors INTEGER",
+        # Phase 3B: PaperTrade data-quality and analytics columns
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS quality_flags JSONB",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS lead_time_days INTEGER",
     ]
     for stmt in migrations:
         try:
