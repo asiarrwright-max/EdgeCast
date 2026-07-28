@@ -1,0 +1,196 @@
+We are entering a validation phase for EdgeCast.
+
+Important: Do not change the existing weather prediction logic, probability calculations, uncertainty assumptions, market parsing, or trade-entry strategy. Treat the current system as Strategy v1 and preserve its behavior.
+
+Your task is to improve paper-trading measurement, transparency, and data-quality auditing.
+
+1. Strategy versioning
+- Add a strategy_version field to every paper trade.
+- Existing and new trades created by the current logic should be labeled "v1".
+- Never recalculate or overwrite the original entry probability, market price, edge, forecast inputs, or stake after a trade is created.
+
+2. Settled-trade processing
+- Confirm that open paper trades automatically settle when the related Kalshi market settles.
+- Store:
+  - settlement result
+  - settlement time
+  - payout
+  - profit/loss
+  - return on stake
+- Add clear logging and error handling for trades that fail to settle.
+- Add a manual "Run settlement check" button for testing.
+
+3. Paper-trading overview
+Add summary cards for:
+- Open trades
+- Settled trades
+- Wins
+- Losses
+- Win rate
+- Total amount staked
+- Total profit/loss
+- ROI
+- Average entry edge
+- Average entry price
+
+Do not display win rate, ROI, or average settled-trade metrics as meaningful when the sample is too small. Clearly show the settled-trade count beside them.
+
+4. Performance analytics
+Add:
+- Cumulative profit/loss over time
+- Daily profit/loss
+- Performance by city
+- Performance by market type
+- Performance by YES versus NO trades
+- Performance by edge bucket:
+  - under 10 percentage points
+  - 10–20
+  - 20–30
+  - 30–40
+  - over 40
+- Performance by entry-price bucket:
+  - 1–5 cents
+  - 6–15 cents
+  - 16–30 cents
+  - 31–50 cents
+  - over 50 cents
+- Performance by forecast lead time, if that data is available
+
+For each group, show:
+- number of settled trades
+- wins
+- losses
+- win rate
+- total stake
+- profit/loss
+- ROI
+
+5. Calibration
+Add a calibration report comparing EdgeCast probabilities with actual outcomes.
+
+Use probability buckets such as:
+- 0–10%
+- 11–20%
+- 21–30%
+- 31–40%
+- 41–50%
+- 51–60%
+- 61–70%
+- 71–80%
+- 81–90%
+- 91–100%
+
+For each bucket, show:
+- number of predictions
+- average EdgeCast probability
+- actual YES rate
+- calibration difference
+
+Also calculate Brier score for settled trades.
+
+6. Trade detail and audit trail
+Each paper trade detail page should permanently display:
+- strategy version
+- market title and ticker
+- YES or NO side
+- entry time
+- market close or expiration time
+- settlement time
+- forecast location
+- weather station or settlement source, when known
+- forecast value used
+- market threshold or range
+- EdgeCast probability at entry
+- market implied probability at entry
+- calculated edge
+- entry price
+- stake
+- quantity or contracts
+- final result
+- profit/loss
+- reason the trade was generated
+- original raw inputs or stored snapshot used for the calculation
+
+7. Data-quality warnings
+Create warning flags for:
+- missing settlement station
+- missing expiration time
+- unknown or unsupported settlement rule
+- zero reported volume
+- missing liquidity data
+- large bid/ask spread
+- extremely low entry price
+- stale market quote
+- forecast timestamp after trade-entry time
+- duplicated trade
+- multiple highly correlated trades for the same city, date, and weather event
+- trade that may not have been realistically fillable
+
+Do not automatically delete these trades. Label them so results can be viewed:
+- including all trades
+- excluding flagged trades
+
+8. Realistic-results view
+Add a second performance view called "Realistic Results".
+
+Keep the existing raw paper-trading results, but also calculate an adjusted result using configurable assumptions for:
+- fees
+- slippage
+- bid/ask spread
+- whether the entry was realistically fillable
+
+Clearly label:
+- Raw Paper Results
+- Realistic Adjusted Results
+
+Do not claim that either represents guaranteed real-world performance.
+
+9. Filters and export
+Add filters for:
+- open or settled
+- date range
+- strategy version
+- city
+- market type
+- trade side
+- edge bucket
+- entry-price bucket
+- flagged or unflagged
+- winner or loser
+
+Add CSV export for the filtered trade list.
+
+10. Sample-size messaging
+Display a clear notice such as:
+
+"Strategy v1 is still being evaluated. Results based on a small number of settled trades may be highly unreliable. No conclusion should be drawn until a substantially larger sample has settled."
+
+Show progress toward:
+- 100 settled trades
+- 300 settled trades
+- 500 settled trades
+
+11. Testing
+Add automated tests for:
+- trade settlement
+- payout and profit/loss calculations
+- ROI
+- YES and NO trades
+- probability and edge buckets
+- calibration buckets
+- Brier score
+- filtering
+- strategy-version preservation
+- prevention of historical trade mutation
+
+Before making changes:
+- inspect the current database schema and existing paper-trading flow
+- create a concise implementation plan
+- identify any migrations required
+- preserve all existing data
+- do not reset the database
+
+After implementation:
+- run all tests
+- verify existing pages still work
+- provide a summary of changed files, database migrations, and any remaining limitations
