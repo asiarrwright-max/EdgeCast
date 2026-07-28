@@ -7,6 +7,119 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
 
+# ---------------------------------------------------------------------------
+# Strategy v2 — Forecast Verification & Error Statistics
+# ---------------------------------------------------------------------------
+
+
+class ForecastVerification(Base):
+    """
+    One row per (city, weather_variable, target_date[, target_hour]).
+    Stores the snapshot forecast value alongside the actual observed
+    temperature retrieved from the Open-Meteo historical archive.
+
+    NOTE: Open-Meteo /archive returns ERA5 reanalysis data, NOT the original
+    model forecast for a historical date.  forecast_error therefore measures
+    (ERA5-reanalysis − NWP-forecast), which is a proxy for but not identical
+    to station-observation error.
+    """
+
+    __tablename__ = "forecast_verifications"
+    __table_args__ = (
+        UniqueConstraint(
+            "city", "weather_variable", "target_date", "target_hour",
+            name="uq_forecast_verification_city_var_date_hour",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    # Best-effort link to the PredictionSnapshot that produced the forecast
+    snapshot_id: Mapped[int | None] = mapped_column(Integer)
+
+    # What we're verifying
+    city: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    weather_variable: Mapped[str] = mapped_column(String(30), nullable=False)  # high | low | hourly_temperature
+    target_date: Mapped[str] = mapped_column(String(20), nullable=False)       # YYYY-MM-DD
+    target_hour: Mapped[int | None] = mapped_column(Integer)                   # 0–23 for hourly; NULL for daily
+
+    # The NWP model forecast at the time of prediction
+    forecast_value: Mapped[float | None] = mapped_column(Float)   # °F
+    lead_time_days: Mapped[int | None] = mapped_column(Integer)
+
+    # The verified observation (populated asynchronously by fetch_and_store_verifications)
+    actual_value: Mapped[float | None] = mapped_column(Float)     # °F; NULL until fetched
+    forecast_error: Mapped[float | None] = mapped_column(Float)   # actual − forecast; NULL until fetched
+    source_label: Mapped[str | None] = mapped_column(String(50))  # 'open_meteo_historical' | 'kalshi_implied'
+
+    # Time metadata
+    month: Mapped[int | None] = mapped_column(Integer)            # 1–12
+    season: Mapped[str | None] = mapped_column(String(10))        # winter|spring|summer|fall
+
+
+class ForecastErrorStats(Base):
+    """
+    Pre-computed aggregate forecast error statistics per (city, variable,
+    lead_time_bucket[, month]).  Populated by recompute_error_stats().
+    Used by probability_engine_v2 to set σ and apply bias correction.
+
+    city = '__global__' for cross-city fallback rows.
+    month = NULL for all-season rows.
+    """
+
+    __tablename__ = "forecast_error_stats"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    last_computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    city: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    weather_variable: Mapped[str] = mapped_column(String(30), nullable=False)
+    lead_time_bucket: Mapped[str] = mapped_column(String(10), nullable=False)  # 0-1d|2-3d|4-7d|>7d
+    month: Mapped[int | None] = mapped_column(Integer)                         # NULL = all seasons
+
+    mean_error: Mapped[float | None] = mapped_column(Float)    # °F; positive = model runs cold
+    median_error: Mapped[float | None] = mapped_column(Float)
+    mae: Mapped[float | None] = mapped_column(Float)           # mean absolute error
+    std_dev: Mapped[float | None] = mapped_column(Float)       # σ for v2 model
+
+    sample_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    fallback_level: Mapped[str | None] = mapped_column(String(20))  # 'city' | 'global'
+
+
+class CalibrationAdjustment(Base):
+    """
+    Per-probability-bucket calibration adjustment factors derived from
+    settled PaperTrade outcomes.
+
+    adjustment_factor is only populated (and used by the engine) when
+    sample_size >= 30 to avoid over-fitting small samples.
+    """
+
+    __tablename__ = "calibration_adjustments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    strategy_version: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+
+    # Probability bucket e.g. [0.10, 0.20)
+    bucket_lo: Mapped[float] = mapped_column(Float, nullable=False)
+    bucket_hi: Mapped[float] = mapped_column(Float, nullable=False)
+
+    # Statistics
+    predicted_rate: Mapped[float | None] = mapped_column(Float)   # avg EC probability in bucket
+    actual_yes_rate: Mapped[float | None] = mapped_column(Float)  # actual fraction that resolved YES
+    adjustment_factor: Mapped[float | None] = mapped_column(Float)  # actual_yes_rate / predicted_rate
+
+    sample_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
 
 class KalshiEvent(Base):
     __tablename__ = "kalshi_events"
@@ -113,6 +226,9 @@ class JobRun(Base):
     pt_no_trades: Mapped[int | None] = mapped_column(Integer)
     pt_skipped: Mapped[int | None] = mapped_column(Integer)
     pt_errors: Mapped[int | None] = mapped_column(Integer)
+    # Phase v2: strategy v2 paper-trading counts
+    pt_v2_created: Mapped[int | None] = mapped_column(Integer)
+    pt_v2_skipped: Mapped[int | None] = mapped_column(Integer)
 
 
 class AppError(Base):
@@ -260,3 +376,9 @@ class PaperTrade(Base):
 
     # Phase 3B: structured data-quality flags (JSON list of flag name strings)
     quality_flags: Mapped[list | None] = mapped_column(JSON)
+
+    # Phase v2: engine metadata (NULL for v1 trades — backward compatible)
+    sigma_used: Mapped[float | None] = mapped_column(Float)          # σ used by v2 engine
+    bias_correction: Mapped[float | None] = mapped_column(Float)     # mean_error subtracted from μ (°F)
+    fallback_level: Mapped[str | None] = mapped_column(String(20))   # 'city' | 'global' | 'fixed_table'
+    calibration_adj: Mapped[float | None] = mapped_column(Float)     # calibration multiplier applied

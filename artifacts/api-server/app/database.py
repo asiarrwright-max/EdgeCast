@@ -70,6 +70,14 @@ async def _apply_migrations(conn) -> None:
         # Phase 3B: PaperTrade data-quality and analytics columns
         "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS quality_flags JSONB",
         "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS lead_time_days INTEGER",
+        # Phase v2: PaperTrade engine metadata (nullable — v1 rows stay NULL)
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS sigma_used FLOAT",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS bias_correction FLOAT",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS fallback_level VARCHAR(20)",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS calibration_adj FLOAT",
+        # Phase v2: JobRun v2 paper-trading counts
+        "ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS pt_v2_created INTEGER",
+        "ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS pt_v2_skipped INTEGER",
     ]
     for stmt in migrations:
         try:

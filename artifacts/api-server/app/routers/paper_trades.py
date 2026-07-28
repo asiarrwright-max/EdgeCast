@@ -41,6 +41,11 @@ from app.services.paper_trading import (
     price_bucket,
     save_paper_trade_settings,
 )
+from app.services.paper_trading_v2 import (
+    V2_FLAG_DESCRIPTIONS,
+    get_strategy_agreement,
+    get_v2_settings,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["paper-trades"])
@@ -50,6 +55,7 @@ router = APIRouter(tags=["paper-trades"])
 
 def _trade_to_dict(t: PaperTrade) -> dict[str, Any]:
     flags: list[str] = t.quality_flags or []
+    all_flag_descs = {**FLAG_DESCRIPTIONS, **V2_FLAG_DESCRIPTIONS}
     return {
         "id": t.id,
         "createdAt": t.created_at.isoformat() if t.created_at else None,
@@ -84,7 +90,12 @@ def _trade_to_dict(t: PaperTrade) -> dict[str, Any]:
         "warnings": t.warnings,
         "qualityFlags": flags,
         "isFlagged": bool(flags),
-        "qualityFlagDescriptions": {f: FLAG_DESCRIPTIONS.get(f, f) for f in flags},
+        "qualityFlagDescriptions": {f: all_flag_descs.get(f, f) for f in flags},
+        # v2 engine metadata (None for v1 trades)
+        "sigmaUsed": t.sigma_used,
+        "biasCorrection": t.bias_correction,
+        "fallbackLevel": t.fallback_level,
+        "calibrationAdj": t.calibration_adj,
     }
 
 
@@ -145,6 +156,60 @@ def _matches_filters(
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
+
+@router.get("/paper-trades/comparison")
+async def get_comparison(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
+    """
+    Side-by-side v1 vs v2 metrics comparison.
+    Returns both strategy summaries and their calibration reports.
+    """
+    v1_metrics = await get_paper_trade_metrics(db, strategy_version="v1.0")
+    v2_metrics = await get_paper_trade_metrics(db, strategy_version="v2.0")
+    v1_calib = await get_calibration_report(db, strategy_version="v1.0")
+    v2_calib = await get_calibration_report(db, strategy_version="v2.0")
+    v2_settings = await get_v2_settings(db)
+    return {
+        "v1": {**v1_metrics, "calibration": v1_calib},
+        "v2": {**v2_metrics, "calibration": v2_calib},
+        "v2Settings": v2_settings,
+    }
+
+
+@router.get("/paper-trades/agreement")
+async def get_agreement(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
+    """Strategy v1 vs v2 agreement/divergence summary."""
+    return await get_strategy_agreement(db)
+
+
+@router.post("/paper-trades/run-verification")
+async def run_verification(
+    _user: dict = Depends(get_current_user),
+):
+    """
+    Trigger an immediate forecast verification pass (fetch actuals + recompute error stats).
+    Normally runs every 24 hours automatically.
+    """
+    from app.database import AsyncSessionLocal
+    from app.services.forecast_verifier import (
+        fetch_and_store_verifications,
+        recompute_error_stats,
+    )
+    if AsyncSessionLocal is None:
+        return {"error": "Database not initialised"}
+    async with AsyncSessionLocal() as session:
+        vstats = await fetch_and_store_verifications(session)
+        estats = await recompute_error_stats(session)
+    return {
+        "verifications": vstats,
+        "errorStats": estats,
+    }
+
 
 @router.get("/paper-trades/metrics")
 async def get_metrics(

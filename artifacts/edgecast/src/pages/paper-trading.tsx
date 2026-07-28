@@ -8,6 +8,9 @@ import {
   useGetPaperTradeAnalytics,
   useGetPaperTradeCalibration,
   useSettleNow,
+  useGetStrategyComparison,
+  useGetStrategyAgreement,
+  useRunVerification,
 } from "@workspace/api-client-react";
 
 // ── small helpers ─────────────────────────────────────────────────────────────
@@ -176,6 +179,11 @@ export default function PaperTradingPage() {
   const [settling, setSettling] = useState(false);
   const [settleResult, setSettleResult] = useState<any>(null);
 
+  // V2 comparison state
+  const [showComparison, setShowComparison] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<any>(null);
+
   // Build query params for list
   const listParams: Record<string, any> = {};
   if (statusF) listParams.status = statusF;
@@ -209,8 +217,11 @@ export default function PaperTradingPage() {
   const { data: calibration } = useGetPaperTradeCalibration(
     calibStratVer ? { strategy_version: calibStratVer } : {}
   );
+  const { data: comparison } = useGetStrategyComparison();
+  const { data: agreement } = useGetStrategyAgreement();
   const updateSettings = useUpdatePaperTradeSettings();
   const settleNowMutation = useSettleNow();
+  const runVerificationMutation = useRunVerification();
 
   const trades = listData?.trades ?? [];
   const total = listData?.total ?? 0;
@@ -234,6 +245,19 @@ export default function PaperTradingPage() {
       setSettleResult({ error: e?.message ?? "Unknown error" });
     } finally {
       setSettling(false);
+    }
+  };
+
+  const handleRunVerification = async () => {
+    setVerifying(true);
+    setVerifyResult(null);
+    try {
+      const r = await runVerificationMutation.mutateAsync();
+      setVerifyResult(r);
+    } catch (e: any) {
+      setVerifyResult({ error: e?.message ?? "Unknown error" });
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -350,6 +374,190 @@ export default function PaperTradingPage() {
         <MetricCard label="Avg Entry Price" value={pct(metrics?.avgEntryPrice)} />
         <MetricCard label="Avg Win Edge" value={pp(metrics?.avgWinEdge)} sub={`Loss: ${pp(metrics?.avgLossEdge)}`} />
       </div>
+
+      {/* V2 Strategy Comparison */}
+      <Section title="Strategy v1 vs v2 Comparison">
+        <div className="px-4 py-3 space-y-4">
+          <div className="flex items-center gap-3 text-sm">
+            <p className="text-xs text-gray-500 flex-1">
+              v2 uses learned σ (from historical forecast errors), bias correction, and conservative
+              calibration adjustments. Initially falls back to v1 fixed σ until enough verified data
+              accumulates.
+            </p>
+            <button
+              onClick={handleRunVerification}
+              disabled={verifying}
+              className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+            >
+              {verifying ? "Running…" : "Run Verification"}
+            </button>
+          </div>
+
+          {verifyResult && (
+            <div
+              className={`rounded border px-3 py-2 text-xs ${
+                verifyResult.error
+                  ? "border-red-300 bg-red-50 text-red-800"
+                  : "border-indigo-200 bg-indigo-50 text-indigo-800"
+              }`}
+            >
+              {verifyResult.error ? (
+                <>Verification failed: {verifyResult.error}</>
+              ) : (
+                <>
+                  Verifications: {verifyResult.verifications?.created ?? 0} created,{" "}
+                  {verifyResult.verifications?.updated ?? 0} updated,{" "}
+                  {verifyResult.verifications?.skipped ?? 0} skipped · Error stats:{" "}
+                  {verifyResult.errorStats?.groups_computed ?? 0} groups recomputed
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Agreement summary */}
+          {agreement && (
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+              {[
+                { label: "Both trade", value: agreement.bothTrade },
+                { label: "Only v1", value: agreement.onlyV1 },
+                { label: "Only v2", value: agreement.onlyV2 },
+                { label: "Same side", value: agreement.sameSides },
+                { label: "Diff side", value: agreement.differentSides },
+                { label: "Prob div >10pp", value: agreement.probDivergenceGt10pp },
+              ].map(({ label, value }) => (
+                <div key={label} className="bg-gray-50 rounded border border-gray-200 px-3 py-2 text-center">
+                  <p className="text-xs text-gray-500">{label}</p>
+                  <p className="text-lg font-semibold text-gray-800">{value}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Side-by-side metrics */}
+          {comparison && (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-xs text-gray-500 uppercase">
+                    <th className="text-left px-4 py-2">Metric</th>
+                    <th className="text-right px-4 py-2">v1.0</th>
+                    <th className="text-right px-4 py-2">v2.0</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    { label: "Total trades", v1: (comparison.v1 as any).totalCount, v2: (comparison.v2 as any).totalCount },
+                    { label: "Open", v1: (comparison.v1 as any).openCount, v2: (comparison.v2 as any).openCount },
+                    { label: "Settled", v1: (comparison.v1 as any).settledCount, v2: (comparison.v2 as any).settledCount },
+                    { label: "Wins", v1: (comparison.v1 as any).wins, v2: (comparison.v2 as any).wins },
+                  ].map(({ label, v1, v2 }) => (
+                    <tr key={label} className="border-t border-gray-100">
+                      <td className="px-4 py-2 text-gray-700">{label}</td>
+                      <td className="text-right px-4 py-2 text-gray-600">{v1 ?? "—"}</td>
+                      <td className="text-right px-4 py-2 text-gray-600">{v2 ?? "—"}</td>
+                    </tr>
+                  ))}
+                  {[
+                    {
+                      label: "Win rate",
+                      v1: pct((comparison.v1 as any).winRate),
+                      v2: pct((comparison.v2 as any).winRate),
+                      v1Raw: (comparison.v1 as any).winRate,
+                      v2Raw: (comparison.v2 as any).winRate,
+                    },
+                  ].map(({ label, v1, v2, v1Raw, v2Raw }) => (
+                    <tr key={label} className="border-t border-gray-100">
+                      <td className="px-4 py-2 text-gray-700">{label}</td>
+                      <td className={`text-right px-4 py-2 font-medium ${v1Raw == null ? "text-gray-400" : v1Raw >= 0.55 ? "text-green-600" : v1Raw < 0.45 ? "text-red-600" : "text-amber-600"}`}>{v1}</td>
+                      <td className={`text-right px-4 py-2 font-medium ${v2Raw == null ? "text-gray-400" : v2Raw >= 0.55 ? "text-green-600" : v2Raw < 0.45 ? "text-red-600" : "text-amber-600"}`}>{v2}</td>
+                    </tr>
+                  ))}
+                  {[
+                    { label: "Net P/L", v1: money((comparison.v1 as any).netProfitLoss), v2: money((comparison.v2 as any).netProfitLoss) },
+                    {
+                      label: "ROI",
+                      v1: pct((comparison.v1 as any).roi == null ? null : (comparison.v1 as any).roi / 100, 2),
+                      v2: pct((comparison.v2 as any).roi == null ? null : (comparison.v2 as any).roi / 100, 2),
+                    },
+                    {
+                      label: "Brier score",
+                      v1: fmt((comparison.v1 as any).calibration?.brierScore),
+                      v2: fmt((comparison.v2 as any).calibration?.brierScore),
+                    },
+                  ].map(({ label, v1, v2 }) => (
+                    <tr key={label} className="border-t border-gray-100">
+                      <td className="px-4 py-2 text-gray-700">{label}</td>
+                      <td className="text-right px-4 py-2 text-gray-600">{v1}</td>
+                      <td className="text-right px-4 py-2 text-gray-600">{v2}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Agreement samples */}
+          {agreement && agreement.samples.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                Agreement samples (up to 20 shared markets)
+              </p>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead>
+                    <tr className="bg-gray-50 text-xs text-gray-400 uppercase">
+                      <th className="text-left px-3 py-1.5">Ticker</th>
+                      <th className="text-center px-3 py-1.5">v1 Dir</th>
+                      <th className="text-center px-3 py-1.5">v2 Dir</th>
+                      <th className="text-right px-3 py-1.5">v1 Prob</th>
+                      <th className="text-right px-3 py-1.5">v2 Prob</th>
+                      <th className="text-right px-3 py-1.5">Δ</th>
+                      <th className="text-center px-3 py-1.5">Agree</th>
+                      <th className="text-left px-3 py-1.5">σ source</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {agreement.samples.map((s: any) => (
+                      <tr key={s.ticker} className="border-t border-gray-100 hover:bg-gray-50">
+                        <td className="px-3 py-1.5 max-w-[140px] truncate text-gray-600 font-mono">{s.ticker}</td>
+                        <td className="text-center px-3 py-1.5">
+                          <span className={`text-xs font-medium px-1 py-0.5 rounded ${s.v1Direction === "YES" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                            {s.v1Direction}
+                          </span>
+                        </td>
+                        <td className="text-center px-3 py-1.5">
+                          <span className={`text-xs font-medium px-1 py-0.5 rounded ${s.v2Direction === "YES" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                            {s.v2Direction}
+                          </span>
+                        </td>
+                        <td className="text-right px-3 py-1.5 text-gray-600">{pct(s.v1EcProb)}</td>
+                        <td className="text-right px-3 py-1.5 text-gray-600">{pct(s.v2EcProb)}</td>
+                        <td className={`text-right px-3 py-1.5 font-medium ${s.probDiff > 0.10 ? "text-amber-600" : "text-gray-400"}`}>
+                          {(s.probDiff * 100).toFixed(1)}pp
+                        </td>
+                        <td className="text-center px-3 py-1.5">
+                          {s.agree ? (
+                            <span className="text-green-600 font-medium">✓</span>
+                          ) : (
+                            <span className="text-red-600 font-medium">✗</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-1.5 text-gray-400 text-xs">{s.v2FallbackLevel ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          <p className="text-xs text-gray-400">
+            v2 calibration and bias corrections are conservative — only applied when n ≥ 5 (σ/bias)
+            or n ≥ 30 (calibration). Until then, v2 uses the v1 fixed σ table as a fallback.
+            Run "Verification" to fetch actual observed temperatures and rebuild error statistics.
+          </p>
+        </div>
+      </Section>
 
       {/* Settings */}
       <Section title="Settings">
@@ -648,6 +856,67 @@ export default function PaperTradingPage() {
         </div>
       </Section>
 
+      {/* V2 Research View (excluded trades) */}
+      <Section title="v2 Research View — Excluded Trades">
+        <div className="px-4 py-3 space-y-3">
+          <p className="text-xs text-gray-500">
+            Markets that v2 declined to trade due to quality rules (1-cent price, zero volume, or
+            no liquidity). These entries help assess what v2 is filtering out and why.
+          </p>
+          {(() => {
+            const excludedTrades = trades.filter((t: any) => t.status === "V2_EXCLUDED");
+            if (excludedTrades.length === 0) {
+              return (
+                <p className="text-sm text-gray-400 py-2">
+                  No excluded v2 trades yet — set the strategy filter below to "v2.0" to see
+                  V2_EXCLUDED entries in the main trade list.
+                </p>
+              );
+            }
+            return (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead>
+                    <tr className="bg-gray-50 text-xs text-gray-400 uppercase">
+                      <th className="text-left px-3 py-2">Market</th>
+                      <th className="text-left px-3 py-2">City</th>
+                      <th className="text-center px-3 py-2">Dir</th>
+                      <th className="text-right px-3 py-2">Price</th>
+                      <th className="text-right px-3 py-2">EC Prob</th>
+                      <th className="text-left px-3 py-2">Exclusion Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {excludedTrades.slice(0, 50).map((t: any) => (
+                      <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
+                        <td className="px-3 py-2 max-w-[160px] truncate text-gray-600 font-mono">{t.marketTicker}</td>
+                        <td className="px-3 py-2 text-gray-600">{t.city ?? "—"}</td>
+                        <td className="text-center px-3 py-2">
+                          {t.direction ? (
+                            <span className={`text-xs font-medium px-1 py-0.5 rounded ${t.direction === "YES" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                              {t.direction}
+                            </span>
+                          ) : "—"}
+                        </td>
+                        <td className="text-right px-3 py-2 text-gray-500">{pct(t.sideMarketPrice)}</td>
+                        <td className="text-right px-3 py-2 text-gray-500">{pct(t.ecYesProbability)}</td>
+                        <td className="px-3 py-2">
+                          {(t.qualityFlags ?? []).map((f: string) => (
+                            <span key={f} title={t.qualityFlagDescriptions?.[f] ?? f} className="inline-block text-xs bg-gray-100 text-gray-500 border border-gray-200 rounded px-1.5 py-0.5 mr-1">
+                              {f}
+                            </span>
+                          ))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
+        </div>
+      </Section>
+
       {/* Trade List */}
       <Section title={`Trades (${total})`} defaultOpen>
         <div className="px-4 py-3 space-y-3">
@@ -663,6 +932,8 @@ export default function PaperTradingPage() {
               <option value="SETTLED">Settled</option>
               <option value="VOID">Void</option>
               <option value="ERROR">Error</option>
+              <option value="PENDING_SETTLEMENT">Pending Settlement</option>
+              <option value="V2_EXCLUDED">v2 Excluded</option>
             </select>
             <select
               value={directionF}
