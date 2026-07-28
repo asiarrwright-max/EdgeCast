@@ -4,6 +4,14 @@ Settlement processing for EdgeCast paper trades — Phase 3A.
 Queries the Kalshi REST API (public, no credentials required) to check
 whether open paper trades have settled.  Settlement is determined solely
 from authoritative Kalshi data — never inferred from weather forecasts.
+
+Status lifecycle:
+  OPEN → SETTLED (Kalshi result: "yes" or "no" confirmed)
+  OPEN → VOID    (Kalshi market canceled/voided)
+  OPEN → PENDING_SETTLEMENT (market closed/finalized but no result yet)
+  OPEN → ERROR   (Kalshi 404 — market no longer exists; terminal)
+  PENDING_SETTLEMENT → SETTLED / VOID / ERROR (re-checked every cycle)
+  Transient errors (network/5xx): status unchanged, warning note appended.
 """
 from __future__ import annotations
 
@@ -11,7 +19,7 @@ import logging
 from datetime import datetime, timezone
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -19,6 +27,11 @@ from app.models import AppError, PaperTrade
 from app.services.paper_trading import settle_position
 
 logger = logging.getLogger(__name__)
+
+# Kalshi market statuses that mean the market has closed but the result
+# has not yet been published.  We put the trade in PENDING_SETTLEMENT
+# rather than leaving it OPEN or treating it as a loss.
+_PENDING_STATUSES = frozenset({"closed", "finalized"})
 
 
 class _FetchResult:
@@ -78,37 +91,59 @@ async def fetch_kalshi_market(ticker: str) -> _FetchResult:
 
 def _extract_result(market_data: dict) -> str | None:
     """
-    Return "yes", "no", "void", or None (not yet settled).
+    Return "yes", "no", "void", "pending", or None (not yet settled).
+
+    "pending"   — market is closed/finalized but no result published yet.
+                  Caller should move trade to PENDING_SETTLEMENT.
+
+    "yes"/"no"  — confirmed final result from Kalshi.
+    "void"      — market was canceled/voided.
+    None        — market still open/active; leave trade OPEN.
 
     Kalshi stores the settlement result in different fields depending on
     API version.  We check the most common locations in order.
     """
-    # "result" field (current API)
-    result = (market_data.get("result") or "").lower()
-    if result in ("yes", "no"):
-        return result
-
-    # Canceled / voided market
     status = (market_data.get("status") or "").lower()
+
+    # Canceled / voided market — check before result to avoid misclassification
     if status in ("canceled", "cancelled", "voided", "canceled_voided"):
         return "void"
 
-    # Not settled yet
+    # "result" field (current API) — only trust it when it is an explicit YES/NO
+    result = (market_data.get("result") or "").lower().strip()
+    if result == "yes":
+        return "yes"
+    if result == "no":
+        return "no"
+
+    # Market has closed or been finalized but no official result yet —
+    # NEVER treat the absence of a result as a loss.
+    if status in _PENDING_STATUSES:
+        return "pending"
+
+    # Market is still open / active — keep the trade OPEN
     return None
 
 
 async def run_settlement_job() -> dict[str, int]:
     """
-    Check all open paper trades against Kalshi and update settled ones.
+    Check all open and pending-settlement paper trades against Kalshi
+    and update settled ones.
 
-    Returns stats: {"checked", "settled", "voided", "errors", "still_open"}
+    Returns stats:
+      {"checked", "settled", "voided", "pending_settlement", "errors", "still_open"}
+
     Safe to call repeatedly — idempotent for already-settled trades.
     """
     from app.database import AsyncSessionLocal
 
     stats: dict[str, int] = {
-        "checked": 0, "settled": 0, "voided": 0,
-        "errors": 0, "still_open": 0,
+        "checked": 0,
+        "settled": 0,
+        "voided": 0,
+        "pending_settlement": 0,
+        "errors": 0,
+        "still_open": 0,
     }
 
     if AsyncSessionLocal is None:
@@ -116,16 +151,25 @@ async def run_settlement_job() -> dict[str, int]:
         return stats
 
     async with AsyncSessionLocal() as session:
+        # Check both OPEN and PENDING_SETTLEMENT trades every cycle.
         open_q = await session.execute(
-            select(PaperTrade).where(PaperTrade.status == "OPEN")
+            select(PaperTrade).where(
+                or_(
+                    PaperTrade.status == "OPEN",
+                    PaperTrade.status == "PENDING_SETTLEMENT",
+                )
+            )
         )
         open_trades = open_q.scalars().all()
 
         if not open_trades:
-            logger.info("Settlement job: no open paper trades.")
+            logger.info("Settlement job: no open or pending paper trades.")
             return stats
 
-        logger.info("Settlement job: checking %d open trade(s).", len(open_trades))
+        logger.info(
+            "Settlement job: checking %d trade(s) (OPEN + PENDING_SETTLEMENT).",
+            len(open_trades),
+        )
 
         for trade in open_trades:
             stats["checked"] += 1
@@ -133,8 +177,7 @@ async def run_settlement_job() -> dict[str, int]:
                 fetch = await fetch_kalshi_market(trade.market_ticker)
 
                 if fetch.transient_error:
-                    # Network / 5xx / timeout — leave OPEN so next cycle retries.
-                    # Append a non-permanent note to warnings but do NOT change status.
+                    # Network / 5xx / timeout — leave status unchanged so next cycle retries.
                     note = f"Settlement check skipped (transient): {fetch.error_msg}"
                     existing = trade.warnings or ""
                     # Only keep the most recent transient-error note to avoid unbounded growth.
@@ -143,9 +186,18 @@ async def run_settlement_job() -> dict[str, int]:
                     trade.warnings = "; ".join(p for p in parts if p)
                     stats["still_open"] += 1
                     logger.info(
-                        "Trade %d (%s) left OPEN after transient fetch error: %s",
+                        "Trade %d (%s) unchanged after transient fetch error: %s",
                         trade.id, trade.market_ticker, fetch.error_msg,
                     )
+                    # Log transient failure separately for monitoring
+                    try:
+                        session.add(AppError(
+                            error_type="settlement_transient",
+                            message=f"Transient fetch error: {fetch.error_msg}"[:500],
+                            context=f"trade_id={trade.id}, ticker={trade.market_ticker}",
+                        ))
+                    except Exception:
+                        pass
                     continue
 
                 if fetch.not_found:
@@ -156,14 +208,39 @@ async def run_settlement_job() -> dict[str, int]:
                     parts.append("Settlement failed: market not found on Kalshi (404)")
                     trade.warnings = "; ".join(parts)
                     stats["errors"] += 1
+                    logger.warning(
+                        "Trade %d (%s) → ERROR: market not found on Kalshi (404).",
+                        trade.id, trade.market_ticker,
+                    )
                     continue
 
                 market_data = fetch.data  # guaranteed non-None here
                 kalshi_result = _extract_result(market_data)
 
                 if kalshi_result is None:
+                    # Market still active — leave OPEN
                     stats["still_open"] += 1
-                    continue  # not settled yet — try again next run
+                    continue
+
+                if kalshi_result == "pending":
+                    # Market is closed/finalized but no result published yet.
+                    # Move to PENDING_SETTLEMENT — NEVER treat as a loss.
+                    if trade.status != "PENDING_SETTLEMENT":
+                        trade.status = "PENDING_SETTLEMENT"
+                        existing = trade.warnings or ""
+                        parts = [p.strip() for p in existing.split(";") if p.strip()
+                                 and "pending settlement" not in p.lower()]
+                        parts.append(
+                            "Market closed/finalized; awaiting official Kalshi result "
+                            f"(checked {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%MZ')})"
+                        )
+                        trade.warnings = "; ".join(parts)
+                    stats["pending_settlement"] += 1
+                    logger.info(
+                        "Trade %d (%s) → PENDING_SETTLEMENT (market closed, no result yet).",
+                        trade.id, trade.market_ticker,
+                    )
+                    continue
 
                 outcome = settle_position(
                     direction=trade.direction,
@@ -213,8 +290,9 @@ async def run_settlement_job() -> dict[str, int]:
         await session.commit()
 
     logger.info(
-        "Settlement job done: %d checked, %d settled, %d voided, %d errors, %d still open.",
+        "Settlement job done: %d checked, %d settled, %d voided, "
+        "%d pending, %d errors, %d still open.",
         stats["checked"], stats["settled"], stats["voided"],
-        stats["errors"], stats["still_open"],
+        stats["pending_settlement"], stats["errors"], stats["still_open"],
     )
     return stats

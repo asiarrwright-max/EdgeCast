@@ -240,7 +240,8 @@ class PaperTrade(Base):
 
     # Lifecycle status
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="OPEN")
-    # OPEN → SETTLED | VOID | ERROR
+    # OPEN → SETTLED | VOID | ERROR | PENDING_SETTLEMENT
+    # PENDING_SETTLEMENT: market closed/finalized but Kalshi has not yet published a result;
 
     # Settlement (written after Kalshi finalizes)
     kalshi_result: Mapped[str | None] = mapped_column(String(10))        # 'yes' | 'no' | 'void'

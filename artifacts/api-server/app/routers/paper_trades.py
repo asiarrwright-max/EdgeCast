@@ -212,6 +212,7 @@ async def settle_now(
         "checked": stats.get("checked", 0),
         "settled": stats.get("settled", 0),
         "voided": stats.get("voided", 0),
+        "pendingSettlement": stats.get("pending_settlement", 0),
         "errors": stats.get("errors", 0),
         "stillOpen": stats.get("still_open", 0),
     }

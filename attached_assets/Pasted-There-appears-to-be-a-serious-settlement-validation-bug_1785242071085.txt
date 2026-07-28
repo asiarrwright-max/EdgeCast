@@ -1,0 +1,85 @@
+There appears to be a serious settlement-validation bug.
+
+Current symptoms:
+- The dashboard shows 41 settled trades, 0 wins, 41 losses, and -100% ROI.
+- All 41 settled trades appear under forecast lead time = "unknown."
+- Clicking a settled trade opens a 404 "Sector Not Found" page.
+- The number of "unknown" lead-time trades exactly matches the number of settled trades.
+
+Please investigate before adding any new features.
+
+Tasks:
+
+1. Audit settlement status
+- Determine exactly why each of the 41 trades was marked settled.
+- Do not treat market expiration, missing market data, API errors, missing outcome, or an unavailable Kalshi market as a loss.
+- A paper trade may only be marked settled when the Kalshi API provides a confirmed final result such as YES or NO.
+- If the outcome is unavailable, keep the trade open or place it in a separate status such as:
+  - pending_settlement
+  - settlement_unknown
+  - settlement_error
+
+2. Preserve historical prediction data
+- Do not change the original forecast, entry probability, price, edge, side, stake, or strategy version.
+- Correct settlement status and P/L only if those values were created from invalid settlement logic.
+
+3. Revalidate all 41 trades
+For each trade, retrieve or verify:
+- Kalshi market ticker
+- market status
+- official final result
+- YES/NO side selected by EdgeCast
+- settlement timestamp
+- payout
+- calculated P/L
+
+Produce an audit table showing:
+- trade ID
+- market ticker/title
+- previous status
+- official Kalshi status
+- official result, if available
+- EdgeCast side
+- previous P/L
+- corrected status
+- corrected P/L
+- reason for correction
+
+4. Fix the trade-detail 404
+- Identify the broken route or incorrect ID used when clicking a settled trade.
+- Make open and settled trades use the same valid detail page pattern.
+- Verify that clicking at least five settled trades opens the correct record.
+
+5. Fix lead-time data
+- Determine why all settled trades show lead time as "unknown."
+- Calculate lead time from the stored trade-entry timestamp and market settlement/expiration timestamp when both exist.
+- Do not invent lead time when required timestamps are missing.
+- Add a data-quality warning when lead time cannot be calculated.
+
+6. Add settlement safeguards
+- Never automatically classify an unknown outcome as a loss.
+- Log settlement API failures separately.
+- Make settlement processing idempotent so repeated checks do not duplicate or corrupt results.
+- Add automated tests for:
+  - confirmed YES settlement
+  - confirmed NO settlement
+  - unresolved market
+  - expired but unresolved market
+  - missing API result
+  - API failure
+  - YES trade payout
+  - NO trade payout
+  - settled-trade detail routing
+
+7. After the fix
+- Re-run settlement validation on the existing 41 trades.
+- Show the corrected totals for:
+  - open
+  - pending settlement
+  - settlement errors
+  - confirmed settled
+  - wins
+  - losses
+  - P/L
+- Do not reset or delete the database.
+- Summarize the root cause and every file changed.

@@ -778,7 +778,7 @@ export default function PaperTradingPage() {
                     <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
                       <td className="px-3 py-2">
                         <Link
-                          href={`/paper-trades/${t.id}`}
+                          href={`/paper-trading/${t.id}`}
                           className="text-blue-600 hover:underline font-medium"
                         >
                           #{t.id}
@@ -809,6 +809,8 @@ export default function PaperTradingPage() {
                               ? "bg-blue-100 text-blue-700"
                               : t.status === "OPEN"
                               ? "bg-yellow-100 text-yellow-700"
+                              : t.status === "PENDING_SETTLEMENT"
+                              ? "bg-purple-100 text-purple-700"
                               : t.status === "VOID"
                               ? "bg-gray-100 text-gray-500"
                               : "bg-red-100 text-red-700"
