@@ -1,0 +1,120 @@
+Create Strategy v2 as a separate shadow paper-trading strategy. Do not modify Strategy v1, its historical trades, or its prediction logic.
+
+The goal of Strategy v2 is to use historical forecast performance and observed weather data to produce better-calibrated probabilities.
+
+Requirements:
+
+1. Preserve Strategy v1
+- Strategy v1 must continue operating unchanged.
+- Do not overwrite or recalculate any existing v1 predictions or trades.
+- Every v2 prediction and paper trade must be labeled strategy_version = "v2".
+- Allow analytics to compare v1 and v2 side by side.
+
+2. Historical data model
+Create storage for:
+- city
+- official settlement station
+- forecast provider
+- forecast timestamp
+- forecast lead time
+- forecast temperature
+- actual observed official temperature
+- forecast error
+- market threshold or temperature range
+- predicted probability
+- final contract result
+- month and season
+
+3. Historical forecast-error analysis
+For each station and forecast lead-time bucket, calculate:
+- mean forecast error
+- median forecast error
+- mean absolute error
+- standard deviation of forecast error
+- sample size
+- seasonal or monthly bias when enough data exists
+
+Do not use a station-specific adjustment when the sample is too small. Fall back to a broader city-level or global estimate and clearly label the fallback.
+
+4. Strategy v2 probability engine
+Use:
+- current forecast
+- historical station-specific forecast bias
+- historical forecast-error distribution
+- forecast lead time
+- historical climatology as a secondary prior
+- market threshold or range
+- probability calibration based on previous predictions and actual outcomes
+
+Do not treat historical average temperature as more important than the current forecast.
+
+5. Calibration
+Track whether predicted probability buckets match actual results.
+
+For example:
+- predictions of 10–20%
+- actual YES frequency
+- calibration adjustment
+- sample size
+
+Do not apply aggressive calibration changes when the sample size is small.
+
+6. Shadow paper trading
+Run v1 and v2 independently on the same eligible markets.
+Each strategy should create its own simulated trade decision.
+Do not place real trades.
+
+Show when:
+- both strategies trade
+- only v1 trades
+- only v2 trades
+- the strategies choose different sides
+- the strategies assign materially different probabilities
+
+7. V2 trade-quality rules
+Initially flag or exclude from the primary realistic-results view:
+- 1-cent contracts
+- zero-volume markets
+- missing liquidity
+- stale quotes
+- large bid/ask spreads
+- unsupported or uncertain settlement rules
+- missing settlement station
+- markets that cannot reasonably be filled at the displayed price
+
+Keep excluded opportunities visible in a separate research view.
+
+8. Backtesting
+If archived forecasts available at the historical timestamp can be obtained, backtest v2 using only information that would have been known at that time.
+
+Do not use today’s reconstructed forecast as though it were the original historical forecast.
+Do not allow future information or actual outcomes to leak into the prediction.
+
+Clearly distinguish:
+- true archived-forecast backtests
+- climatology-only historical analysis
+- live forward paper trading
+
+9. Comparison dashboard
+Compare v1 and v2 using:
+- settled trade count
+- win rate
+- raw ROI
+- realistic adjusted ROI
+- Brier score
+- calibration error
+- performance by city
+- performance by price bucket
+- performance by edge bucket
+- performance by lead time
+- cumulative P/L
+
+10. Implementation process
+Before coding:
+- inspect the existing probability and paper-trading architecture
+- provide a concise implementation plan
+- identify historical data sources and limitations
+- identify any database migrations
+
+Do not reset or delete existing data.
+Do not connect real-money trading.
