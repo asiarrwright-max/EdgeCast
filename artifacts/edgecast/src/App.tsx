@@ -12,6 +12,7 @@ import JobsPage from '@/pages/jobs';
 import ErrorsPage from '@/pages/errors';
 import PaperTradingPage from '@/pages/paper-trading';
 import PaperTradeDetailPage from '@/pages/paper-trade-detail';
+import StrategyAuditPage from '@/pages/strategy-audit';
 
 import Layout from '@/components/layout';
 
@@ -93,6 +94,7 @@ function ProtectedRoutes() {
             <Route path="/markets/:ticker" component={MarketDetailPage} />
             <Route path="/paper-trading/:id" component={PaperTradeDetailPage} />
             <Route path="/paper-trading" component={PaperTradingPage} />
+            <Route path="/strategy-audit" component={StrategyAuditPage} />
             <Route path="/health" component={HealthPage} />
             <Route path="/jobs" component={JobsPage} />
             <Route path="/errors" component={ErrorsPage} />

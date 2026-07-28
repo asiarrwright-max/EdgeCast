@@ -1,0 +1,168 @@
+Do not change Strategy v1 or Strategy v2 prediction logic yet.
+
+Build a Strategy Differences and Loss Audit report so we can understand whether v2 is actually behaving differently and why v1 has had no wins so far.
+
+1. Strategy Differences report
+
+For every market analyzed by both strategies, show:
+
+- market ticker
+- market title
+- city
+- settlement date
+- contract type
+- v1 probability
+- v2 probability
+- probability difference in percentage points
+- v1 trade decision
+- v2 trade decision
+- v1 side
+- v2 side
+- v1 entry price
+- v2 entry price
+- v1 edge
+- v2 edge
+- whether both traded
+- whether only v1 traded
+- whether only v2 traded
+- whether they chose different sides
+- exact reason one strategy traded and the other did not
+- historical bias adjustment used by v2
+- historical sigma/error estimate used by v2
+- sample size supporting the v2 adjustment
+- whether v2 used historical data or fell back to v1 assumptions
+
+Add filters for:
+- both trade
+- only v1
+- only v2
+- different side
+- probability difference above 5pp
+- probability difference above 10pp
+- v2 historical adjustment applied
+- v2 fallback used
+- open or settled
+
+2. V1 loss audit
+
+Audit every settled v1 trade and group the losses by EdgeCast probability at entry:
+
+- 0–5%
+- 5–10%
+- 10–20%
+- 20–30%
+- 30–40%
+- 40–50%
+- 50–70%
+- 70–100%
+
+For each bucket, show:
+- number of settled trades
+- wins
+- losses
+- actual win rate
+- average predicted probability
+- average entry price
+- total stake
+- profit/loss
+- ROI
+
+Also show:
+- longest losing streak
+- expected number of wins based on the sum of predicted probabilities
+- actual number of wins
+- difference between expected and actual wins
+- probability-weighted expected wins by bucket
+
+3. Long-shot analysis
+
+Create a separate analysis for trades entered at:
+
+- 1¢
+- 2–5¢
+- 6–10¢
+- 11–20¢
+- above 20¢
+
+For each group, show:
+- settled count
+- average EdgeCast probability
+- expected wins
+- actual wins
+- total stake
+- P/L
+- ROI
+
+Clearly identify whether the 0-win result is primarily caused by a concentration in low-price, low-probability contracts.
+
+4. Settlement correctness check
+
+For every settled v1 trade, verify and display:
+
+- Kalshi official result
+- EdgeCast trade side
+- whether the trade was correctly classified as win or loss
+- payout calculation
+- P/L calculation
+- settlement timestamp
+- any settlement warning
+
+Add a summary count:
+- correctly settled
+- incorrectly settled
+- unresolved
+- missing official result
+- API error
+
+Do not treat unresolved or missing results as losses.
+
+5. V2 readiness report
+
+Show how much verified historical data v2 currently has by:
+
+- city
+- station
+- lead-time bucket
+- month or season
+
+For each group, show:
+- verified observations
+- mean bias
+- mean absolute error
+- standard deviation
+- whether the sample is sufficient for v2
+- whether fallback is still being used
+
+6. UI
+
+Add a new section or page called:
+
+“Strategy Differences & Loss Audit”
+
+The page should make it easy to answer:
+
+- Is v2 producing meaningfully different probabilities?
+- Is v2 actually using historical data?
+- Why is v1 losing?
+- Are the losses mostly expected long-shot losses?
+- Is there still any settlement or payout bug?
+
+7. Constraints
+
+- Do not modify historical trades.
+- Do not recalculate old entry probabilities.
+- Do not change trade thresholds.
+- Do not change prediction logic.
+- Do not reset or delete data.
+- Do not add real-money trading.
+
+Before coding:
+- inspect the current v1/v2 data model
+- identify what data already exists
+- provide a concise implementation plan
+- identify any database changes required
+
+After coding:
+- run tests
+- verify the report using the current 41 settled v1 trades
+- provide a plain-English summary of what the report reveals
