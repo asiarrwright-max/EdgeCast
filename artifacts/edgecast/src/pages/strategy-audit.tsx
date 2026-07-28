@@ -1,12 +1,13 @@
 /**
  * Strategy Differences & Loss Audit
  * ===================================
- * Five diagnostic sections:
+ * Six diagnostic sections:
  *   1. Strategy Differences — v1 vs v2 per-market comparison
  *   2. V1 Loss Audit        — probability-bucketed win/loss breakdown
  *   3. Long-shot Analysis   — entry-price-bucketed breakdown
  *   4. Settlement Check     — payout verification for all settled v1 trades
  *   5. V2 Readiness         — how much verified data v2 has accumulated
+ *   6. V2 Learning          — monitoring dashboard for forecast learning progress
  */
 import { useState, ReactNode } from "react";
 import { Link } from "wouter";
@@ -16,11 +17,16 @@ import {
   useGetLongShot,
   useGetSettlementCheck,
   useGetV2Readiness,
+  useGetV2LearningProgress,
+  useGetV2CityDetail,
+  useRunVerification,
   type ComparisonRow,
   type LossAuditBucket,
   type LongShotBucket,
   type SettlementTrade,
   type V2ReadinessRow,
+  type CityLearningRow,
+  type ErrorGroupRow,
 } from "@workspace/api-client-react";
 
 // ---------------------------------------------------------------------------
@@ -820,6 +826,517 @@ function V2ReadinessTab() {
 }
 
 // ---------------------------------------------------------------------------
+// 6. V2 Learning Progress
+// ---------------------------------------------------------------------------
+
+const READINESS_STYLE: Record<string, string> = {
+  learned: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300",
+  partially_learned: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
+  insufficient_sample: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
+  collecting: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
+  not_collecting: "bg-muted text-muted-foreground",
+  data_quality_issue: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
+};
+
+function ReadinessBadge({ status, label }: { status: string; label: string }) {
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${READINESS_STYLE[status] ?? "bg-muted"}`}>
+      {label}
+    </span>
+  );
+}
+
+function MilestoneBar({ current, milestones, reached }: {
+  current: number;
+  milestones: number[];
+  reached: boolean[];
+}) {
+  const max = milestones[milestones.length - 1];
+  const pct = Math.min(100, (current / max) * 100);
+  return (
+    <div className="space-y-1">
+      <div className="h-2 bg-muted rounded-full overflow-hidden">
+        <div
+          className="h-full bg-primary transition-all"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="flex justify-between">
+        {milestones.map((m, i) => (
+          <span
+            key={m}
+            className={`text-[9px] ${reached[i] ? "text-primary font-semibold" : "text-muted-foreground"}`}
+          >
+            {m}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CityDetailPanel({ city, onClose }: { city: string; onClose: () => void }) {
+  const { data, isLoading } = useGetV2CityDetail(city);
+  return (
+    <div className="border-t border-border bg-muted/20 px-4 py-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="space-y-0.5">
+          <p className="text-sm font-semibold">{city} — Detail</p>
+          {data && (
+            <p className="text-xs text-muted-foreground">
+              {data.stationInfo.stationName ?? "Unknown station"}
+              {data.stationInfo.verified ? " ✓ Verified" : " (Unverified)"}
+            </p>
+          )}
+        </div>
+        <button
+          onClick={onClose}
+          className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded border border-border"
+        >
+          Close
+        </button>
+      </div>
+
+      {isLoading && <p className="text-xs text-muted-foreground">Loading…</p>}
+
+      {data && (
+        <>
+          {/* Station notes */}
+          {data.stationInfo.notes && (
+            <div className="text-xs text-muted-foreground bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded px-3 py-2">
+              {data.stationInfo.notes}
+            </div>
+          )}
+
+          {/* Milestone bar */}
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">
+              Progress: {data.milestoneProgress.current} usable observations
+              {data.milestoneProgress.nextMilestone != null && (
+                <span> — {data.milestoneProgress.neededForNext} until next milestone</span>
+              )}
+            </p>
+            <MilestoneBar
+              current={data.milestoneProgress.current}
+              milestones={data.milestoneProgress.milestones}
+              reached={data.milestoneProgress.reached}
+            />
+          </div>
+
+          {/* Recent verifications */}
+          {data.verifications.length > 0 ? (
+            <div>
+              <p className="text-xs font-semibold mb-1">Recent Verifications ({data.verifications.length})</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground">
+                      <th className="text-left px-2 py-1">Date</th>
+                      <th className="text-left px-2 py-1">Variable</th>
+                      <th className="text-right px-2 py-1">Forecast</th>
+                      <th className="text-right px-2 py-1">Actual</th>
+                      <th className="text-right px-2 py-1">Error</th>
+                      <th className="text-left px-2 py-1">Source</th>
+                      <th className="text-right px-2 py-1">Lead</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.verifications.slice(0, 20).map((v) => (
+                      <tr key={v.id} className="border-b border-border/50 hover:bg-muted/30">
+                        <td className="px-2 py-1 font-mono">{v.targetDate}</td>
+                        <td className="px-2 py-1">{v.weatherVariable}</td>
+                        <td className="text-right px-2 py-1">
+                          {v.forecastValue != null ? `${v.forecastValue.toFixed(1)}°` : "—"}
+                        </td>
+                        <td className="text-right px-2 py-1">
+                          {v.actualValue != null ? `${v.actualValue.toFixed(1)}°` : "—"}
+                        </td>
+                        <td className={`text-right px-2 py-1 ${
+                          v.forecastError != null
+                            ? Math.abs(v.forecastError) > 5 ? "text-red-600" : "text-foreground"
+                            : ""
+                        }`}>
+                          {v.forecastError != null
+                            ? `${v.forecastError > 0 ? "+" : ""}${v.forecastError.toFixed(1)}°`
+                            : "—"}
+                        </td>
+                        <td className="px-2 py-1 text-muted-foreground truncate max-w-[120px]">
+                          {v.sourceLabel?.replace("_", " ") ?? "—"}
+                        </td>
+                        <td className="text-right px-2 py-1 text-muted-foreground">
+                          {v.leadTimeDays != null ? `${v.leadTimeDays}d` : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {data.verifications.length > 20 && (
+                  <p className="text-xs text-muted-foreground px-2 py-1">
+                    …and {data.verifications.length - 20} older rows
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">No verifications recorded yet.</p>
+          )}
+
+          {/* FES groups */}
+          {data.fesGroups.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold mb-1">Error Stat Groups ({data.fesGroups.length})</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground">
+                      <th className="text-left px-2 py-1">Variable</th>
+                      <th className="text-left px-2 py-1">Lead</th>
+                      <th className="text-right px-2 py-1">Month</th>
+                      <th className="text-right px-2 py-1">n</th>
+                      <th className="text-right px-2 py-1">MAE</th>
+                      <th className="text-right px-2 py-1">σ</th>
+                      <th className="text-right px-2 py-1">Bias</th>
+                      <th className="text-left px-2 py-1">Level</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.fesGroups.map((g, i) => (
+                      <tr key={i} className="border-b border-border/50 hover:bg-muted/30">
+                        <td className="px-2 py-1">{g.variable}</td>
+                        <td className="px-2 py-1">{g.leadTimeBucket}</td>
+                        <td className="text-right px-2 py-1">{g.month ?? "all"}</td>
+                        <td className="text-right px-2 py-1 font-medium">{g.sampleSize}</td>
+                        <td className="text-right px-2 py-1">{g.mae != null ? `${g.mae.toFixed(2)}°` : "—"}</td>
+                        <td className="text-right px-2 py-1">{g.stdDev != null ? `${g.stdDev.toFixed(2)}°` : "—"}</td>
+                        <td className="text-right px-2 py-1">
+                          {g.meanBias != null ? `${g.meanBias > 0 ? "+" : ""}${g.meanBias.toFixed(2)}°` : "—"}
+                        </td>
+                        <td className="px-2 py-1 text-muted-foreground">{g.fallbackLevel ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function V2LearningTab() {
+  const { data, isLoading, refetch } = useGetV2LearningProgress();
+  const [expandedCity, setExpandedCity] = useState<string | null>(null);
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [verificationMsg, setVerificationMsg] = useState<string | null>(null);
+
+  const verificationMutation = useRunVerification({
+    onSuccess: (result) => {
+      const v = result.verifications;
+      setVerificationMsg(
+        `Done — ${v.created ?? 0} created, ${v.skipped ?? 0} skipped, ${v.errors ?? 0} errors`
+      );
+      refetch();
+    },
+    onError: (e: unknown) => {
+      setVerificationMsg(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    },
+  });
+
+  if (isLoading) return <Loading />;
+  if (!data) return <p className="text-sm text-muted-foreground px-4 py-6">No data.</p>;
+
+  const s = data.summary;
+
+  const filteredErrorGroups =
+    sourceFilter === "all"
+      ? data.errorGroups
+      : data.errorGroups.filter((g) => g.sourceQualityLabel === sourceFilter);
+
+  return (
+    <div className="p-4 space-y-6">
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <StatBox label="Total Cities" value={s.totalCities} />
+        <StatBox
+          label="Learned"
+          value={s.citiesLearned}
+          sub={`+ ${s.citiesPartiallyLearned} partially`}
+        />
+        <StatBox
+          label="Collecting Data"
+          value={s.citiesCollecting}
+          sub={`+ ${s.citiesNotCollecting} not started`}
+        />
+        <StatBox label="Data-Quality Issue" value={s.citiesDataQualityIssue} />
+        <StatBox label="Usable Observations" value={s.totalUsableObservations} />
+        <StatBox
+          label="Error Stat Groups"
+          value={s.totalFesGroups}
+          sub={`${s.cityFesGroups} city · ${s.globalFesGroups} global`}
+        />
+        <StatBox
+          label="V2 Trades (Historical)"
+          value={s.v2TradesUsingHistorical}
+          sub={`of ${s.v2TotalTrades} total`}
+        />
+        <StatBox
+          label="V2 Trades (Fallback)"
+          value={s.v2TradesUsingFallback}
+          sub={`of ${s.v2TotalTrades} total`}
+        />
+      </div>
+
+      {/* Verification controls */}
+      <Section title="Verification Controls">
+        <div className="px-4 py-3 flex items-center gap-3 flex-wrap">
+          <button
+            onClick={() => verificationMutation.mutate()}
+            disabled={verificationMutation.isPending}
+            className="px-3 py-1.5 text-xs font-medium rounded border border-border bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {verificationMutation.isPending ? "Running…" : "Run Verification Now"}
+          </button>
+          {verificationMsg && (
+            <span className="text-xs text-muted-foreground">{verificationMsg}</span>
+          )}
+          <span className="text-xs text-muted-foreground">
+            Fetches actual temps for past forecasts from NOAA / ERA5.
+          </span>
+        </div>
+      </Section>
+
+      {/* Readiness legend */}
+      <Section title="Readiness States">
+        <div className="px-4 py-3 flex flex-wrap gap-3">
+          {Object.entries(READINESS_STYLE).map(([key]) => (
+            <div key={key} className="flex items-center gap-1.5">
+              <ReadinessBadge
+                status={key}
+                label={key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+              />
+              <span className="text-[10px] text-muted-foreground">
+                {key === "not_collecting" && "0 obs"}
+                {key === "collecting" && "1–4 obs"}
+                {key === "insufficient_sample" && "≥5 obs, no FES group ready"}
+                {key === "partially_learned" && "some FES groups ≥5"}
+                {key === "learned" && "all city FES groups ≥5"}
+                {key === "data_quality_issue" && "no station or HIGH AMBIGUITY"}
+              </span>
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      {/* City table */}
+      <Section title="City Learning Status (all 24 cities)">
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border text-muted-foreground">
+                <th className="text-left px-3 py-2">City</th>
+                <th className="text-left px-3 py-2">Readiness</th>
+                <th className="text-right px-3 py-2">Usable Obs</th>
+                <th className="text-left px-3 py-2 hidden sm:table-cell">Source</th>
+                <th className="text-right px-3 py-2 hidden sm:table-cell">FES Groups</th>
+                <th className="text-right px-3 py-2 hidden sm:table-cell">FES Ready</th>
+                <th className="text-left px-3 py-2 hidden md:table-cell">Progress</th>
+                <th className="text-right px-3 py-2 hidden md:table-cell">V2 Hist</th>
+                <th className="text-left px-3 py-2 hidden lg:table-cell">Latest Obs</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.cities.map((row) => {
+                const isExpanded = expandedCity === row.city;
+                return (
+                  <>
+                    <tr
+                      key={row.city}
+                      className="border-b border-border/50 hover:bg-muted/30 cursor-pointer"
+                      onClick={() => setExpandedCity(isExpanded ? null : row.city)}
+                    >
+                      <td className="px-3 py-2 font-medium">
+                        <span className="flex items-center gap-1">
+                          <span>{isExpanded ? "▾" : "▸"}</span>
+                          {row.city}
+                          {row.stationVerified && (
+                            <span className="text-green-600 dark:text-green-400 text-[9px]">✓</span>
+                          )}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <ReadinessBadge
+                          status={row.readinessStatus}
+                          label={row.readinessLabel}
+                        />
+                      </td>
+                      <td className="text-right px-3 py-2 font-medium">{row.usableObservations}</td>
+                      <td className="px-3 py-2 hidden sm:table-cell text-muted-foreground capitalize">
+                        {row.sourceQualityLabel}
+                      </td>
+                      <td className="text-right px-3 py-2 hidden sm:table-cell">
+                        {row.cityFesGroupCount}
+                      </td>
+                      <td className="text-right px-3 py-2 hidden sm:table-cell">
+                        {row.cityFesReadyCount}
+                        {row.cityFesGroupCount > 0 && (
+                          <span className="text-muted-foreground">
+                            /{row.cityFesGroupCount}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 hidden md:table-cell min-w-[120px]">
+                        <MilestoneBar
+                          current={row.milestoneProgress.current}
+                          milestones={row.milestoneProgress.milestones}
+                          reached={row.milestoneProgress.reached}
+                        />
+                      </td>
+                      <td className="text-right px-3 py-2 hidden md:table-cell">
+                        {row.v2TradesHistorical > 0 ? (
+                          <span className="text-green-600 dark:text-green-400">
+                            {row.v2TradesHistorical}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">0</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 hidden lg:table-cell font-mono text-muted-foreground">
+                        {row.latestObservationDate ?? "—"}
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr key={`${row.city}-detail`} className="bg-muted/10">
+                        <td colSpan={9} className="p-0">
+                          <CityDetailPanel
+                            city={row.city}
+                            onClose={() => setExpandedCity(null)}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Section>
+
+      {/* Error groups */}
+      <Section title="Forecast Error Stat Groups">
+        <div className="px-4 py-3 flex items-center gap-3 border-b border-border">
+          <span className="text-xs text-muted-foreground">Filter by source:</span>
+          {["all", "ghcnd", "era5", "mixed", "none"].map((f) => (
+            <button
+              key={f}
+              onClick={() => setSourceFilter(f)}
+              className={`text-xs px-2 py-0.5 rounded border ${
+                sourceFilter === f
+                  ? "border-primary text-primary"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {f}
+            </button>
+          ))}
+          <span className="text-xs text-muted-foreground ml-2">
+            {filteredErrorGroups.length} group{filteredErrorGroups.length !== 1 ? "s" : ""}
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border text-muted-foreground">
+                <th className="text-left px-3 py-2">City</th>
+                <th className="text-left px-3 py-2">Variable</th>
+                <th className="text-left px-3 py-2">Lead</th>
+                <th className="text-right px-3 py-2">Month</th>
+                <th className="text-right px-3 py-2">n</th>
+                <th className="text-right px-3 py-2">MAE</th>
+                <th className="text-right px-3 py-2">σ</th>
+                <th className="text-right px-3 py-2">Bias</th>
+                <th className="text-left px-3 py-2">Level</th>
+                <th className="text-left px-3 py-2">Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredErrorGroups.map((g, i) => (
+                <tr key={i} className="border-b border-border/50 hover:bg-muted/30">
+                  <td className="px-3 py-1.5 font-medium">
+                    {g.city === "__global__" ? (
+                      <span className="text-muted-foreground italic">global</span>
+                    ) : (
+                      g.city
+                    )}
+                  </td>
+                  <td className="px-3 py-1.5">{g.variable}</td>
+                  <td className="px-3 py-1.5">{g.leadTimeBucket}</td>
+                  <td className="text-right px-3 py-1.5">{g.month ?? "all"}</td>
+                  <td className="text-right px-3 py-1.5 font-medium">{g.sampleSize}</td>
+                  <td className="text-right px-3 py-1.5">
+                    {g.mae != null ? `${g.mae.toFixed(2)}°` : "—"}
+                  </td>
+                  <td className="text-right px-3 py-1.5">
+                    {g.stdDev != null ? `${g.stdDev.toFixed(2)}°` : "—"}
+                  </td>
+                  <td className="text-right px-3 py-1.5">
+                    {g.meanBias != null
+                      ? `${g.meanBias > 0 ? "+" : ""}${g.meanBias.toFixed(2)}°`
+                      : "—"}
+                  </td>
+                  <td className="px-3 py-1.5 text-muted-foreground">{g.fallbackLevel ?? "—"}</td>
+                  <td className="px-3 py-1.5 capitalize text-muted-foreground">
+                    {g.sourceQualityLabel}
+                  </td>
+                </tr>
+              ))}
+              {filteredErrorGroups.length === 0 && (
+                <tr>
+                  <td colSpan={10} className="text-center px-3 py-4 text-muted-foreground">
+                    No error stat groups {sourceFilter !== "all" ? `matching source "${sourceFilter}"` : "recorded yet"}.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Section>
+
+      {/* V1 vs V2 Activation */}
+      <Section title="V1 vs V2 Activation">
+        <div className="px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <StatBox label="V1 Trades" value={s.v1TotalTrades} />
+          <StatBox label="V2 Trades" value={s.v2TotalTrades} />
+          <StatBox
+            label="V2 Using Historical σ"
+            value={s.v2TradesUsingHistorical}
+            sub={s.v2TotalTrades > 0
+              ? `${((s.v2TradesUsingHistorical / s.v2TotalTrades) * 100).toFixed(0)}% of v2`
+              : "—"}
+          />
+          <StatBox
+            label="V2 Using Fixed Table"
+            value={s.v2TradesUsingFallback}
+            sub={s.v2TotalTrades > 0
+              ? `${((s.v2TradesUsingFallback / s.v2TotalTrades) * 100).toFixed(0)}% of v2`
+              : "—"}
+          />
+        </div>
+        <div className="px-4 pb-3">
+          <p className="text-xs text-muted-foreground">
+            V2 trades marked "historical" used learned σ/bias from ForecastErrorStats.
+            "Fixed table" means the engine fell back to the hard-coded 1d→2.5°F … ≥11d→9.5°F
+            σ table because MIN_SAMPLE (5) was not yet reached.
+          </p>
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -829,6 +1346,7 @@ const TABS = [
   { id: "long-shot", label: "3. Long-shot Analysis" },
   { id: "settlement", label: "4. Settlement Check" },
   { id: "v2-readiness", label: "5. V2 Readiness" },
+  { id: "v2-learning", label: "6. V2 Learning" },
 ];
 
 export default function StrategyAuditPage() {
@@ -848,6 +1366,7 @@ export default function StrategyAuditPage() {
         {activeTab === "long-shot" && <LongShotTab />}
         {activeTab === "settlement" && <SettlementCheckTab />}
         {activeTab === "v2-readiness" && <V2ReadinessTab />}
+        {activeTab === "v2-learning" && <V2LearningTab />}
       </div>
     </div>
   );

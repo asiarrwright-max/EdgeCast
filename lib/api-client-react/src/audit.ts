@@ -291,3 +291,179 @@ export function useGetV2Readiness(
     ...options,
   }) as UseQueryResult<V2ReadinessResult, unknown>;
 }
+
+// ---------------------------------------------------------------------------
+// V2 Learning Progress types
+// ---------------------------------------------------------------------------
+
+export interface MilestoneProgress {
+  current: number;
+  milestones: number[];
+  reached: boolean[];
+  nextMilestone: number | null;
+  neededForNext: number | null;
+}
+
+export interface CityFesGroup {
+  variable: string;
+  leadTimeBucket: string;
+  month: number | null;
+  sampleSize: number;
+  fallbackLevel: string | null;
+  mae: number | null;
+  stdDev: number | null;
+  meanBias: number | null;
+}
+
+export interface CityLearningRow {
+  city: string;
+  stationVerified: boolean;
+  stationName: string;
+  readinessStatus: string;
+  readinessLabel: string;
+  usableObservations: number;
+  totalObservations: number;
+  sourceBreakdown: Record<string, number>;
+  sourceQualityLabel: "ghcnd" | "era5" | "mixed" | "none";
+  cityFesGroupCount: number;
+  cityFesReadyCount: number;
+  milestoneProgress: MilestoneProgress;
+  v2TradesTotal: number;
+  v2TradesFallback: number;
+  v2TradesHistorical: number;
+  latestObservationDate: string | null;
+  fesGroups: CityFesGroup[];
+}
+
+export interface ErrorGroupRow {
+  city: string;
+  variable: string;
+  leadTimeBucket: string;
+  month: number | null;
+  sampleSize: number;
+  fallbackLevel: string | null;
+  mae: number | null;
+  stdDev: number | null;
+  meanBias: number | null;
+  sourceQualityLabel: string;
+  lastComputedAt: string | null;
+}
+
+export interface LearningProgressSummary {
+  totalCities: number;
+  citiesLearned: number;
+  citiesPartiallyLearned: number;
+  citiesCollecting: number;
+  citiesNotCollecting: number;
+  citiesDataQualityIssue: number;
+  totalUsableObservations: number;
+  totalFesGroups: number;
+  cityFesGroups: number;
+  globalFesGroups: number;
+  v2TotalTrades: number;
+  v2TradesUsingHistorical: number;
+  v2TradesUsingFallback: number;
+  v1TotalTrades: number;
+}
+
+export interface LearningProgressResult {
+  summary: LearningProgressSummary;
+  cities: CityLearningRow[];
+  errorGroups: ErrorGroupRow[];
+}
+
+export interface CityDetailVerification {
+  id: number;
+  targetDate: string;
+  weatherVariable: string;
+  forecastValue: number | null;
+  actualValue: number | null;
+  forecastError: number | null;
+  sourceLabel: string | null;
+  ghcndStationId: string | null;
+  leadTimeDays: number | null;
+  month: number | null;
+  season: string | null;
+  createdAt: string | null;
+}
+
+export interface CityDetailTrade {
+  id: number;
+  ticker: string;
+  direction: string;
+  status: string;
+  outcome: string | null;
+  fallbackLevel: string | null;
+  sigmaUsed: number | null;
+  biasCorrection: number | null;
+  calibrationAdj: number | null;
+  stake: number | null;
+  pl: number | null;
+  targetDate: string | null;
+  createdAt: string | null;
+}
+
+export interface CityDetailResult {
+  city: string;
+  readinessStatus: string;
+  readinessLabel: string;
+  stationInfo: {
+    stationName: string | null;
+    ghcndStationId: string | null;
+    verified: boolean | null;
+    notes: string | null;
+  };
+  milestoneProgress: MilestoneProgress;
+  sourceBreakdown: Record<string, number>;
+  sourceQualityLabel: string;
+  verifications: CityDetailVerification[];
+  fesGroups: CityFesGroup[];
+  v2Trades: CityDetailTrade[];
+}
+
+// ---------------------------------------------------------------------------
+// Fetch functions — V2 Learning Progress
+// ---------------------------------------------------------------------------
+
+export const getV2LearningProgress = (
+  options?: Parameters<typeof customFetch>[1]
+): Promise<LearningProgressResult> =>
+  customFetch<LearningProgressResult>("/api/audit/v2-learning-progress", {
+    ...options,
+    method: "GET",
+  });
+
+export const getV2CityDetail = (
+  city: string,
+  options?: Parameters<typeof customFetch>[1]
+): Promise<CityDetailResult> =>
+  customFetch<CityDetailResult>(
+    `/api/audit/v2-city-detail/${encodeURIComponent(city)}`,
+    { ...options, method: "GET" }
+  );
+
+// ---------------------------------------------------------------------------
+// Hooks — V2 Learning Progress
+// ---------------------------------------------------------------------------
+
+export function useGetV2LearningProgress(
+  options?: UseQueryOptions<LearningProgressResult, unknown, LearningProgressResult>
+): UseQueryResult<LearningProgressResult, unknown> {
+  return useQuery({
+    queryKey: ["/api/audit/v2-learning-progress"],
+    queryFn: ({ signal }) => getV2LearningProgress({ signal }),
+    ...options,
+  }) as UseQueryResult<LearningProgressResult, unknown>;
+}
+
+export function useGetV2CityDetail(
+  city: string,
+  options?: UseQueryOptions<CityDetailResult, unknown, CityDetailResult>
+): UseQueryResult<CityDetailResult, unknown> {
+  return useQuery({
+    queryKey: ["/api/audit/v2-city-detail", city],
+    queryFn: ({ signal }) => getV2CityDetail(city, { signal }),
+    enabled: city.length > 0,
+    ...options,
+  }) as UseQueryResult<CityDetailResult, unknown>;
+}

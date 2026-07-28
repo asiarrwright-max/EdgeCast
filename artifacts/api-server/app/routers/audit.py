@@ -13,6 +13,8 @@ All endpoints are read-only. No trade data is modified.
 from __future__ import annotations
 
 import math
+import statistics as _statistics
+from collections import defaultdict
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -21,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import ForecastErrorStats, KalshiMarket, PaperTrade
+from app.models import ForecastErrorStats, ForecastVerification, KalshiMarket, PaperTrade, PredictionSnapshot
 
 router = APIRouter(tags=["audit"])
 
@@ -730,4 +732,374 @@ async def v2_readiness(
             "pctReady": _pct(sigma_groups / total_groups) if total_groups else None,
             "pctFull": _pct(full_groups / total_groups) if total_groups else None,
         },
+    }
+
+
+# ---------------------------------------------------------------------------
+# 6. V2 Learning Progress
+# ---------------------------------------------------------------------------
+
+_LP_MILESTONES = [5, 15, 30, 50, 100]
+_LP_MIN_SAMPLE = 5
+
+_READINESS_LABELS: dict[str, str] = {
+    "not_collecting": "Not Collecting",
+    "collecting": "Collecting",
+    "insufficient_sample": "Insufficient Sample",
+    "partially_learned": "Partially Learned",
+    "learned": "Learned",
+    "data_quality_issue": "Data-Quality Issue",
+}
+
+
+def _lp_compute_readiness_status(
+    station: Any,
+    usable_count: int,
+    city_fes_groups: list[ForecastErrorStats],
+) -> str:
+    """
+    Six-state readiness classifier for one city.
+
+    States (in evaluation order):
+      data_quality_issue  – no station mapping, or notes contain HIGH AMBIGUITY
+      not_collecting      – 0 usable FV records
+      collecting          – 1–4 usable FV records
+      insufficient_sample – ≥5 obs but no city-level FES group has sample_size ≥ MIN_SAMPLE
+      partially_learned   – some city-level FES groups ≥ MIN_SAMPLE, others not
+      learned             – all city-level FES groups ≥ MIN_SAMPLE
+    """
+    if station is None:
+        return "data_quality_issue"
+    notes = getattr(station, "notes", None) or ""
+    if "HIGH AMBIGUITY" in notes.upper():
+        return "data_quality_issue"
+    if usable_count == 0:
+        return "not_collecting"
+    if usable_count < _LP_MIN_SAMPLE:
+        return "collecting"
+    # usable_count >= 5 — inspect city-level FES groups
+    city_groups = [g for g in city_fes_groups if g.fallback_level == "city"]
+    if not city_groups:
+        return "insufficient_sample"
+    ready = [g for g in city_groups if g.sample_size >= _LP_MIN_SAMPLE]
+    if not ready:
+        return "insufficient_sample"
+    if len(ready) < len(city_groups):
+        return "partially_learned"
+    return "learned"
+
+
+def _lp_milestone_progress(usable_count: int) -> dict[str, Any]:
+    reached = [usable_count >= m for m in _LP_MILESTONES]
+    next_ms = next((m for m in _LP_MILESTONES if usable_count < m), None)
+    return {
+        "current": usable_count,
+        "milestones": _LP_MILESTONES,
+        "reached": reached,
+        "nextMilestone": next_ms,
+        "neededForNext": (next_ms - usable_count) if next_ms is not None else None,
+    }
+
+
+def _lp_source_quality_label(sources: dict[str, int]) -> str:
+    ghcnd = sources.get("ghcnd_observation", 0) + sources.get("ghcnd_observation_unverified", 0)
+    era5 = sources.get("era5_reanalysis", 0) + sources.get("open_meteo_historical", 0)
+    if ghcnd > 0 and era5 == 0:
+        return "ghcnd"
+    if era5 > 0 and ghcnd == 0:
+        return "era5"
+    if ghcnd > 0 and era5 > 0:
+        return "mixed"
+    return "none"
+
+
+@router.get("/audit/v2-learning-progress")
+async def v2_learning_progress(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
+    """
+    V2 Learning Progress Dashboard.
+    Returns a full payload: summary cards, per-city rows, error-group rows,
+    and v1 vs v2 activation stats.
+    """
+    from app.services.settlement_stations import SETTLEMENT_STATIONS
+
+    # ── 1. Load all ForecastVerification rows ──────────────────────────────
+    fv_rows: list[ForecastVerification] = (await db.execute(
+        select(ForecastVerification).order_by(
+            ForecastVerification.city, ForecastVerification.target_date
+        )
+    )).scalars().all()
+
+    # ── 2. Load all ForecastErrorStats rows ────────────────────────────────
+    fes_rows: list[ForecastErrorStats] = (await db.execute(
+        select(ForecastErrorStats).order_by(
+            ForecastErrorStats.city, ForecastErrorStats.weather_variable,
+            ForecastErrorStats.lead_time_bucket,
+        )
+    )).scalars().all()
+
+    # ── 3. Load v2 PaperTrades ─────────────────────────────────────────────
+    v2_trades: list[PaperTrade] = (await db.execute(
+        select(PaperTrade).where(PaperTrade.strategy_version == "v2.0")
+    )).scalars().all()
+
+    # ── 4. Index by city ───────────────────────────────────────────────────
+    fv_by_city: dict[str, list[ForecastVerification]] = defaultdict(list)
+    for fv in fv_rows:
+        fv_by_city[fv.city].append(fv)
+
+    fes_by_city: dict[str, list[ForecastErrorStats]] = defaultdict(list)
+    for fes in fes_rows:
+        fes_by_city[fes.city].append(fes)
+
+    v2_by_city: dict[str, list[PaperTrade]] = defaultdict(list)
+    for t in v2_trades:
+        if t.city:
+            v2_by_city[t.city].append(t)
+
+    # ── 5. Per-city rows ───────────────────────────────────────────────────
+    city_rows = []
+    for city, station in SETTLEMENT_STATIONS.items():
+        city_fvs = fv_by_city.get(city, [])
+        city_fes = fes_by_city.get(city, [])
+        city_v2 = v2_by_city.get(city, [])
+
+        usable = [fv for fv in city_fvs if fv.actual_value is not None]
+        usable_count = len(usable)
+        total_count = len(city_fvs)
+
+        # Source breakdown
+        sources: dict[str, int] = defaultdict(int)
+        for fv in usable:
+            src = fv.source_label or "unknown"
+            sources[src] += 1
+
+        # Latest observation date
+        latest_date = max((fv.target_date for fv in usable), default=None)
+
+        readiness = _lp_compute_readiness_status(station, usable_count, city_fes)
+
+        city_fes_city_level = [g for g in city_fes if g.fallback_level == "city"]
+        ready_groups = [g for g in city_fes_city_level if g.sample_size >= _LP_MIN_SAMPLE]
+
+        # V2 trade stats
+        v2_fallback_count = sum(
+            1 for t in city_v2
+            if t.fallback_level in ("fixed_table", None)
+        )
+        v2_total = len(city_v2)
+
+        city_rows.append({
+            "city": city,
+            "stationVerified": station.verified,
+            "stationName": station.station_name,
+            "readinessStatus": readiness,
+            "readinessLabel": _READINESS_LABELS.get(readiness, readiness),
+            "usableObservations": usable_count,
+            "totalObservations": total_count,
+            "sourceBreakdown": dict(sources),
+            "sourceQualityLabel": _lp_source_quality_label(dict(sources)),
+            "cityFesGroupCount": len(city_fes_city_level),
+            "cityFesReadyCount": len(ready_groups),
+            "milestoneProgress": _lp_milestone_progress(usable_count),
+            "v2TradesTotal": v2_total,
+            "v2TradesFallback": v2_fallback_count,
+            "v2TradesHistorical": v2_total - v2_fallback_count,
+            "latestObservationDate": latest_date,
+            "fesGroups": [
+                {
+                    "variable": g.weather_variable,
+                    "leadTimeBucket": g.lead_time_bucket,
+                    "month": g.month,
+                    "sampleSize": g.sample_size,
+                    "fallbackLevel": g.fallback_level,
+                    "mae": _round(g.mae),
+                    "stdDev": _round(g.std_dev),
+                    "meanBias": _round(g.mean_error),
+                }
+                for g in city_fes
+            ],
+        })
+
+    # Sort: data_quality_issue last, then by readiness state order, then alpha
+    _STATE_ORDER = {
+        "learned": 0,
+        "partially_learned": 1,
+        "insufficient_sample": 2,
+        "collecting": 3,
+        "not_collecting": 4,
+        "data_quality_issue": 5,
+    }
+    city_rows.sort(key=lambda r: (_STATE_ORDER.get(r["readinessStatus"], 9), r["city"]))
+
+    # ── 6. Error group rows (all FES) ──────────────────────────────────────
+    error_group_rows = []
+    for g in fes_rows:
+        city_fvs_for_source = fv_by_city.get(g.city, [])
+        sources_for_group: dict[str, int] = defaultdict(int)
+        for fv in city_fvs_for_source:
+            if fv.actual_value is not None and fv.source_label:
+                sources_for_group[fv.source_label] += 1
+        error_group_rows.append({
+            "city": g.city,
+            "variable": g.weather_variable,
+            "leadTimeBucket": g.lead_time_bucket,
+            "month": g.month,
+            "sampleSize": g.sample_size,
+            "fallbackLevel": g.fallback_level,
+            "mae": _round(g.mae),
+            "stdDev": _round(g.std_dev),
+            "meanBias": _round(g.mean_error),
+            "sourceQualityLabel": _lp_source_quality_label(dict(sources_for_group)),
+            "lastComputedAt": g.last_computed_at.isoformat() if g.last_computed_at else None,
+        })
+
+    # ── 7. Summary cards ───────────────────────────────────────────────────
+    status_counts: dict[str, int] = defaultdict(int)
+    for row in city_rows:
+        status_counts[row["readinessStatus"]] += 1
+
+    total_usable = sum(r["usableObservations"] for r in city_rows)
+    total_fes = len(fes_rows)
+    global_fes = [g for g in fes_rows if g.city == "__global__"]
+    city_fes_only = [g for g in fes_rows if g.city != "__global__"]
+
+    v2_hist = sum(1 for t in v2_trades if t.fallback_level not in ("fixed_table", None))
+    v2_fall = sum(1 for t in v2_trades if t.fallback_level in ("fixed_table", None))
+    v1_trades: list[PaperTrade] = (await db.execute(
+        select(PaperTrade).where(PaperTrade.strategy_version == "v1.0")
+    )).scalars().all()
+
+    summary = {
+        "totalCities": len(SETTLEMENT_STATIONS),
+        "citiesLearned": status_counts.get("learned", 0),
+        "citiesPartiallyLearned": status_counts.get("partially_learned", 0),
+        "citiesCollecting": status_counts.get("collecting", 0),
+        "citiesNotCollecting": status_counts.get("not_collecting", 0),
+        "citiesDataQualityIssue": status_counts.get("data_quality_issue", 0),
+        "totalUsableObservations": total_usable,
+        "totalFesGroups": total_fes,
+        "cityFesGroups": len(city_fes_only),
+        "globalFesGroups": len(global_fes),
+        "v2TotalTrades": len(v2_trades),
+        "v2TradesUsingHistorical": v2_hist,
+        "v2TradesUsingFallback": v2_fall,
+        "v1TotalTrades": len(v1_trades),
+    }
+
+    return {
+        "summary": summary,
+        "cities": city_rows,
+        "errorGroups": error_group_rows,
+    }
+
+
+@router.get("/audit/v2-city-detail/{city}")
+async def v2_city_detail(
+    city: str,
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
+    """
+    Full verification history + FES groups + v2 trades for a single city.
+    Used for drill-down from the V2 Learning Progress dashboard.
+    """
+    from app.services.settlement_stations import SETTLEMENT_STATIONS
+
+    station = SETTLEMENT_STATIONS.get(city)
+
+    fv_rows: list[ForecastVerification] = (await db.execute(
+        select(ForecastVerification)
+        .where(ForecastVerification.city == city)
+        .order_by(ForecastVerification.target_date.desc())
+    )).scalars().all()
+
+    fes_rows: list[ForecastErrorStats] = (await db.execute(
+        select(ForecastErrorStats)
+        .where(ForecastErrorStats.city == city)
+        .order_by(
+            ForecastErrorStats.weather_variable,
+            ForecastErrorStats.lead_time_bucket,
+        )
+    )).scalars().all()
+
+    v2_rows: list[PaperTrade] = (await db.execute(
+        select(PaperTrade)
+        .where(PaperTrade.strategy_version == "v2.0", PaperTrade.city == city)
+        .order_by(PaperTrade.created_at.desc())
+    )).scalars().all()
+
+    usable = [fv for fv in fv_rows if fv.actual_value is not None]
+    sources: dict[str, int] = defaultdict(int)
+    for fv in usable:
+        src = fv.source_label or "unknown"
+        sources[src] += 1
+
+    city_fes = fes_rows
+    readiness = _lp_compute_readiness_status(station, len(usable), city_fes)
+
+    return {
+        "city": city,
+        "readinessStatus": readiness,
+        "readinessLabel": _READINESS_LABELS.get(readiness, readiness),
+        "stationInfo": {
+            "stationName": station.station_name if station else None,
+            "ghcndStationId": station.ghcnd_station_id if station else None,
+            "verified": station.verified if station else None,
+            "notes": station.notes if station else None,
+        },
+        "milestoneProgress": _lp_milestone_progress(len(usable)),
+        "sourceBreakdown": dict(sources),
+        "sourceQualityLabel": _lp_source_quality_label(dict(sources)),
+        "verifications": [
+            {
+                "id": fv.id,
+                "targetDate": fv.target_date,
+                "weatherVariable": fv.weather_variable,
+                "forecastValue": _round(fv.forecast_value),
+                "actualValue": _round(fv.actual_value),
+                "forecastError": _round(fv.forecast_error),
+                "sourceLabel": fv.source_label,
+                "ghcndStationId": fv.ghcnd_station_id,
+                "leadTimeDays": fv.lead_time_days,
+                "month": fv.month,
+                "season": fv.season,
+                "createdAt": fv.created_at.isoformat() if fv.created_at else None,
+            }
+            for fv in fv_rows
+        ],
+        "fesGroups": [
+            {
+                "variable": g.weather_variable,
+                "leadTimeBucket": g.lead_time_bucket,
+                "month": g.month,
+                "sampleSize": g.sample_size,
+                "fallbackLevel": g.fallback_level,
+                "mae": _round(g.mae),
+                "stdDev": _round(g.std_dev),
+                "meanBias": _round(g.mean_error),
+                "lastComputedAt": g.last_computed_at.isoformat() if g.last_computed_at else None,
+            }
+            for g in fes_rows
+        ],
+        "v2Trades": [
+            {
+                "id": t.id,
+                "ticker": t.market_ticker,
+                "direction": t.direction,
+                "status": t.status,
+                "outcome": t.outcome,
+                "fallbackLevel": t.fallback_level,
+                "sigmaUsed": _round(t.sigma_used),
+                "biasCorrection": _round(t.bias_correction),
+                "calibrationAdj": _round(t.calibration_adj),
+                "stake": _round(t.stake),
+                "pl": _round(t.profit_loss),
+                "targetDate": t.target_settlement_date,
+                "createdAt": t.created_at.isoformat() if t.created_at else None,
+            }
+            for t in v2_rows
+        ],
     }
