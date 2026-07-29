@@ -1,0 +1,94 @@
+Before building the Stored Forecast Verification Backfill, inspect the production database and report how much usable historical forecast data already exists.
+
+Do not make any code changes yet.
+Do not create verification records yet.
+Do not modify Strategy v1, Strategy v2, trades, predictions, or statistics.
+
+Please query the production database and provide a dry-run snapshot inventory with the following:
+
+1. Total PredictionSnapshot records
+
+Show:
+- total snapshot count
+- count by strategy version
+- count by city
+- count by forecast variable or market type
+- earliest snapshot timestamp
+- latest snapshot timestamp
+
+2. Backfill eligibility
+
+Count how many snapshots are:
+
+- eligible for official GHCND verification now
+- already verified
+- associated with an event that has not happened yet
+- missing a target date or expiration time
+- created after the target event
+- associated with an unsupported contract type
+- associated with an unverified settlement station
+- duplicates
+- missing required forecast values
+- otherwise invalid
+
+3. Eligible records by city
+
+For each city, show:
+
+- total snapshots
+- eligible snapshots
+- already verified
+- confirmed settlement station
+- GHCND station ID
+- earliest eligible target date
+- latest eligible target date
+- supported variable, such as TMAX or TMIN
+
+Clearly separate cities with verified station mappings from cities that cannot yet be safely backfilled.
+
+4. Expected learning impact
+
+Based on the eligible records, estimate:
+
+- expected number of new ForecastVerification rows
+- expected number of forecast-error groups after recomputation
+- which city, station, lead-time, and variable groups may reach n ≥ 5
+- which groups may reach n ≥ 30
+- how many cities could begin using learned sigma
+- how many cities would probably remain on fallback assumptions
+
+5. API and execution estimate
+
+Show:
+
+- estimated NOAA API request count
+- whether requests can be batched by station and date range
+- estimated execution time
+- whether NOAA rate limits are likely to be an issue
+- whether the process can be safely resumed if interrupted
+
+6. Data-integrity checks
+
+Confirm whether the current PredictionSnapshot records contain enough information to prevent look-ahead bias, including:
+
+- snapshot creation timestamp
+- target date or target timestamp
+- forecast value
+- city
+- market ticker or event reference
+- weather variable
+- strategy version
+- settlement-station mapping
+
+Flag any required field that is missing or unreliable.
+
+7. Final recommendation
+
+End with one of these conclusions:
+
+- Backfill is likely to materially accelerate V2 learning
+- Backfill will provide a modest improvement
+- Too few eligible snapshots exist to justify building it now
+- Data quality is insufficient for a scientifically valid backfill
+
+Please provide exact production row counts and a plain-English summary. Do not rely on development database counts.
