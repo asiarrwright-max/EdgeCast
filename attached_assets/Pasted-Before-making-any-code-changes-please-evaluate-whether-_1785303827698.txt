@@ -1,0 +1,56 @@
+Before making any code changes, please evaluate whether EdgeCast can safely use multiple forecast snapshots from the same city, variable, and settlement date to improve V2 learning.
+
+The goal is to extract more information from each weather event without falsely treating highly correlated forecasts as independent samples.
+
+Please answer:
+
+1. What forecast snapshots are currently stored for each city-day?
+   - Show the typical number of snapshots per city, variable, and target date.
+   - Show the distribution of lead times.
+
+2. Can snapshots be grouped into fixed lead-time buckets, such as:
+   - 5–7 days
+   - 3–4 days
+   - 2 days
+   - 24–48 hours
+   - 12–24 hours
+   - 6–12 hours
+   - under 6 hours
+   - same-day
+
+3. Could ForecastErrorStats be calculated separately by:
+   - city
+   - settlement station
+   - variable
+   - lead-time bucket
+
+4. Would each city-date contribute no more than one observation to each lead-time bucket?
+
+5. How should we prevent repeated API pulls of nearly identical forecasts from inflating sample size?
+   Please evaluate options such as:
+   - selecting the earliest snapshot in each lead-time bucket
+   - selecting the snapshot closest to a fixed lead-time target
+   - applying correlation-aware weights
+   - limiting each city-date to one record per bucket
+
+6. How should same-day forecasts be handled?
+   - Should forecasts retrieved after a cutoff time be excluded?
+   - What cutoff would reduce contamination from observations already incorporated into the forecast?
+   - Can the actual model run or generation time be obtained from Open-Meteo, rather than only the API retrieval time?
+
+7. Would this approach provide meaningful additional learning compared with the current one-observation-per-city-date method?
+
+8. Based on the current production data, estimate:
+   - how many valid lead-time-bucket observations exist
+   - how many ForecastErrorStats groups would reach n ≥ 5
+   - how many would reach n ≥ 30
+   - whether any cities could begin using learned sigma sooner
+
+9. Identify any look-ahead bias, dependence, or calibration risks.
+
+10. End with a recommendation:
+   - implement lead-time-bucket learning now
+   - continue collecting data before implementing it
+   - or use a different approach
+
+Do not modify production code or database records yet. Provide exact production counts and a plain-English recommendation.
