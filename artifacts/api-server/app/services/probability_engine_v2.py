@@ -312,11 +312,14 @@ async def run_analysis_v2(
         )
 
     # ── Lead time ─────────────────────────────────────────────────────────────
+    # market.target_date may be a full ISO datetime ("2026-07-28T19:00:00Z");
+    # date.fromisoformat only accepts "YYYY-MM-DD", so strip any time component.
     try:
-        target = date.fromisoformat(target_date_str)
+        date_only_str = target_date_str.split("T")[0] if target_date_str else None
+        target = date.fromisoformat(date_only_str)
         lead_time_days = max(0, (target - date.today()).days)
         month = target.month
-    except ValueError:
+    except (ValueError, TypeError):
         lead_time_days = None
         month = None
 

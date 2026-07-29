@@ -38,6 +38,9 @@ def _to_dict(j: JobRun) -> dict:
         "ptNoTrades": j.pt_no_trades,
         "ptSkipped": j.pt_skipped,
         "ptErrors": j.pt_errors,
+        # V2 shadow paper-trading counts
+        "ptV2Created": j.pt_v2_created,
+        "ptV2Skipped": j.pt_v2_skipped,
     }
 
 
