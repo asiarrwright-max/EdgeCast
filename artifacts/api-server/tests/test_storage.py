@@ -139,6 +139,45 @@ class TestModels:
         assert m.parsing_status == "collected"
         assert m.weather_market_type == "temperature"
 
+    def test_kalshi_market_long_title_and_subtitle(self):
+        """Regression: title and subtitle must accept strings longer than 500 chars.
+
+        Previously VARCHAR(500) caused StringDataRightTruncationError when Kalshi
+        multi-game / esports markets had concatenated subtitles > 500 characters.
+        Both columns are now TEXT with no length cap.
+        """
+        from app.models import KalshiMarket
+        from sqlalchemy import inspect as sa_inspect, text as sa_text
+        from sqlalchemy.orm import class_mapper
+
+        long_title    = "A" * 600   # 600 chars — previously would overflow VARCHAR(500)
+        long_subtitle = "B" * 900   # 900 chars — matches the real-world esports market that triggered the bug
+
+        m = KalshiMarket(
+            ticker="KXTEST-LONGTEXT-001",
+            title=long_title,
+            subtitle=long_subtitle,
+            status="active",
+            weather_matched=False,
+            parsing_status="collected",
+            weather_market_type="temperature",
+        )
+        assert m.title    == long_title,    "title must store strings >500 chars"
+        assert m.subtitle == long_subtitle, "subtitle must store strings >500 chars"
+        assert len(m.title)    == 600
+        assert len(m.subtitle) == 900
+
+        # Confirm the ORM column type is Text (no length constraint)
+        mapper    = class_mapper(KalshiMarket)
+        col_title = mapper.columns["title"]
+        col_sub   = mapper.columns["subtitle"]
+        from sqlalchemy import Text
+        assert isinstance(col_title.type, Text),    "title column must be Text, not String(n)"
+        assert isinstance(col_sub.type,   Text),    "subtitle column must be Text, not String(n)"
+        # Text has no length attribute (or length is None)
+        assert getattr(col_title.type, "length", None) is None, "title must have no length cap"
+        assert getattr(col_sub.type,   "length", None) is None, "subtitle must have no length cap"
+
     def test_job_run_new_fields(self):
         from app.models import JobRun
 
