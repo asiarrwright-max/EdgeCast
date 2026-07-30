@@ -4,15 +4,17 @@ import {
   useTriggerCollection,
   useGetV2LearningProgress,
   useGetPaperTradeMetrics,
+  useGetMarkets,
   getGetDashboardQueryKey,
   getGetMarketsQueryKey,
   getGetJobsQueryKey,
 } from "@workspace/api-client-react";
-import { format } from "date-fns";
+import { format, parseISO, differenceInHours } from "date-fns";
 import {
   Activity, CloudRain, Database, RefreshCw, AlertTriangle,
   AlertCircle, CheckCircle2, Cloud, Sun, CloudLightning,
-  TrendingUp, Info, Brain, ExternalLink, Target, Briefcase, DollarSign
+  TrendingUp, Info, Brain, ExternalLink, Target, Briefcase, DollarSign,
+  Zap, Clock, Star
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -77,6 +79,40 @@ function InfoTooltip({ text, maxWidth = 260 }: { text: string; maxWidth?: number
       </Tooltip>
     </TooltipProvider>
   );
+}
+
+// ── Model Readiness Score ────────────────────────────────────────────────────
+
+const TOTAL_CITIES = 24; // fixed universe
+
+function computeReadinessScore(summary: {
+  totalUsableObservations: number;
+  citiesLearned: number;
+  citiesPartiallyLearned: number;
+  v2TotalTrades: number;
+  v2TradesUsingHistorical: number;
+}): number {
+  const learnedPct  = summary.citiesLearned / TOTAL_CITIES;
+  const partialPct  = summary.citiesPartiallyLearned / TOTAL_CITIES;
+  const obsDensity  = Math.min(summary.totalUsableObservations / 2000, 1);
+  const histRate    = summary.v2TotalTrades > 0
+    ? summary.v2TradesUsingHistorical / summary.v2TotalTrades
+    : 0;
+
+  const score =
+    learnedPct  * 40 +   // 40 pts: fully learned cities
+    obsDensity  * 30 +   // 30 pts: raw observation density
+    histRate    * 20 +   // 20 pts: trades using real learned data vs defaults
+    partialPct  * 10;    // 10 pts: partially-learned cities count too
+
+  return Math.round(Math.min(score, 100));
+}
+
+function readinessScoreLabel(score: number): { label: string; color: string } {
+  if (score >= 80) return { label: "Highly Trusted",      color: "green" };
+  if (score >= 55) return { label: "Getting Reliable",    color: "blue"  };
+  if (score >= 30) return { label: "Building Confidence", color: "amber" };
+  return               { label: "Early Stage",            color: "gray"  };
 }
 
 // ── Model Logic ──────────────────────────────────────────────────────────────
@@ -196,6 +232,153 @@ function GlossaryStrip() {
   );
 }
 
+// ── Today's Best Opportunities ───────────────────────────────────────────────
+
+const CONFIDENCE_WEIGHT: Record<string, number> = {
+  VERY_HIGH: 1.0,
+  HIGH:      0.8,
+  MODERATE:  0.6,
+  LOW:       0.3,
+};
+
+function opportunityScore(edge: number, confidence: string | null | undefined): number {
+  const w = CONFIDENCE_WEIGHT[confidence?.toUpperCase() ?? ""] ?? 0.4;
+  return edge * w;
+}
+
+function confidenceBadgeClass(confidence: string | null | undefined): string {
+  switch (confidence?.toUpperCase()) {
+    case "VERY_HIGH": return COLOR_SYSTEM.green;
+    case "HIGH":      return COLOR_SYSTEM.blue;
+    case "MODERATE":  return COLOR_SYSTEM.amber;
+    default:          return COLOR_SYSTEM.gray;
+  }
+}
+
+function TodaysBestOpportunities({
+  markets,
+  cityReadiness,
+}: {
+  markets: Array<{
+    id: number;
+    ticker: string;
+    city?: string | null;
+    probabilityDiff?: number | null;
+    confidence?: string | null;
+    ecProbability?: number | null;
+    marketProbability?: number | null;
+    closeTime?: string | null;
+  }>;
+  cityReadiness: Record<string, string>;
+}) {
+  const ranked = markets
+    .filter(m => (m.probabilityDiff ?? 0) > 0 && m.confidence && m.ecProbability != null)
+    .map(m => ({ ...m, score: opportunityScore(m.probabilityDiff!, m.confidence) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+
+  if (ranked.length === 0) {
+    return (
+      <Card className="border-border/50 bg-card/40 backdrop-blur shadow-sm">
+        <CardHeader className="pb-4 border-b border-border/50 bg-muted/5">
+          <CardTitle className="text-xs font-mono tracking-widest text-muted-foreground uppercase flex items-center gap-2">
+            <Star className="h-4 w-4 text-amber-400" /> Today's Best Opportunities
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-8 text-center text-xs font-mono text-muted-foreground">
+          No ranked opportunities right now — run a sync to refresh market data.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="border-border/50 bg-card/40 backdrop-blur shadow-sm overflow-hidden">
+      <CardHeader className="flex flex-row items-center justify-between pb-4 border-b border-border/50 bg-muted/5">
+        <CardTitle className="text-xs font-mono tracking-widest text-muted-foreground uppercase flex items-center gap-2">
+          <Star className="h-4 w-4 text-amber-400" /> Today's Best Opportunities
+        </CardTitle>
+        <Link href="/markets" className="text-[10px] font-mono text-primary hover:text-primary-foreground hover:underline flex items-center gap-1 transition-colors">
+          ALL MARKETS <ExternalLink className="h-3 w-3" />
+        </Link>
+      </CardHeader>
+      <CardContent className="p-0">
+        <p className="px-4 pt-3 pb-2 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+          Ranked by edge × confidence · Top {ranked.length} of {markets.filter(m => (m.probabilityDiff ?? 0) > 0).length} active opportunities
+        </p>
+        <div className="divide-y divide-border/30">
+          {ranked.map((m, i) => {
+            const cityStatus = m.city ? (cityReadiness[m.city] ?? "not_collecting") : "not_collecting";
+            const cityColor  = CITY_CHIP_COLORS[cityStatus] || CITY_CHIP_COLORS.not_collecting;
+            const cityLabel  = CITY_STATUS_LABEL[cityStatus] ?? cityStatus;
+            const hoursLeft  = m.closeTime
+              ? differenceInHours(parseISO(m.closeTime), new Date())
+              : null;
+
+            return (
+              <div key={m.id} className="px-4 py-3 hover:bg-muted/10 transition-colors flex items-center gap-3">
+                {/* Rank */}
+                <div className="text-[10px] font-mono font-bold text-muted-foreground w-4 shrink-0 text-center">
+                  {i + 1}
+                </div>
+
+                {/* Main info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Link
+                      href={`/markets/${m.ticker}`}
+                      className="text-xs font-mono font-bold text-primary hover:underline truncate"
+                    >
+                      {m.ticker}
+                    </Link>
+                    {m.city && (
+                      <TooltipProvider delayDuration={150}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border cursor-default ${cityColor}`}>
+                              {m.city}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent className="text-xs font-sans">
+                            Model status for {m.city}: {cityLabel}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 text-[10px] font-mono text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <Zap className="h-2.5 w-2.5 text-amber-400" />
+                      Edge: <span className="text-amber-400 font-semibold">+{(m.probabilityDiff! * 100).toFixed(1)}pp</span>
+                    </span>
+                    {hoursLeft != null && hoursLeft > 0 && (
+                      <span className="flex items-center gap-1">
+                        <Clock className="h-2.5 w-2.5 text-muted-foreground" />
+                        {hoursLeft < 24
+                          ? `${hoursLeft}h left`
+                          : `${Math.round(hoursLeft / 24)}d left`}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Confidence badge */}
+                <span className={`text-[9px] font-mono px-2 py-1 rounded border shrink-0 ${confidenceBadgeClass(m.confidence)}`}>
+                  {m.confidence?.replace("_", " ")}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        <div className="px-4 py-2.5 border-t border-border/30 bg-muted/5 text-[9px] font-mono text-muted-foreground">
+          Edge = EdgeCast probability − market price. Confidence reflects model certainty at entry.
+          City badge color = model readiness for that location.
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function DashboardSkeleton() {
   return (
     <div className="space-y-8 animate-pulse pb-20">
@@ -228,6 +411,7 @@ export default function DashboardPage() {
   const { data: dashboard, isLoading: dashLoading, error: dashError } = useGetDashboard();
   const { data: learning, isLoading: learnLoading, error: learnError } = useGetV2LearningProgress();
   const { data: metrics, isLoading: metricsLoading } = useGetPaperTradeMetrics();
+  const { data: allMarkets } = useGetMarkets();
   const triggerMutation = useTriggerCollection();
 
   const handleTrigger = () => {
@@ -280,6 +464,16 @@ export default function DashboardPage() {
   });
 
   const stage = getModelStage(learning.summary);
+
+  // Model Readiness Score (0-100)
+  const readinessScore = computeReadinessScore(learning.summary);
+  const readinessLabel = readinessScoreLabel(readinessScore);
+
+  // City readiness map for opportunity cross-referencing
+  const cityReadinessMap: Record<string, string> = Object.fromEntries(
+    learning.cities.map(c => [c.city, c.readinessStatus])
+  );
+
   const heroGlowMap: Record<string, string> = {
     blue: "bg-blue-500",
     green: "bg-emerald-500",
@@ -357,16 +551,39 @@ export default function DashboardPage() {
                    </p>
                 </div>
 
-                {/* Quick Overall KPIs */}
-                <div className="flex gap-8 md:text-right shrink-0">
-                   <div className="space-y-1">
-                     <div className="text-4xl font-mono font-bold text-foreground">{overallPct}%</div>
-                     <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Trained</div>
-                   </div>
-                   <div className="space-y-1">
-                     <div className="text-4xl font-mono font-bold text-foreground">{learning.summary.citiesLearned}</div>
-                     <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Cities Locked</div>
-                   </div>
+                {/* Readiness Score + KPIs */}
+                <div className="flex flex-col items-end gap-4 shrink-0">
+                  <TooltipProvider delayDuration={150}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="text-center cursor-help">
+                          <div className={`text-5xl md:text-6xl font-mono font-black tracking-tight ${TEXT_COLORS[readinessLabel.color]}`}>
+                            {readinessScore}
+                          </div>
+                          <div className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground mt-0.5">/ 100</div>
+                          <div className={`text-[10px] font-mono font-semibold mt-1 ${TEXT_COLORS[readinessLabel.color]}`}>
+                            {readinessLabel.label}
+                          </div>
+                          <div className="text-[8px] font-mono text-muted-foreground mt-0.5 uppercase tracking-widest">
+                            Readiness Score
+                          </div>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent className="font-sans text-xs leading-relaxed max-w-[280px]">
+                        Composite score (0–100): cities fully trained (40 pts), observation volume (30 pts), trades using learned data vs defaults (20 pts), cities partially trained (10 pts).
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  <div className="flex gap-5 text-right">
+                    <div className="space-y-0.5">
+                      <div className="text-2xl font-mono font-bold text-foreground">{learning.summary.citiesLearned}</div>
+                      <div className="text-[9px] uppercase tracking-widest text-muted-foreground">Fully Trained</div>
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="text-2xl font-mono font-bold text-foreground">{overallPct}%</div>
+                      <div className="text-[9px] uppercase tracking-widest text-muted-foreground">Progress</div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -398,7 +615,13 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* 3. CITY LEARNING MATRIX */}
+          {/* 3. TODAY'S BEST OPPORTUNITIES */}
+          <TodaysBestOpportunities
+            markets={allMarkets?.markets ?? []}
+            cityReadiness={cityReadinessMap}
+          />
+
+          {/* 4. CITY LEARNING MATRIX */}
           <Card className="border-border/50 bg-card/40 backdrop-blur shadow-sm overflow-hidden">
             <CardHeader className="flex flex-row items-center justify-between pb-4 border-b border-border/50 bg-muted/5">
                <CardTitle className="text-xs font-mono tracking-widest text-muted-foreground uppercase flex items-center gap-2">
