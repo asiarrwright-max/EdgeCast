@@ -268,9 +268,14 @@ async def _run_paper_trading_v3_inner(session, stats: dict) -> dict[str, int]:
 
     now = datetime.now(timezone.utc)
 
-    # Latest V3 snapshot per ticker
+    # Latest PENDING V3 snapshot per ticker.
+    # SUPERSEDED rows are excluded so paper trading only considers the most
+    # recent prediction for each ticker (the predictor marks older rows
+    # SUPERSEDED before creating new PENDING ones in the same session).
     all_v3_q = await session.execute(
-        select(V3PredictionSnapshot).order_by(
+        select(V3PredictionSnapshot)
+        .where(V3PredictionSnapshot.trade_decision == "PENDING")
+        .order_by(
             V3PredictionSnapshot.market_ticker,
             V3PredictionSnapshot.id.desc(),
         )

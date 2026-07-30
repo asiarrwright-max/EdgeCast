@@ -13,4 +13,5 @@
 - [ncei-access-api-units](ncei-access-api-units.md) — NCEI access API returns full degrees (not tenths); TMAX_SCALE_FACTOR must be 1.0, not 10.
 - [open-meteo-historical-forecast-api-constraint](open-meteo-historical-forecast-api-constraint.md) — forecast_days mutually exclusive with start_date/end_date; V3 gets one lead-time bucket only from this provider.
 - [v3-phase2-walkforward-results](v3-phase2-walkforward-results.md) — walk-forward verdict: no_clear_improvement; raw model near-zero bias masks; OKC overshot; sigma floor dominates coverage.
-- [v3-bias-sigma-two-component](v3-bias-sigma-two-component.md) — sigma always applied for calibration; bias gated on n_eff≥50 + |t|≥2.0 + |bias|≥0.3°F; Denver annual FAILS (t=1.85), OKC annual PASSES (t=3.33).
+- [v3-bias-sigma-two-component](v3-bias-sigma-two-component.md) — sigma always applied; bias gated; V3 formula correct (mu += bias); V2.1 formula inverted (mu -= mean_error); Denver summer passes gate (t=2.30, +1.06°F underforecast).
+- [v3-same-day-contract-staleness](v3-same-day-contract-staleness.md) — extreme edges (74–94pp) for same-day TLOW contracts are spurious; market reflects morning's observed temp while V3 holds prior GFS forecast; is_executable=False screens these out.

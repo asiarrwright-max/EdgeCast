@@ -417,7 +417,13 @@ async def run_analysis_v2(
         fallback_level = "fixed_table"
         bias = 0.0
 
-    # Bias-corrected μ: subtract mean_error (positive = model runs high)
+    # Bias-corrected μ.
+    # Convention: mean_error = mean(actual − forecast).
+    #   positive mean_error → actual hotter than forecast → GFS under-forecasts.
+    #   negative mean_error → actual cooler than forecast → GFS over-forecasts.
+    # Subtracting a positive mean_error lowers mu (downward V2.1 adjustment).
+    # V3 uses the opposite sign (mu += bias) which is the correct direction;
+    # this V2.1 formula is preserved unchanged to avoid recalculating settled records.
     mu = forecast_value - bias
 
     # ── Gaussian probability ──────────────────────────────────────────────────

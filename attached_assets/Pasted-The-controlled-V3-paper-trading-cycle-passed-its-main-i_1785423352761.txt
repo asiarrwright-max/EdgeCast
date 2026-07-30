@@ -1,0 +1,69 @@
+The controlled V3 paper-trading cycle passed its main integrity checks. Before I leave V3 running normally, please investigate three final items.
+
+1. Verify Denver bias direction
+
+The report shows Denver receiving a +1.06°F bias correction, which raises probabilities for hotter outcomes.
+
+However, another explanation says GFS historically “over-forecasted heat” in Denver. Those statements appear directionally inconsistent.
+
+Please show:
+
+- The exact signed-error formula used:
+  actual - forecast, or forecast - actual
+- Denver’s raw historical mean signed error
+- The raw forecast for several Denver examples
+- The applied correction
+- The final corrected forecast
+- Proof that the correction moves in the appropriate direction
+- Correct the written explanation if the code is right but the narrative is wrong
+
+Add a unit test confirming that:
+- historical underforecasting produces an upward correction
+- historical overforecasting produces a downward correction
+
+2. Audit extreme claimed edges
+
+Review every V3 trade with claimed edge greater than 50 percentage points.
+
+For each, show:
+
+- ticker and contract wording
+- YES or NO direction
+- Kalshi YES bid and ask
+- Kalshi NO bid and ask, whether directly supplied or derived
+- market probability shown in analytics
+- V3 probability for the selected side
+- actual simulated executable entry price
+- estimated fees
+- gross edge
+- net executable edge after fees
+- quote age and executable status
+
+Confirm that the system does not:
+- compare a NO prediction with a YES price incorrectly
+- use midpoint probability as an executable price
+- treat 99.5% YES as though NO costs 99.5 cents
+- create a paper trade where no valid executable quote exists
+
+Any paper trade without a valid entry price and executable quote must not be included in official ROI.
+
+3. Improve repeated PENDING snapshot handling
+
+There are currently 114 tickers with two PENDING snapshots because two collection cycles were run.
+
+Please confirm that production selection uses an explicit collection batch ID and prediction timestamp, not only the highest database ID.
+
+Implement or confirm:
+
+- one snapshot per ticker per collection batch
+- the latest completed batch is selected deterministically
+- older untraded PENDING snapshots are marked SUPERSEDED rather than remaining indefinitely PENDING
+- TEST_EXCLUDED records remain excluded
+- retries cannot supersede a valid completed batch incorrectly
+- settlement and analytics use the snapshot linked to the actual trade
+
+Report how many current PENDING rows would become SUPERSEDED.
+
+Do not modify or recalculate completed V1, V2, or V2.1 records.
+
+V3 can remain paper-only, but do not treat this first cycle as official performance evidence until these three checks are complete.

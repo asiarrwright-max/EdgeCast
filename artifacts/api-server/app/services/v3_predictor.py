@@ -32,11 +32,11 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.database import AsyncSessionLocal
 from app.models import KalshiMarket, PredictionSnapshot
-from app.models_v3 import CURRENT_PRELOAD_VERSION, V3PredictionSnapshot
+from app.models_v3 import CURRENT_PRELOAD_VERSION, V3PaperTrade, V3PredictionSnapshot
 from app.services.settlement_stations import get_station
 from app.services.v3_flags import get_v3_flag
 from app.services.v3_probability_engine import V3PredictionInput, run_v3_prediction
@@ -175,6 +175,45 @@ async def _run_v3_predictions_inner(session, stats: dict) -> dict:
     market_map: dict[str, KalshiMarket] = {
         m.ticker: m for m in markets_q.scalars().all()
     }
+
+    # ── Supersede stale PENDING snapshots ────────────────────────────────────
+    # Before creating new snapshots, mark any existing PENDING rows for the
+    # same tickers as SUPERSEDED.  This ensures exactly one live PENDING row
+    # per ticker at all times and prevents unbounded PENDING accumulation.
+    #
+    # Safety rule: rows that are already linked to a V3PaperTrade are NEVER
+    # superseded so trade provenance (v3_snapshot_id FK) remains intact.
+    all_eligible_tickers: list[str] = [s.market_ticker for s in latest_snaps]
+    if all_eligible_tickers:
+        # Snapshot IDs that have a V3PaperTrade pointing at them — preserve them
+        traded_snap_ids_q = await session.execute(
+            select(V3PaperTrade.v3_snapshot_id).where(
+                V3PaperTrade.v3_snapshot_id.is_not(None)
+            )
+        )
+        traded_snap_ids: set[int] = {row[0] for row in traded_snap_ids_q}
+
+        supersede_stmt = (
+            update(V3PredictionSnapshot)
+            .where(
+                V3PredictionSnapshot.market_ticker.in_(all_eligible_tickers),
+                V3PredictionSnapshot.trade_decision == "PENDING",
+            )
+        )
+        if traded_snap_ids:
+            supersede_stmt = supersede_stmt.where(
+                V3PredictionSnapshot.id.not_in(traded_snap_ids)
+            )
+        supersede_stmt = supersede_stmt.values(
+            trade_decision="SUPERSEDED",
+            decision_reason=(
+                "Superseded by newer prediction created in the following collection cycle"
+            ),
+        )
+        result = await session.execute(supersede_stmt)
+        superseded_count = result.rowcount
+        if superseded_count:
+            logger.info("V3 predictions: superseded %d stale PENDING snapshots", superseded_count)
 
     # ── Process each market ───────────────────────────────────────────────────
     for snap in latest_snaps:

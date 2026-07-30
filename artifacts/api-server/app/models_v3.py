@@ -406,7 +406,11 @@ class V3PredictionSnapshot(Base):
 
     # Decision
     trade_decision: Mapped[str | None] = mapped_column(String(20))
-    # "YES" | "NO" | "SKIP" | "PENDING" (set after paper-trading step)
+    # "YES" | "NO" | "SKIP" | "PENDING" | "SUPERSEDED"
+    # "SUPERSEDED" — a newer prediction has been created for this ticker in a
+    # subsequent collection cycle.  Trade-linked rows (those referenced by a
+    # V3PaperTrade.v3_snapshot_id) are never superseded so trade provenance is
+    # always intact.
     decision_reason: Mapped[str | None] = mapped_column(Text)
     analysis_status: Mapped[str] = mapped_column(
         String(50), nullable=False, default="unsupported"

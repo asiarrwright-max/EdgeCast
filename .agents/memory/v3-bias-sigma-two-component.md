@@ -20,15 +20,34 @@ Denver's annual bias (+0.53°F) is real but too noisy (t=1.85, fails gate).
 OKC's annual bias (−0.80°F) is significant (t=3.33, passes gate).  
 Sigma floor dominates coverage (90.6% within ±1σ vs ideal 68%) — the primary value of the preload is calibration, not mean adjustment.
 
-## Live gate results (732 records, 2024)
+## Live gate results (DB-confirmed, July 2026)
 
-| City       | Season | Level | n_eff | bias   | t    | Gate |
-|------------|--------|-------|-------|--------|------|------|
-| Denver     | summer | 0     | 55.2  | +1.064 | 2.30 | PASS |
-| Denver     | all    | 1     | 219.6 | +0.531 | 1.85 | FAIL (t just below 2.0) |
-| OKC        | spring | 0     | 55.2  | −0.901 | 2.04 | PASS |
-| OKC        | all    | 1     | 219.6 | −0.797 | 3.33 | PASS |
-| global     | all    | 3     | 439.2 | −0.133 | 0.70 | FAIL |
+| City   | Season | Level | n_eff | bias    | t    | Gate |
+|--------|--------|-------|-------|---------|------|------|
+| Denver | summer | 0     | 55.2  | +1.0642 | 2.30 | PASS |
+| Denver | fall   | 0     | 54.6  | +0.571  | 1.16 | FAIL |
+| Denver | spring | 0     | 55.2  | −0.022  | 0.03 | FAIL |
+| Denver | winter | 0     | 54.6  | +0.537  | 0.90 | FAIL |
+| Denver | all    | 1     | 219.6 | +0.531  | 1.85 | FAIL (t=1.85, just below 2.0 gate) |
+
+## Bias direction (V3 formula is CORRECT; V2.1 formula is INVERTED)
+
+signed_error = actual − forecast  (positive = GFS under-forecasts, actual hotter)
+bias = mean(signed_error)
+
+V3 (`v3_probability_engine.py`):
+    mu_adjusted = forecast_value + final_bias    ← CORRECT
+    Positive bias → raises mu → more prob of hot outcome ✓
+
+V2.1 (`probability_engine_v2.py`, line ~421):
+    mu = forecast_value − mean_error             ← INVERTED
+    Positive mean_error (GFS under-forecast) → lowers mu → wrong direction.
+    Deliberately not changed to avoid recalculating settled records.
+    The misleading comment "positive = model runs high" was updated to explain the discrepancy.
+
+Denver summer narrative: GFS historically UNDER-forecasts Denver summer TMAX by 1.06°F.
+V3 corrects upward (+1.06°F), raising P(hot outcome). Previous reports saying "over-forecasts"
+were wrong — the +1.06°F positive bias unambiguously labels GFS as an underforecaster.
 
 ## Where the gate lives
 
