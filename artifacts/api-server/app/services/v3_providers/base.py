@@ -15,16 +15,29 @@ Data integrity requirements (enforced by providers)
 -----------------------------------------------------
 Every ``RawForecastRecord`` returned by a provider MUST have:
 - ``forecast_init_time`` populated (UTC, timezone-aware).
-  If the underlying API cannot provide the model initialization time,
-  the provider MUST raise ``ProviderDataError`` rather than return a record
-  with a guessed or absent init time.
+  If the underlying API cannot provide the true model initialization time,
+  the provider MAY derive a conservative estimate and MUST set
+  ``init_time_source`` to an appropriate "derived_*" key rather than
+  "api_provided".  Raising ``ProviderDataError`` is only required when no
+  defensible estimate is possible at all.
 - ``forecast_valid_time`` populated (UTC, timezone-aware).
+- ``init_time_source`` populated — see values on ``RawForecastRecord``.
 - A clear distinction between "model output" and "reanalysis".
   Providers that serve reanalysis (e.g. ERA5) MUST set
   ``is_reanalysis=True`` so the look-ahead validator can reject them.
 
 A provider MUST NOT blend records from different underlying models into one
 unlabeled aggregate.  Separate model runs must be returned as separate records.
+
+Lead-time bucket implications
+------------------------------
+When ``init_time_source == "api_provided"``, the ingestion engine computes
+an exact hourly lead and assigns one of the short-range buckets
+("0-6h", "6-12h", "12-18h", "18-24h", "24-36h", "36-48h").
+
+When ``init_time_source`` starts with "derived_", the nominal
+``lead_time_hours`` is used to assign a daily bucket ("1d", "2d", …)
+because the true lead cannot be determined with sub-day precision.
 """
 from __future__ import annotations
 
@@ -94,6 +107,16 @@ class RawForecastRecord:
     raw_response: Any
     # The verbatim API response (dict / str) for this record.
     # Stored in V3RawSourceRecord.raw_response before any transformation.
+
+    # ── Timestamp provenance ───────────────────────────────────────────────
+    init_time_source: str = "derived_prior_day_00z"
+    # How forecast_init_time was determined:
+    #   "api_provided"           — provider returned an explicit model run
+    #                              timestamp; exact short-range lead buckets work.
+    #   "derived_prior_day_00z"  — conservatively set to valid_date − 1 day at
+    #                              00:00 UTC; short-range buckets are NOT reliable;
+    #                              lead_time_bucket falls back to nominal daily value.
+    # Add new derived_* variants as needed for other estimation strategies.
 
     # ── Data-quality flags ─────────────────────────────────────────────────
     is_reanalysis: bool = False

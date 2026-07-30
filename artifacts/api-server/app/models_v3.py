@@ -195,9 +195,30 @@ class V3HistoricalRecord(Base):
 
     # Lead time
     lead_time_hours: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Nominal hours from forecast_init_time to forecast_valid_time
+    # Nominal hours from forecast_init_time to forecast_valid_time.
+    # For derived timestamps this is the provider's declared nominal value (e.g. 24),
+    # which may differ from the exact computed lead (forecast_valid_time - forecast_init_time).
     lead_time_bucket: Mapped[str] = mapped_column(String(10), nullable=False)
-    # "1d" | "2d" | "3d" | "4d" | "5d" | "6d" | "7d"
+    # Short-range buckets (requires init_time_source = "api_provided"):
+    #   "0-6h" | "6-12h" | "12-18h" | "18-24h" | "24-36h" | "36-48h"
+    # Daily buckets (used when init_time is derived / not precisely known):
+    #   "1d" | "2d" | "3d" | "4d" | "5d" | "6d" | "7d"
+    # Phase 2 groups records by this bucket for bias/sigma estimation.
+    # Broad fallback groups ("2d", "3d", …) are used when a short-range bucket
+    # has insufficient sample size for stable estimates (< MIN_SAMPLE threshold).
+
+    # Timestamp provenance
+    init_time_source: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="derived_prior_day_00z"
+    )
+    # How forecast_init_time was determined:
+    #   "api_provided"        — provider returned an explicit model run timestamp;
+    #                           exact short-range lead-time buckets are trustworthy.
+    #   "derived_prior_day_00z" — conservatively estimated as valid_date − 1 day at
+    #                           00:00 UTC; short-range buckets CANNOT be computed;
+    #                           lead_time_bucket is forced to the nominal daily value.
+    # Future providers that expose model run metadata (NOAA GFS archives, GEFS
+    # ensemble files) should set "api_provided" and populate the correct init_time.
 
     # Forecast values (normalized, Fahrenheit)
     forecast_tmax_f: Mapped[float | None] = mapped_column(Float)
@@ -265,7 +286,11 @@ class V3ErrorStats(Base):
     # "__global__" for cross-city fallback rows
     model: Mapped[str] = mapped_column(String(100), nullable=False)
     lead_time_bucket: Mapped[str] = mapped_column(String(10), nullable=False)
-    # "1d" | "2d" | "3d" | "4d" | "5d" | "6d" | "7d" | "__all__"
+    # Short-range: "0-6h" | "6-12h" | "12-18h" | "18-24h" | "24-36h" | "36-48h"
+    # Daily:       "1d" | "2d" | "3d" | "4d" | "5d" | "6d" | "7d" | "__all__"
+    # Short-range buckets are only populated when the training data was sourced
+    # from a provider with init_time_source = "api_provided".  Current data
+    # from Open-Meteo date-range mode uses "1d" only.
     season: Mapped[str | None] = mapped_column(String(10))
     # "winter" | "spring" | "summer" | "fall" | NULL (all-season)
     fallback_level: Mapped[int] = mapped_column(Integer, nullable=False)

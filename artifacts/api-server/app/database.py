@@ -93,6 +93,10 @@ async def _apply_migrations(conn) -> None:
         "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS station_lon FLOAT",
         # V3: nullable comparison_group_id on prediction_snapshots (additive; no constraint on existing rows)
         "ALTER TABLE prediction_snapshots ADD COLUMN IF NOT EXISTS comparison_group_id VARCHAR(36)",
+        # V3 Phase 1 refinement: timestamp provenance field on historical records
+        # Distinguishes API-provided init timestamps from conservatively derived ones.
+        # Default is 'derived_prior_day_00z' (matches Open-Meteo date-range mode behavior).
+        "ALTER TABLE v3_historical_records ADD COLUMN IF NOT EXISTS init_time_source VARCHAR(30) DEFAULT 'derived_prior_day_00z'",
     ]
     for stmt in migrations:
         try:

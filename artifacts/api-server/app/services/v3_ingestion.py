@@ -87,6 +87,61 @@ LEAD_TIME_BUCKET: dict[int, str] = {
     24: "1d", 48: "2d", 72: "3d",
     96: "4d", 120: "5d", 144: "6d", 168: "7d",
 }
+# Maps nominal lead hours → daily bucket for derived-timestamp records.
+# Used when init_time_source != "api_provided".
+
+# Short-range bucket boundaries (hours), used when init_time_source == "api_provided".
+# Preferred: 0–6h, 6–12h, 12–18h, 18–24h, 24–36h, 36–48h.
+# Broader fallback groups are used by Phase 2 when a short-range bucket
+# has too few samples for stable bias/sigma estimation.
+SHORT_RANGE_BUCKETS: list[tuple[float, str]] = [
+    (6.0,  "0-6h"),
+    (12.0, "6-12h"),
+    (18.0, "12-18h"),
+    (24.0, "18-24h"),
+    (36.0, "24-36h"),
+    (48.0, "36-48h"),
+    (72.0, "2d"),
+    (96.0, "3d"),
+    (120.0, "4d"),
+    (144.0, "5d"),
+    (168.0, "6d"),
+]
+
+
+def _bucket_from_exact_hours(hours: float) -> str:
+    """
+    Assign a lead-time bucket from a precisely known lead in hours.
+    Only called when init_time_source == "api_provided".
+    """
+    for threshold, label in SHORT_RANGE_BUCKETS:
+        if hours < threshold:
+            return label
+    return "7d"
+
+
+def _compute_lead_bucket(
+    init_time_source: str,
+    nominal_lead_hours: int,
+    forecast_init_time: "datetime | None",
+    forecast_valid_time: "datetime | None",
+) -> str:
+    """
+    Return the lead-time bucket for a V3 historical record.
+
+    When ``init_time_source == "api_provided"`` and both timestamps are
+    present, the exact computed lead (valid − init) is used to assign one of
+    the short-range buckets (0–6h … 36–48h).
+
+    Otherwise, the nominal lead hours are mapped to a daily bucket via
+    LEAD_TIME_BUCKET.  This is the correct behavior for Open-Meteo date-range
+    mode, where init_time is derived and sub-day precision is not available.
+    """
+    if init_time_source == "api_provided" and forecast_init_time and forecast_valid_time:
+        exact_hours = (forecast_valid_time - forecast_init_time).total_seconds() / 3600.0
+        return _bucket_from_exact_hours(exact_hours)
+    # Derived or unknown init time — fall back to nominal daily bucket.
+    return LEAD_TIME_BUCKET.get(nominal_lead_hours, f"{nominal_lead_hours // 24}d")
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
@@ -382,8 +437,14 @@ async def _process_one_record(
         quality_status = "ok"
         flags = validation.flags
 
-    # 8. Lead-time bucket
-    bucket = LEAD_TIME_BUCKET.get(raw.lead_time_hours, f"{raw.lead_time_hours // 24}d")
+    # 8. Lead-time bucket — uses init_time_source to pick short-range vs daily bucket
+    init_time_src = getattr(raw, "init_time_source", "derived_prior_day_00z")
+    bucket = _compute_lead_bucket(
+        init_time_source=init_time_src,
+        nominal_lead_hours=raw.lead_time_hours,
+        forecast_init_time=raw.forecast_init_time,
+        forecast_valid_time=raw.forecast_valid_time,
+    )
 
     # 9. Insert (skip on unique conflict)
     hist_rec = V3HistoricalRecord(
@@ -404,6 +465,7 @@ async def _process_one_record(
         forecast_retrieval_time=raw.retrieval_timestamp,
         lead_time_hours=raw.lead_time_hours,
         lead_time_bucket=bucket,
+        init_time_source=init_time_src,
         forecast_tmax_f=forecast_tmax_f,
         observed_tmax_f=observed_tmax_f,
         signed_error=signed_error,

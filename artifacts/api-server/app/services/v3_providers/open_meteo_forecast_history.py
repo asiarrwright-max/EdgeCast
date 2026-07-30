@@ -275,7 +275,12 @@ class OpenMeteoForecastHistoryProvider(ForecastHistoryProvider):
                 source_provenance=source_provenance,
                 raw_response=data,
                 is_reanalysis=False,
-                data_flags=[],
+                # The Historical Forecast API date-range mode does NOT return model run
+                # timestamps.  init_time is conservatively derived as valid_date − 1 day
+                # at 00:00 UTC.  Short-range lead-time buckets are NOT possible from
+                # this source.  See docs/v3-lead-time-precision.md for details.
+                init_time_source="derived_prior_day_00z",
+                data_flags=["init_time_derived"],
             )
             records.append(rec)
 
