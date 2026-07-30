@@ -1,0 +1,48 @@
+Please perform a comprehensive read-only audit of EdgeCast’s paper-trading and settlement pipeline. Do not change the prediction engine, learning logic, or erase/reset any existing data. My goal is to determine whether the current poor performance is due to the forecasting model itself or an issue in the trading, settlement, or simulation pipeline.
+
+The current V2 results show:
+
+* High confidence predictions
+* Average predicted entry edge of approximately 38.5 percentage points
+* Only 15% settled win rate
+* Approximately -78% ROI
+
+Those metrics seem inconsistent, so before assuming the model simply needs more training, I want to rule out implementation errors.
+
+Please verify the following:
+
+1. Kalshi prices are interpreted correctly everywhere (API ingestion, storage, calculations, and display), including cents vs. decimal values.
+2. YES and NO contracts are handled correctly, including purchase price, payout, and profit/loss calculations.
+3. Market rules are parsed correctly (greater than, less than, at least, above, below, ranges, rain definitions, etc.).
+4. Every weather market is mapped to the correct official weather station, settlement source, local date, and time zone used by Kalshi.
+5. EdgeCast’s recorded settlement always matches Kalshi’s official settlement outcome.
+6. Paper trades are executed using realistic executable prices (ask/bid) rather than midpoint or unavailable prices.
+7. Bid/ask spread, liquidity assumptions, slippage, and fees are either accurately modeled or clearly documented as current limitations.
+8. Trades are never duplicated, reversed, or settled incorrectly.
+9. Open, pending, settled, void, and expired trade counts reconcile exactly with total trades.
+10. Historical inputs do not accidentally use information that would not have been available at the time the prediction was made (look-ahead bias).
+
+Most importantly, I want a manual audit of at least 20 settled V2 trades.
+
+For each trade, trace the entire lifecycle:
+
+* Market details
+* Forecast inputs used
+* EdgeCast probability
+* Confidence
+* Why the trade was selected
+* Side chosen (YES/NO)
+* Entry price
+* Official Kalshi settlement result
+* EdgeCast settlement result
+* Profit/loss calculation
+
+Please produce a table showing each step for every audited trade and clearly identify any discrepancies or potential bugs.
+
+Finally, provide a summary answering these questions:
+
+* Does the prediction engine appear to be functioning correctly?
+* Is there any evidence of pricing, settlement, accounting, execution, or simulation bugs?
+* If the results are genuinely due to forecasting quality rather than implementation issues, say so explicitly and explain why.
+
+Do not implement fixes yet. I want the audit findings and recommendations first so we can decide on the next steps based on evidence rather than assumptions.
