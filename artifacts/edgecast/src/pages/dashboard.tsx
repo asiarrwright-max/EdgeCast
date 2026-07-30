@@ -91,55 +91,99 @@ function CityChip({ city, status, obs }: { city: string; status: string; obs: nu
   );
 }
 
+// ── Learning stage definitions ────────────────────────────────────────────────
+
 type LearningStage = {
+  emoji: string;
   label: string;
-  description: string;
+  whyItMatters: string;
   color: string;
+  bgColor: string;
 };
+
+const STAGES: LearningStage[] = [
+  {
+    emoji: "🌱",
+    label: "Just Getting Started",
+    whyItMatters:
+      "Every completed forecast teaches EdgeCast what actually happened so future predictions become more accurate.",
+    color: "text-orange-400",
+    bgColor: "bg-orange-500/10 border-orange-500/20",
+  },
+  {
+    emoji: "📚",
+    label: "Learning From Real Weather",
+    whyItMatters:
+      "Real temperature outcomes are now being compared to forecasts. The more settled markets EdgeCast sees, the better it understands how accurate weather predictions actually are.",
+    color: "text-yellow-400",
+    bgColor: "bg-yellow-500/10 border-yellow-500/20",
+  },
+  {
+    emoji: "🧠",
+    label: "Getting Smarter",
+    whyItMatters:
+      "City-specific patterns are now being used. EdgeCast has learned that some cities run warmer than forecast, others cooler — and it adjusts for those tendencies automatically.",
+    color: "text-blue-400",
+    bgColor: "bg-blue-500/10 border-blue-500/20",
+  },
+  {
+    emoji: "🎯",
+    label: "Fully Trained",
+    whyItMatters:
+      "EdgeCast is using measured data for all major cities and fine-tuning its probability outputs based on its own track record.",
+    color: "text-emerald-400",
+    bgColor: "bg-emerald-500/10 border-emerald-500/20",
+  },
+];
+
+type Readiness = { dot: string; label: string; sub: string; color: string };
+
+function getReadiness(summary: {
+  totalUsableObservations: number;
+  citiesLearned: number;
+  citiesPartiallyLearned: number;
+  v2TradesUsingHistorical: number;
+}): Readiness {
+  const { totalUsableObservations, citiesLearned, v2TradesUsingHistorical } = summary;
+  if (citiesLearned >= 3 && v2TradesUsingHistorical > 0) {
+    return { dot: "🟢", label: "Ready", sub: "Using real-world data for predictions", color: "text-emerald-400" };
+  }
+  if (totalUsableObservations >= 5) {
+    return { dot: "🟡", label: "Still Learning", sub: "Building experience — predictions are educated estimates", color: "text-yellow-400" };
+  }
+  return { dot: "🔴", label: "Not Enough Data Yet", sub: "Very early stage — predictions use built-in defaults", color: "text-orange-400" };
+}
 
 function getLearningStage(summary: {
   totalUsableObservations: number;
   citiesLearned: number;
   citiesPartiallyLearned: number;
   v2TradesUsingHistorical: number;
-  v2TotalTrades: number;
 }): LearningStage {
   const { totalUsableObservations, citiesLearned, citiesPartiallyLearned, v2TradesUsingHistorical } = summary;
-
-  if (totalUsableObservations < 5) {
-    return {
-      label: "Getting Started",
-      description: "Using built-in estimates for all cities. EdgeCast is collecting its first real-world observations.",
-      color: "text-orange-400",
-    };
-  }
-  if (citiesLearned === 0 && citiesPartiallyLearned === 0) {
-    return {
-      label: "Collecting Evidence",
-      description: "Observations are coming in. Waiting for enough data per city to switch from built-in to measured statistics.",
-      color: "text-yellow-400",
-    };
-  }
-  if (v2TradesUsingHistorical === 0) {
-    return {
-      label: "Early Learning",
-      description: "Some cities have enough data to learn from, but no completed trades have used city-specific stats yet.",
-      color: "text-blue-400",
-    };
-  }
-  if (citiesLearned > 0) {
-    return {
-      label: "Active Learning",
-      description: "City-specific forecast error data is being used for predictions. More cities will graduate as data accumulates.",
-      color: "text-emerald-400",
-    };
-  }
-  return {
-    label: "Building",
-    description: "Partially learned cities are informing predictions. Full city data is accumulating.",
-    color: "text-blue-400",
-  };
+  if (citiesLearned >= 3 && v2TradesUsingHistorical > 0) return STAGES[3]; // Fully Trained
+  if (v2TradesUsingHistorical > 0 || citiesLearned > 0 || citiesPartiallyLearned > 0) return STAGES[2]; // Getting Smarter
+  if (totalUsableObservations >= 5) return STAGES[1]; // Learning From Real Weather
+  return STAGES[0]; // Just Getting Started
 }
+
+const CITY_CHIP_COLORS: Record<string, string> = {
+  learned:             "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+  partially_learned:   "bg-blue-500/20   text-blue-400   border-blue-500/30",
+  insufficient_sample: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
+  collecting:          "bg-orange-500/20 text-orange-400 border-orange-500/30",
+  not_collecting:      "bg-muted/50      text-muted-foreground border-border",
+  data_quality_issue:  "bg-red-500/20    text-red-400    border-red-500/30",
+};
+
+const CITY_STATUS_LABEL: Record<string, string> = {
+  learned:             "Fully trained",
+  partially_learned:   "Partially trained",
+  insufficient_sample: "Almost ready",
+  collecting:          "Collecting",
+  not_collecting:      "Not started",
+  data_quality_issue:  "Data issue",
+};
 
 // ── How EdgeCast Learns section ───────────────────────────────────────────────
 
@@ -149,16 +193,10 @@ function HowEdgeCastLearns() {
   if (isLoading) {
     return (
       <Card className="border-border/50 bg-card/50">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-mono text-muted-foreground flex items-center gap-2">
-            <Brain className="h-4 w-4" />
-            HOW EDGECAST LEARNS
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-3 gap-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-12 rounded" />
+        <CardContent className="pt-5 pb-5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-16 rounded" />
             ))}
           </div>
         </CardContent>
@@ -169,127 +207,134 @@ function HowEdgeCastLearns() {
   if (!data) return null;
 
   const { summary, cities } = data;
-  const stage = getLearningStage(summary);
+  const stage     = getLearningStage(summary);
+  const readiness = getReadiness(summary);
 
-  // Sort cities: learned first, then partially, then collecting, then not started
+  // Overall learning progress: milestones reached across all cities ÷ total possible
+  // Each city has 5 milestones (5 / 15 / 30 / 50 / 100 observations)
+  const totalReached = cities.reduce(
+    (sum, c) => sum + (c.milestoneProgress?.reached?.filter(Boolean).length ?? 0),
+    0,
+  );
+  const totalPossible  = summary.totalCities * 5;
+  const overallPct     = totalPossible > 0 ? Math.round((totalReached / totalPossible) * 100) : 0;
+
+  // Cities actively learning = any city with at least 1 observation
+  const activelyLearning = cities.filter(
+    c => !["not_collecting", "data_quality_issue"].includes(c.readinessStatus),
+  ).length;
+
+  // Sort: fully trained first, then partial, then collecting, then not started
   const SORT_ORDER = ["learned", "partially_learned", "insufficient_sample", "collecting", "not_collecting", "data_quality_issue"];
   const sortedCities = [...cities].sort((a, b) => {
     const ai = SORT_ORDER.indexOf(a.readinessStatus);
     const bi = SORT_ORDER.indexOf(b.readinessStatus);
-    if (ai !== bi) return ai - bi;
-    return b.usableObservations - a.usableObservations;
+    return ai !== bi ? ai - bi : b.usableObservations - a.usableObservations;
   });
-
-  const learnedCount = summary.citiesLearned + summary.citiesPartiallyLearned;
-  const totalCities  = summary.totalCities;
 
   return (
     <Card className="border-border/50 bg-card/50">
-      <CardHeader className="pb-2">
+      <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <CardTitle className="text-sm font-mono text-muted-foreground flex items-center gap-2">
-              <Brain className="h-4 w-4 text-primary" />
-              HOW EDGECAST LEARNS
-            </CardTitle>
-            <div className="flex items-center gap-2">
-              <span className={`text-base font-mono font-bold ${stage.color}`}>
-                {stage.label.toUpperCase()}
-              </span>
-              <span className="text-xs text-muted-foreground">—</span>
-              <span className="text-xs text-muted-foreground">{stage.description}</span>
-            </div>
-          </div>
+          <CardTitle className="text-sm font-mono text-muted-foreground flex items-center gap-2">
+            <Brain className="h-4 w-4 text-primary" />
+            HOW EDGECAST LEARNS
+          </CardTitle>
           <Link
             href="/strategy-audit"
-            className="text-[10px] font-mono text-primary hover:underline whitespace-nowrap flex items-center gap-1 mt-1"
+            className="text-[10px] font-mono text-primary hover:underline whitespace-nowrap flex items-center gap-1"
           >
             DEEP DIVE <ExternalLink className="h-3 w-3" />
           </Link>
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-4 pt-0">
-        {/* Plain-English narrative */}
-        <div className="text-xs text-muted-foreground leading-relaxed border-l-2 border-primary/30 pl-3 space-y-2">
-          <p>
-            EdgeCast compares its weather forecast to the market price on Kalshi. The key question is:{" "}
-            <em>how far off could this forecast realistically be?</em> That uncertainty is expressed as{" "}
-            <Term
-              label="sigma (σ)"
-              tip="Sigma is the standard deviation of forecast errors — how many degrees a weather forecast is typically off by. A σ of 2.5°F means most forecasts miss by ≤2.5°F. Smaller σ = more confident predictions."
-            />
-            .
-          </p>
-          <p>
-            At first, EdgeCast uses a built-in{" "}
-            <Term
-              label="fixed-table fallback"
-              tip="When there isn't enough local data, EdgeCast uses a pre-set table of typical forecast errors by lead time (e.g., 1-day forecasts: σ = 2.5°F, 3-day: σ = 4.3°F). These are rough industry estimates, not measured from this city's data."
-            />
-            . After each market settles, it fetches the actual temperature and compares it to what was forecast. Once{" "}
-            enough observations accumulate, it switches to measured statistics for that city — learning its own{" "}
-            <Term
-              label="sigma and bias"
-              tip="Bias correction accounts for systematic forecast errors. If a city's forecasts consistently run 1°F too high, EdgeCast subtracts that offset before calculating probabilities."
-            />
-            . With more settled trades, it also applies{" "}
-            <Term
-              label="calibration"
-              tip="Calibration fine-tunes the final probability. If EdgeCast says 70% but actually wins 80% of those trades, calibration nudges the output upward. Requires 30+ settled trades to activate."
-            />
-            {" "}to match its probability outputs to reality.
-          </p>
-        </div>
+      <CardContent className="space-y-5 pt-0">
 
-        {/* Progress stats row */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="bg-muted/30 rounded px-3 py-2 text-center">
-            <div className="text-lg font-mono font-bold text-foreground">{summary.totalUsableObservations}</div>
-            <div className="text-[10px] text-muted-foreground font-mono flex items-center justify-center gap-1">
-              OBSERVATIONS
-              <InfoTooltip text="Each time a market settles and EdgeCast retrieves the actual temperature from NOAA or ERA5, that's one observation. More observations → more accurate sigma estimates." />
+        {/* Model Readiness + Stage — top row */}
+        <div className="flex flex-col sm:flex-row gap-3">
+          {/* Readiness pill */}
+          <div className="flex items-center gap-3 px-4 py-3 rounded-lg border bg-muted/20 sm:w-64 shrink-0">
+            <span className="text-2xl leading-none">{readiness.dot}</span>
+            <div>
+              <div className={`text-sm font-semibold ${readiness.color}`}>{readiness.label}</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">{readiness.sub}</div>
             </div>
           </div>
-          <div className="bg-muted/30 rounded px-3 py-2 text-center">
-            <div className="text-lg font-mono font-bold text-foreground">
-              {learnedCount}<span className="text-muted-foreground text-sm font-normal">/{totalCities}</span>
-            </div>
-            <div className="text-[10px] text-muted-foreground font-mono flex items-center justify-center gap-1">
-              CITIES LEARNING
-              <InfoTooltip text="Cities that have at least 5 usable observations and have started using measured (rather than built-in) forecast error statistics." />
-            </div>
-          </div>
-          <div className="bg-muted/30 rounded px-3 py-2 text-center">
-            <div className="text-lg font-mono font-bold text-foreground">{summary.totalFesGroups}</div>
-            <div className="text-[10px] text-muted-foreground font-mono flex items-center justify-center gap-1">
-              ERROR GROUPS
-              <InfoTooltip text="Forecast Error Stat groups — each one covers a city × weather variable × lead-time bucket (e.g. Chicago · high temp · 2–3 days). A group needs ≥5 observations to be used." />
-            </div>
-          </div>
-          <div className="bg-muted/30 rounded px-3 py-2 text-center">
-            <div className="text-lg font-mono font-bold text-foreground">
-              {summary.v2TotalTrades > 0
-                ? `${Math.round((summary.v2TradesUsingHistorical / summary.v2TotalTrades) * 100)}%`
-                : "—"}
-            </div>
-            <div className="text-[10px] text-muted-foreground font-mono flex items-center justify-center gap-1">
-              USING REAL DATA
-              <InfoTooltip text="Percentage of Strategy V2 trades that used measured city or global statistics instead of the built-in fixed table. As more data accumulates, this number climbs toward 100%." />
+
+          {/* Stage card */}
+          <div className={`flex-1 flex items-start gap-3 px-4 py-3 rounded-lg border ${stage.bgColor}`}>
+            <span className="text-2xl leading-none mt-0.5">{stage.emoji}</span>
+            <div className="space-y-1">
+              <div className={`text-sm font-semibold ${stage.color}`}>{stage.label}</div>
+              <div className="text-[11px] text-muted-foreground leading-relaxed">{stage.whyItMatters}</div>
             </div>
           </div>
         </div>
 
-        {/* City progress grid */}
+        {/* Progress metrics */}
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-muted/30 rounded-lg px-3 py-2.5 text-center">
+              <div className="text-xl font-mono font-bold text-foreground">{summary.totalUsableObservations}</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5 flex items-center justify-center gap-1">
+                Forecasts Learned From
+                <InfoTooltip text="Each time a weather market settles, EdgeCast looks up what the temperature actually was and compares it to the forecast. That comparison is one lesson. The more lessons, the smarter the model gets." />
+              </div>
+            </div>
+            <div className="bg-muted/30 rounded-lg px-3 py-2.5 text-center">
+              <div className="text-xl font-mono font-bold text-foreground">
+                {activelyLearning}
+                <span className="text-muted-foreground text-base font-normal"> of {summary.totalCities}</span>
+              </div>
+              <div className="text-[10px] text-muted-foreground mt-0.5 flex items-center justify-center gap-1">
+                Cities Actively Learning
+                <InfoTooltip text="Cities where EdgeCast has started receiving real temperature data to compare against its forecasts. Cities not yet started are still waiting for their first settled market." />
+              </div>
+            </div>
+            <div className="bg-muted/30 rounded-lg px-3 py-2.5 text-center">
+              <div className="text-xl font-mono font-bold text-foreground">{summary.citiesLearned}</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5 flex items-center justify-center gap-1">
+                Cities Fully Trained
+                <InfoTooltip text="Cities where EdgeCast has enough real-world data to use its own measured statistics instead of built-in defaults. A city needs at least 5 confirmed temperature observations to reach this stage." />
+              </div>
+            </div>
+            <div className="bg-muted/30 rounded-lg px-3 py-2.5 text-center">
+              <div className="text-xl font-mono font-bold text-foreground">{overallPct}%</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5 flex items-center justify-center gap-1">
+                Overall Learning Progress
+                <InfoTooltip text="How far EdgeCast has come across all cities, measured against five learning milestones per city (5, 15, 30, 50, and 100 observations). 100% means all cities have reached every milestone." />
+              </div>
+            </div>
+          </div>
+
+          {/* Overall progress bar */}
+          <div className="space-y-1">
+            <div className="h-2 bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all duration-700 rounded-full"
+                style={{ width: `${Math.max(overallPct, overallPct > 0 ? 2 : 0)}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-[9px] text-muted-foreground font-mono">
+              <span>Getting Started</span>
+              <span>Learning</span>
+              <span>Getting Smarter</span>
+              <span>Fully Trained</span>
+            </div>
+          </div>
+        </div>
+
+        {/* City grid */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide">
-              City Learning Progress
+              Progress by City
             </p>
-            <div className="flex items-center gap-2 text-[9px] text-muted-foreground font-mono">
+            <div className="flex items-center gap-2 text-[9px] text-muted-foreground">
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-sm bg-emerald-500/40 border border-emerald-500/50 inline-block" />
-                Learned
+                Fully trained
               </span>
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-sm bg-blue-500/40 border border-blue-500/50 inline-block" />
@@ -306,40 +351,44 @@ function HowEdgeCastLearns() {
             </div>
           </div>
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2">
-            {sortedCities.map(city => (
-              <CityChip
-                key={city.city}
-                city={city.city}
-                status={city.readinessStatus}
-                obs={city.usableObservations}
-              />
-            ))}
+            {sortedCities.map(c => {
+              const colors = CITY_CHIP_COLORS[c.readinessStatus] ?? "bg-muted/50 text-muted-foreground border-border";
+              const label  = CITY_STATUS_LABEL[c.readinessStatus] ?? c.readinessStatus;
+              return (
+                <div key={c.city} className={`rounded border px-2 py-1.5 text-[10px] font-mono ${colors}`}>
+                  <div className="font-semibold truncate">{c.city}</div>
+                  <div className="opacity-70 mt-0.5">
+                    {c.usableObservations > 0 ? `${c.usableObservations} lessons` : "0 lessons"} · {label}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 
         {/* Glossary strip */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border/50 pt-3 text-[10px] text-muted-foreground font-mono">
-          <span className="text-[10px] text-muted-foreground/60 uppercase">Glossary:</span>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border/50 pt-3 text-[10px] text-muted-foreground">
+          <span className="uppercase tracking-wide opacity-60">What do these mean?</span>
           {[
             {
-              label: "Sigma (σ)",
-              tip: "Standard deviation of forecast errors — how many degrees a weather forecast is typically off. Learned per city once ≥5 observations are available.",
+              label: "Lessons",
+              tip: "Each time a weather market settles and EdgeCast confirms the actual temperature, that counts as one lesson. More lessons = more accurate predictions.",
             },
             {
-              label: "Bias",
-              tip: "Systematic offset: if a city's forecasts always run too warm or too cold, EdgeCast subtracts that offset before calculating probabilities.",
+              label: "Built-in defaults",
+              tip: "When EdgeCast is new to a city, it uses rough industry-standard estimates for how far off weather forecasts typically are. Think of it as the textbook answer before you have personal experience.",
             },
             {
-              label: "Fallback",
-              tip: "Three levels: Fixed Table (built-in estimates) → Global (cross-city averages) → City (local measured stats). EdgeCast upgrades as data accumulates.",
+              label: "Systematic bias",
+              tip: "Some cities' forecasts consistently run a bit too warm or too cool. Once EdgeCast spots this pattern, it automatically corrects for it — like knowing your oven always runs 10° hot.",
             },
             {
-              label: "Calibration",
-              tip: "Fine-tunes probability outputs using historical outcome rates. Activates after 30+ settled trades. Ensures '70% confident' actually wins ~70% of the time.",
+              label: "Probability fine-tuning",
+              tip: "After enough settled trades, EdgeCast checks: when it said '70% confident,' did that actually happen 70% of the time? If not, it adjusts its confidence levels to match reality.",
             },
             {
-              label: "Brier Score",
-              tip: "Measures probability accuracy. Range: 0 (perfect) to 1 (worst). Random guessing scores 0.25. Lower is better. Only covers trades EdgeCast actually entered.",
+              label: "Probability accuracy score",
+              tip: "A number that measures how well EdgeCast's confidence levels match real outcomes. Zero is perfect; 0.25 is no better than random guessing. Lower is better.",
             },
           ].map(({ label, tip }) => (
             <TooltipProvider key={label} delayDuration={150}>
@@ -349,7 +398,7 @@ function HowEdgeCastLearns() {
                     {label}
                   </span>
                 </TooltipTrigger>
-                <TooltipContent className="font-sans text-xs leading-relaxed max-w-[260px]">
+                <TooltipContent className="font-sans text-xs leading-relaxed max-w-[280px]">
                   {tip}
                 </TooltipContent>
               </Tooltip>
