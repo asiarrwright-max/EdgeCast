@@ -10,10 +10,14 @@ import {
   useGetStationCoverage,
   useGetOkcExplanation,
   useGetConsensusBacktest,
+  useGetV3IngestionAudit,
+  useGetV3Flags,
   type RetroTrade,
   type RetroSummary,
   type StationEntry,
   type CityStatus,
+  type V3CityAuditEntry,
+  type V3Flag,
 } from "@workspace/api-client-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -589,6 +593,163 @@ function RetrospectiveSection() {
 // Main page
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// V3 Data tab — ingestion audit and feature flags
+// ---------------------------------------------------------------------------
+
+function V3FlagsBadge({ flag }: { flag: V3Flag }) {
+  const enabled = (flag.value || "").toLowerCase() === "true";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+        enabled
+          ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
+          : "bg-muted text-muted-foreground"
+      }`}
+    >
+      {enabled ? "✓" : "✗"} {flag.value || "false"}
+    </span>
+  );
+}
+
+function V3StatusBadge({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    success: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+    partial: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
+    error: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+    skipped: "bg-muted text-muted-foreground",
+    no_data: "bg-muted text-muted-foreground",
+    unknown: "bg-muted text-muted-foreground",
+  };
+  return (
+    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${map[status] ?? map.unknown}`}>
+      {status}
+    </span>
+  );
+}
+
+function V3DataSection() {
+  const { data: flagsData, isLoading: flagsLoading } = useGetV3Flags();
+  const { data: auditData, isLoading: auditLoading } = useGetV3IngestionAudit();
+
+  const isLoading = flagsLoading || auditLoading;
+
+  return (
+    <SectionCard title="V3 Historical Preload — Ingestion Audit">
+      {isLoading ? (
+        <Loading />
+      ) : (
+        <div className="space-y-6 px-4 py-4">
+          {/* Feature flags */}
+          {flagsData && (
+            <div>
+              <h3 className="text-sm font-semibold mb-2">Feature Flags</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left py-1.5 pr-4 font-medium text-muted-foreground">Flag</th>
+                      <th className="text-left py-1.5 pr-4 font-medium text-muted-foreground">State</th>
+                      <th className="text-left py-1.5 font-medium text-muted-foreground">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {flagsData.flags.map((flag) => (
+                      <tr key={flag.key} className="border-b border-border/50 hover:bg-muted/30">
+                        <td className="py-1.5 pr-4 font-mono text-[11px]">{flag.key}</td>
+                        <td className="py-1.5 pr-4">
+                          <V3FlagsBadge flag={flag} />
+                        </td>
+                        <td className="py-1.5 text-muted-foreground">{flag.description}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                All flags default to false. Enable via the app_settings table when ready to run each phase.
+              </p>
+            </div>
+          )}
+
+          {/* Ingestion audit table */}
+          <div>
+            <h3 className="text-sm font-semibold mb-2">Per-City Ingestion Status</h3>
+            {auditData && auditData.cities.length > 0 ? (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="text-left py-1.5 pr-3 font-medium text-muted-foreground">City</th>
+                        <th className="text-left py-1.5 pr-3 font-medium text-muted-foreground">Status</th>
+                        <th className="text-right py-1.5 pr-3 font-medium text-muted-foreground">Records</th>
+                        <th className="text-right py-1.5 pr-3 font-medium text-muted-foreground">OK</th>
+                        <th className="text-right py-1.5 pr-3 font-medium text-muted-foreground">Rejected</th>
+                        <th className="text-left py-1.5 pr-3 font-medium text-muted-foreground">Date Range</th>
+                        <th className="text-left py-1.5 font-medium text-muted-foreground">Last Run</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {auditData.cities.map((city: any) => (
+                        <tr key={city.city} className="border-b border-border/50 hover:bg-muted/30">
+                          <td className="py-1.5 pr-3 font-medium">{city.city}</td>
+                          <td className="py-1.5 pr-3">
+                            <V3StatusBadge status={city.status} />
+                          </td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums">{city.total_records.toLocaleString()}</td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums text-green-700 dark:text-green-400">
+                            {city.total_ok_records.toLocaleString()}
+                          </td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums text-red-600 dark:text-red-400">
+                            {city.total_rejected.toLocaleString()}
+                          </td>
+                          <td className="py-1.5 pr-3 text-muted-foreground">
+                            {city.earliest_date && city.latest_date
+                              ? `${city.earliest_date} → ${city.latest_date}`
+                              : "—"}
+                          </td>
+                          <td className="py-1.5 text-muted-foreground">
+                            {city.last_run_at
+                              ? new Date(city.last_run_at).toLocaleString()
+                              : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex gap-6 mt-3 text-xs text-muted-foreground">
+                  <span>Cities with data: <strong>{auditData.summary.cities_with_data}</strong></span>
+                  <span>Total records: <strong>{auditData.summary.total_records.toLocaleString()}</strong></span>
+                  <span>OK records: <strong>{auditData.summary.total_ok_records.toLocaleString()}</strong></span>
+                </div>
+              </>
+            ) : (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                <p className="font-medium mb-1">No ingestion data yet</p>
+                <p>
+                  Enable the <code className="text-xs bg-muted px-1 py-0.5 rounded">v3.ingestion_enabled</code> flag
+                  and trigger a run to populate historical records.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Disclaimer */}
+          {auditData?.note && (
+            <p className="text-xs text-muted-foreground border-t border-border pt-3">{auditData.note}</p>
+          )}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Page root
+// ---------------------------------------------------------------------------
+
 export default function V21AuditPage() {
   return (
     <div className="space-y-6">
@@ -612,6 +773,9 @@ export default function V21AuditPage() {
 
       {/* Consensus guard */}
       <ConsensusGuardSection />
+
+      {/* V3 historical preload ingestion audit */}
+      <V3DataSection />
     </div>
   );
 }

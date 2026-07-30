@@ -1,0 +1,112 @@
+Revise the plan before building.
+
+The overall three-phase structure is good, but make these changes:
+
+1. Provider abstraction
+Do not architect V3 around Open-Meteo specifically.
+
+Create a forecast-history provider interface or adapter layer so the historical ingestion system can support multiple providers without changing the V3 learning engine.
+
+Open-Meteo can be the first provider implementation, but the architecture must also support:
+- NOAA archived GFS
+- GEFS
+- ECMWF or other archived model sources where practical
+
+Each historical record must permanently retain:
+- provider
+- underlying model
+- model version when available
+- forecast initialization time
+- valid time
+- retrieval/archive time
+- raw source identifier
+- source provenance
+
+Do not blend different models or providers into one unlabeled dataset.
+
+2. Preserve raw source data
+Store the raw historical forecast response exactly as received before normalization, unit conversion, daily aggregation, bias correction, or other transformation.
+
+Also store:
+- normalized parsed values
+- transformation version
+- unit conversions performed
+- quality-control decisions
+- rejection reason when applicable
+
+The raw record should be immutable and reproducible.
+
+3. Behavioral isolation, not just file isolation
+Do not rely on the claim that no existing files need to change.
+
+Small additive edits to shared routing, registration, scheduler, dependency injection, or configuration files are acceptable only when necessary.
+
+The real requirement is:
+- no change in V1, V2, or V2.1 behavior
+- no change in their predictions
+- no change in their learned state
+- no change in their paper trades
+- no change in their settlement or P&L calculations
+
+Add regression tests that capture representative V2.1 predictions, trade decisions, settlement outputs, and analytics before the V3 work, then confirm they remain unchanged after all three phases.
+
+4. Database safety concern
+The project currently uses create_all instead of a migrations directory.
+
+Before building, revise the plan to explain exactly how schema changes will be introduced safely in existing environments.
+
+Do not assume create_all alone is sufficient for future schema evolution.
+
+For this V3 build:
+- only add new V3-specific tables
+- do not alter or repurpose existing tables
+- document how the new tables are created
+- confirm startup remains safe if the tables already exist
+- confirm rollback simply disables V3 and leaves the new tables unused
+- recommend a formal migration framework as a separate future infrastructure improvement, but do not introduce a broad migration rewrite as part of V3 unless required
+
+5. Feature flags
+Use separate flags for:
+- v3.ingestion_enabled
+- v3.validation_enabled
+- v3.predictions_enabled
+- v3.paper_trading_enabled
+
+Do not use one broad v3.enabled flag that could activate everything at once.
+
+Default all flags to false.
+
+Phase 1 may only enable ingestion manually.
+Phase 2 may only enable validation manually.
+Phase 3 predictions and paper trading must remain disabled until review.
+
+6. Phase 3 wording
+Do not describe Phase 3 as “activates V3.”
+
+Phase 3 should implement the capability, but V3 predictions and paper trading must still remain disabled by default after the build.
+
+No automatic activation.
+
+7. Data-source accuracy
+Verify before implementation that the selected Open-Meteo endpoint truly provides archived forecast runs that were available at the historical issue time.
+
+Do not confuse:
+- historical observed weather
+- reanalysis
+- reconstructed historical forecasts
+- actual archived model forecasts
+
+If the source cannot prove issue time and valid time, reject it for training use.
+
+8. Deliverables at the end of each phase
+Each phase must stop for review and provide:
+- files created or modified
+- schema changes
+- tests run and results
+- proof existing strategy behavior is unchanged
+- known limitations
+- exact next-step recommendation
+
+Do not automatically start the next phase after completing the prior phase unless I explicitly approve it.
+
+Update the task plans to reflect all of this, then show me the revised plans before any code is built.

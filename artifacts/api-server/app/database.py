@@ -91,6 +91,8 @@ async def _apply_migrations(conn) -> None:
         "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS station_verified BOOLEAN",
         "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS station_lat FLOAT",
         "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS station_lon FLOAT",
+        # V3: nullable comparison_group_id on prediction_snapshots (additive; no constraint on existing rows)
+        "ALTER TABLE prediction_snapshots ADD COLUMN IF NOT EXISTS comparison_group_id VARCHAR(36)",
     ]
     for stmt in migrations:
         try:
@@ -157,6 +159,11 @@ async def init_db() -> None:
     # Repair any markets that failed city extraction in a previous run
     # because the Kalshi API omitted series_ticker from the response body.
     await repair_stale_parse_failures()
+    # V3: seed feature flags (idempotent — only inserts if missing)
+    from app.services.v3_flags import ensure_v3_feature_flags
+    async with AsyncSessionLocal() as session:
+        await ensure_v3_feature_flags(session)
+        await session.commit()
     logger.info("Database ready.")
 
 

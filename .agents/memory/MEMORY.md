@@ -8,3 +8,5 @@
 - [orval-zod-integer](orval-zod-integer.md) — Orval generates zod.int() for type:integer which doesn't exist in Zod v3; use type:number in OpenAPI spec instead.
 - [v21-pipeline-fixes](v21-pipeline-fixes.md) — Sigma floor 3.5°F, MIN_SAMPLE=30, station coords, 4h quote staleness, consensus guard; OKC verified, LAX now verified as LAX airport.
 - [kalshi-rules-api](kalshi-rules-api.md) — Kalshi market API rules_secondary field names the NWS station explicitly; no PDFs needed to verify settlement stations.
+- [v3-lookahead-ordering](v3-lookahead-ordering.md) — LOOKAHEAD_VIOLATION fires before VALID_TIME_INCONSISTENCY; tests for valid_time < init_time must accept either reason.
+- [api-client-react-rebuild](api-client-react-rebuild.md) — After adding a new .ts file to lib/api-client-react/src/, run `pnpm tsc --build` in that package before the frontend will see the exports.

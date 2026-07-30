@@ -7,6 +7,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
 
+# V3: Historical Preload models — additive import, no existing model changed.
+# This import registers V3 tables with Base.metadata so create_all includes them.
+import app.models_v3  # noqa: F401, E402
+
 # ---------------------------------------------------------------------------
 # Strategy v2 — Forecast Verification & Error Statistics
 # ---------------------------------------------------------------------------
