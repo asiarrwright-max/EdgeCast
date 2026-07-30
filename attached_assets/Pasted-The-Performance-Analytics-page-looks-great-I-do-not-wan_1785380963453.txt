@@ -1,0 +1,115 @@
+The Performance Analytics page looks great. I do not want to remove or replace any of the information currently displayed. I only want to improve how the existing metrics are explained and prioritized.
+
+Please make the following updates:
+
+1. Add a short “Key Takeaways” summary near the top of the page.
+
+This summary should be generated from the selected filters and current data, not hard-coded.
+
+Examples of the type of statements it could show:
+- ROI is improving but remains negative.
+- Prediction accuracy is currently above or below the target range.
+- V2 still has too few settled trades for a reliable comparison with V1.
+- More settled trades are needed before declaring a strategy winner.
+
+Keep this section brief, ideally 3–4 plain-English statements.
+
+2. Add trend indicators to the main metric cards.
+
+For ROI, Win Rate, Brier Score, Average Edge, and Average Confidence, show whether the metric is:
+- Improving
+- Getting worse
+- Mostly unchanged
+
+Use the recent period compared with the prior matching period where enough data exists.
+
+Please remember:
+- Higher is better for ROI and Win Rate.
+- Lower is better for Brier Score.
+- Do not show a trend when there is not enough data.
+- Label insufficient data clearly instead of guessing.
+
+3. Add plain-English context to the charts.
+
+Keep every chart, but add one short explanation below each title or near the chart.
+
+Suggested wording:
+
+Cumulative ROI
+“Shows how paper-trading profitability has changed over time. Higher is better.”
+
+Rolling Win Rate
+“Shows the percentage of winning trades across the most recent 10 settled trades.”
+
+Brier Score Over Time
+“Shows how closely EdgeCast’s confidence matched actual outcomes. Lower is better.”
+
+Daily P/L
+“Shows the paper-trading profit or loss recorded each day.”
+
+Daily Trade Count
+“Shows how many paper trades EdgeCast placed each day.”
+
+4. Add target or interpretation guidance where appropriate.
+
+For Brier Score:
+- Explain that lower is better.
+- Show 0.25 as a reference line, but label it carefully as a simple 50/50 baseline rather than a universal definition of good performance.
+- Do not imply that every score under 0.25 automatically means the model is profitable or strong.
+
+For ROI:
+- Make it clear that the long-term goal is positive ROI.
+- Do not create an arbitrary performance target.
+
+5. Improve the label “Avg Edge (At Entry).”
+
+Change the visible label to:
+“Average Edge When Trade Was Placed”
+
+If that is too long for the card, use:
+“Average Entry Edge”
+
+Add an info tooltip:
+“The average difference between EdgeCast’s estimated probability and the market price when the trade was placed. This includes open trades and does not represent realized profit.”
+
+6. Improve the V1 versus V2 comparison summary.
+
+Above the comparison table, add a small status label such as:
+- Too Early to Call
+- V1 Currently Leading
+- V2 Currently Leading
+- Mixed Results
+
+The label must be based on the data and sample size.
+
+For now, use “Too Early to Call” when either strategy has fewer than a reasonable number of settled trades or when the two strategies were not evaluated on comparable trade populations.
+
+Also show the reason in plain English, such as:
+“V2 has only 20 settled trades, so the current comparison is not yet reliable.”
+
+7. Keep the shared-market comparison prominent.
+
+Because the overall V1 and V2 strategies do not always trade the same markets, clearly explain that the “Shared Markets” section is the fairest apples-to-apples comparison.
+
+Add a tooltip or note:
+“Shared Markets compares outcomes only where both strategies evaluated the same market. Overall results may differ because V1 and V2 do not always enter the same trades.”
+
+8. Keep all existing filters, cards, charts, tables, and calculations.
+
+Do not remove:
+- Time filters
+- Strategy filters
+- Total trades
+- Settled trades
+- Win rate
+- ROI
+- Brier score
+- Average edge
+- Average confidence
+- Void trades
+- Any existing charts
+- The full V1 versus V2 comparison table
+
+The goal is not to simplify by removing information. The goal is to help a nontechnical user understand what the numbers mean, whether they are improving, and how much confidence to place in the comparison.
+
+Please preserve the current dark theme and color system. Use green, red, amber, blue, and gray consistently, but do not use green to suggest success when the underlying result is still negative.
