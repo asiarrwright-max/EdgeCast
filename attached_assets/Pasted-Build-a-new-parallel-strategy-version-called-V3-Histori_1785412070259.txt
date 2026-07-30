@@ -1,0 +1,392 @@
+Build a new parallel strategy version called V3: Historical Preload.
+
+CRITICAL SAFETY REQUIREMENT
+
+Do not modify, overwrite, migrate, backfill, relabel, recalculate, or otherwise alter V1, V2, or V2.1.
+
+V1, V2, and V2.1 must continue operating exactly as they do today.
+
+Do not:
+- Change their prediction formulas
+- Change their sigma, bias, thresholds, or calibration rules
+- Change their city eligibility rules
+- Change their paper-trading logic
+- Change their settlement logic
+- Change their analytics
+- Reassign any historical trades to V3
+- Recalculate any existing predictions or results
+- Share mutable model state between V3 and another version
+
+V3 must be implemented as a completely separate parallel challenger with:
+- Its own strategy identifier
+- Its own configuration
+- Its own learned state
+- Its own historical preload tables
+- Its own predictions
+- Its own paper trades
+- Its own analytics
+- Its own readiness status
+
+Before making changes, create a clear implementation plan and identify every existing file, table, function, endpoint, background job, and shared service that could affect another strategy version.
+
+Use additive database migrations only. Do not drop, rename, repurpose, or destructively alter existing columns or tables.
+
+GOAL
+
+V3 should test one primary hypothesis:
+
+Does initializing the weather model with trustworthy historical forecast-error data improve forward calibration and realistic paper-trading performance compared with V2.1?
+
+V3 should initially differ from V2.1 only through its historical forecast-error preload.
+
+Keep the following identical to V2.1 unless separation is technically required:
+- Verified settlement stations
+- Active and inactive city rules
+- Market interpretation
+- Quote freshness rules
+- Executability checks
+- Fee assumptions
+- Settlement processing
+- P&L accounting
+- Paper-trade sizing
+- Trading thresholds
+- Probability-to-market comparison
+- Audit logging
+
+Do not add a consensus trading filter or multi-model trading logic to the first V3 release. Store source-specific history now so a later V3.x experiment can test ensembles separately.
+
+DATA SOURCES
+
+Historical forecasts:
+- Use Open-Meteo archived previous model runs or exact historical model runs where available.
+- Prefer the same underlying forecast model currently used by EdgeCast live.
+- Add NOAA archived GFS data where it can be matched reliably.
+- Add GEFS history only if forecast issue time, valid time, model version, lead time, and location can be preserved accurately.
+- Keep every source and underlying model explicitly labeled.
+- Never combine GFS, GEFS, ECMWF, HRRR, or other models into an anonymous aggregate.
+
+Historical outcomes:
+- Use official NOAA station observations for the exact verified settlement station.
+- The station must match the station used by the relevant Kalshi contract.
+- Do not use city-center weather.
+- Do not use reanalysis as the primary truth when an official station observation is available.
+- Reanalysis may be stored only as secondary gap-checking data and must be clearly labeled.
+
+INITIAL SCOPE
+
+Start with:
+- Only currently verified and active cities
+- Daily maximum-temperature markets
+- Approximately two complete years for all supported cities where clean data exists
+- Extend to three to five years for a model only when the older data is genuinely comparable and timestamp-correct
+- Lead times from one through seven days
+- Exact station coordinates and station identifiers
+- Fahrenheit-normalized values
+- Correct local weather dates and time zones
+
+Do not include precipitation markets in the first V3 release.
+
+HISTORICAL RECORD REQUIREMENTS
+
+Create a historical forecast-observation dataset with fields such as:
+
+- strategy preload version
+- city ID
+- station ID
+- station name
+- station latitude and longitude
+- local time zone
+- target local weather date
+- forecast source
+- underlying forecast model
+- model version when available
+- forecast initialization timestamp
+- forecast retrieval or archive timestamp
+- forecast valid timestamp
+- forecast lead time in hours
+- normalized lead-time bucket
+- forecasted daily high
+- official observed daily high
+- signed error
+- absolute error
+- squared error
+- month
+- season
+- data-quality status
+- missing-data flags
+- source provenance
+- ingestion timestamp
+- immutable source-record identifier
+
+Enforce uniqueness so the same historical forecast run cannot be loaded twice.
+
+LOOK-AHEAD PROTECTION
+
+This is mandatory.
+
+For every record, prove that the forecast was available before the historical prediction cutoff.
+
+Do not use:
+- Later model updates
+- Retrospectively corrected forecasts
+- Forecasts generated after the simulated decision time
+- Observations or settlement information in a feature
+- Final daily values that would not yet have been known
+
+Build validation checks that reject any record where:
+- Forecast initialization is after the permitted cutoff
+- Forecast valid time or local date mapping is inconsistent
+- Outcome data appears in forecast features
+- Source timestamps are missing or ambiguous
+
+HISTORICAL PRELOAD MODEL
+
+Use the historical records to initialize V3’s bias and uncertainty estimates.
+
+At minimum, support estimates by:
+- City
+- Forecast lead-time bucket
+- Season or month where sample size permits
+- Forecast model
+
+Use hierarchical fallback rather than tiny unstable buckets.
+
+Example fallback order:
+1. City + model + lead time + season
+2. City + model + lead time
+3. City + model
+4. Model + lead time
+5. Global conservative fallback
+
+Require minimum sample sizes before using narrow buckets.
+
+Use partial pooling or shrinkage so small groups are pulled toward broader estimates.
+
+Preserve conservative uncertainty controls:
+- Do not allow sigma to become unrealistically small
+- Retain the V2.1 minimum sigma protections
+- Retain conservative fallback sigma
+- Cap extreme estimates where appropriate
+- Record which fallback level produced each prediction
+
+HISTORICAL-TO-FORWARD WEIGHTING
+
+The preload should act as a prior, not permanent truth.
+
+Create an explicit, configurable weighting method so V3 gradually gives more influence to its own forward settled observations.
+
+Requirements:
+- Historical preload starts with meaningful influence
+- Forward V3 observations gain influence as they accumulate
+- Historical influence decays predictably
+- The weighting formula is documented
+- The effective historical sample size is visible
+- The system does not pretend that 700 correlated historical days equal 700 perfectly independent observations
+- No forward observation from V2.1 may update V3
+- No V3 observation may update V2.1
+
+Store separate V3 learning state keyed by:
+- City
+- Model
+- Lead-time bucket
+- Season where applicable
+
+V3 PREDICTIONS AND PAPER TRADES
+
+Run V3 on the same eligible live opportunities as V2.1 whenever possible.
+
+For each shared market:
+- Generate a V2.1 prediction normally
+- Generate a V3 prediction independently
+- Preserve both
+- Allow both to create separate paper-trade decisions
+- Never let one strategy’s decision suppress the other
+- Link shared opportunities with a comparison group ID
+
+Store for every V3 prediction:
+- Raw forecast
+- Historical bias adjustment
+- Historical sigma
+- Forward-learning adjustment
+- Final bias
+- Final sigma
+- Historical sample count
+- Effective historical sample size
+- Forward V3 sample count
+- Fallback level used
+- Data source and model
+- Predicted probability
+- Market probability
+- Claimed edge
+- Trade decision and reason
+- Complete configuration version
+
+ANALYTICS
+
+Add a separate V3 analytics section without altering the existing V1, V2, or V2.1 views.
+
+Include:
+- V3 settled-trade count
+- Readiness status
+- Brier score
+- Calibration chart
+- Net realistic ROI
+- Win rate
+- Average claimed edge
+- Forecast MAE and RMSE
+- Bias and sigma by city
+- Performance by lead time
+- Performance by season
+- Performance by forecast source/model
+- Historical versus forward weighting
+- Effective historical sample size
+- Fallback usage
+- Data-quality exclusions
+
+Add a V2.1 versus V3 paired comparison using only shared markets.
+
+The paired comparison should include:
+- Number of shared eligible markets
+- Number of shared predictions
+- Number of shared settled paper trades
+- Brier difference
+- Calibration difference
+- MAE difference
+- Net ROI difference
+- Trade-frequency difference
+- Confidence difference
+- City-by-city comparison
+- Lead-time comparison
+
+Clearly distinguish:
+- Historical retrospective validation
+- Live forward paper trading
+
+Never combine the two into one headline ROI.
+
+RETROSPECTIVE VALIDATION
+
+Run a walk-forward validation of the preload logic.
+
+Do not randomly split weather observations.
+
+Use time-based folds, for example:
+- Train on earlier dates
+- Validate on later unseen dates
+- Roll the window forward
+
+Compare:
+- Raw forecast
+- Bias-adjusted forecast
+- V2.1-style conservative baseline
+- V3 preload method
+
+Report:
+- MAE
+- RMSE
+- Bias
+- Brier score when translated into contract probabilities
+- Calibration
+- Sample sizes
+- Results by city and lead time
+
+Do not tune repeatedly against the final holdout period.
+
+DATA-QUALITY AND INGESTION UI
+
+Create an admin or audit view showing:
+- Cities included
+- Stations included
+- Date coverage
+- Models included
+- Records downloaded
+- Records accepted
+- Records rejected
+- Missing observation dates
+- Duplicate records
+- Look-ahead violations
+- Unit-conversion issues
+- Time-zone mapping issues
+- Last successful ingestion
+- Source API failures
+
+V3 must not activate for a city until its preload passes validation.
+
+If preload data is unavailable or invalid:
+- Mark that city as V3 unavailable
+- Continue V2.1 normally
+- Do not fall back silently to an unverified station
+- Do not prevent other valid cities from running
+
+TESTING
+
+Add comprehensive tests for:
+- Strategy isolation
+- No mutation of V1, V2, or V2.1
+- Additive database migrations
+- Historical-source provenance
+- Duplicate prevention
+- Correct station matching
+- Time-zone conversion
+- Fahrenheit/Celsius conversion
+- Forecast issue-time validation
+- Look-ahead rejection
+- Lead-time bucketing
+- Bias calculation
+- Sigma calculation
+- Hierarchical fallback
+- Shrinkage or partial pooling
+- Historical-weight decay
+- Forward V3 learning
+- V3 settlement
+- V3 P&L
+- Paired V2.1/V3 comparisons
+- Failure of one source without affecting other strategies
+
+Add regression tests that snapshot representative V2.1 predictions before implementation and confirm they are unchanged afterward.
+
+ROLLOUT
+
+Implement in stages:
+
+Phase 1:
+- Schema
+- Data-source clients
+- Historical ingestion
+- Validation and audit UI
+
+Phase 2:
+- Historical bias and sigma computation
+- Walk-forward validation
+- V3 strategy service
+
+Phase 3:
+- Parallel live predictions
+- Separate V3 paper trading
+- V3 analytics
+- Paired V2.1 comparison
+
+Keep V3 disabled behind a feature flag until:
+- Migrations succeed
+- Data validation passes
+- Strategy-isolation tests pass
+- V2.1 regression tests pass
+- Historical preload audit is reviewed
+
+DELIVERABLES BEFORE ENABLING V3
+
+Provide:
+1. Architecture summary
+2. Exact list of modified and newly created files
+3. Database migration details
+4. Proof V1, V2, and V2.1 were not changed
+5. Source coverage by city, model, and year
+6. Rejected-record summary
+7. Walk-forward validation report
+8. Regression-test results
+9. Strategy-isolation test results
+10. Screenshots or output of the V3 audit and comparison pages
+11. Clear explanation of the historical-weight decay formula
+12. Rollback procedure that disables V3 without touching any other strategy
+
+Do not enable V3 paper trading automatically after coding. Finish the build, run the tests, load and validate the historical data, then stop and present the results for review.
