@@ -3,6 +3,7 @@ import {
   useGetDashboard,
   useTriggerCollection,
   useGetV2LearningProgress,
+  useGetPaperTradeMetrics,
   getGetDashboardQueryKey,
   getGetMarketsQueryKey,
   getGetJobsQueryKey,
@@ -10,8 +11,8 @@ import {
 import { format } from "date-fns";
 import {
   Activity, CloudRain, Database, RefreshCw, AlertTriangle,
-  AlertCircle, CheckCircle2, SkipForward, XOctagon,
-  TrendingUp, Info, Brain, ExternalLink,
+  AlertCircle, CheckCircle2, Cloud, Sun, CloudLightning,
+  TrendingUp, Info, Brain, ExternalLink, Target, Briefcase, DollarSign
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,155 +26,31 @@ import {
 } from "@/components/ui/tooltip";
 import { Link } from "wouter";
 
-// ── Inline helpers ────────────────────────────────────────────────────────────
+// ── Shared Styling Systems ───────────────────────────────────────────────────
 
-function InfoTooltip({ text, maxWidth = 260 }: { text: string; maxWidth?: number }) {
-  return (
-    <TooltipProvider delayDuration={150}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Info className="h-3 w-3 text-muted-foreground cursor-help inline shrink-0" />
-        </TooltipTrigger>
-        <TooltipContent
-          className="font-sans text-xs leading-relaxed"
-          style={{ maxWidth }}
-        >
-          {text}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
-
-/** Inline term with a hover tooltip — renders as underlined text + ℹ icon */
-function Term({ label, tip }: { label: string; tip: string }) {
-  return (
-    <TooltipProvider delayDuration={150}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="underline decoration-dotted underline-offset-2 cursor-help text-foreground/80 hover:text-foreground transition-colors">
-            {label}
-          </span>
-        </TooltipTrigger>
-        <TooltipContent className="font-sans text-xs leading-relaxed max-w-[260px]">
-          {tip}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
-
-const READINESS_COLORS: Record<string, string> = {
-  learned:             "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
-  partially_learned:   "bg-blue-500/20   text-blue-400   border-blue-500/30",
-  insufficient_sample: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-  collecting:          "bg-orange-500/20 text-orange-400 border-orange-500/30",
-  not_collecting:      "bg-muted/50      text-muted-foreground border-border",
-  data_quality_issue:  "bg-red-500/20    text-red-400    border-red-500/30",
+const COLOR_SYSTEM: Record<string, string> = {
+  blue:   "bg-blue-500/10 text-blue-400 border-blue-500/30",
+  green:  "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+  amber:  "bg-amber-500/10 text-amber-400 border-amber-500/30",
+  red:    "bg-red-500/10 text-red-400 border-red-500/30",
+  gray:   "bg-slate-500/10 text-slate-400 border-slate-500/30",
 };
 
-const READINESS_LABEL: Record<string, string> = {
-  learned:             "Learned",
-  partially_learned:   "Partial",
-  insufficient_sample: "Needs FES",
-  collecting:          "Collecting",
-  not_collecting:      "Not started",
-  data_quality_issue:  "Quality issue",
+const TEXT_COLORS: Record<string, string> = {
+  blue:   "text-blue-400",
+  green:  "text-emerald-400",
+  amber:  "text-amber-400",
+  red:    "text-red-400",
+  gray:   "text-slate-400",
 };
-
-function CityChip({ city, status, obs }: { city: string; status: string; obs: number }) {
-  const colors = READINESS_COLORS[status] ?? "bg-muted/50 text-muted-foreground border-border";
-  return (
-    <div className={`rounded border px-2 py-1.5 text-[10px] font-mono ${colors}`}>
-      <div className="font-semibold truncate">{city}</div>
-      <div className="opacity-70 mt-0.5">{obs} obs · {READINESS_LABEL[status] ?? status}</div>
-    </div>
-  );
-}
-
-// ── Learning stage definitions ────────────────────────────────────────────────
-
-type LearningStage = {
-  emoji: string;
-  label: string;
-  whyItMatters: string;
-  color: string;
-  bgColor: string;
-};
-
-const STAGES: LearningStage[] = [
-  {
-    emoji: "🌱",
-    label: "Just Getting Started",
-    whyItMatters:
-      "Every completed forecast teaches EdgeCast what actually happened so future predictions become more accurate.",
-    color: "text-orange-400",
-    bgColor: "bg-orange-500/10 border-orange-500/20",
-  },
-  {
-    emoji: "📚",
-    label: "Learning From Real Weather",
-    whyItMatters:
-      "Real temperature outcomes are now being compared to forecasts. The more settled markets EdgeCast sees, the better it understands how accurate weather predictions actually are.",
-    color: "text-yellow-400",
-    bgColor: "bg-yellow-500/10 border-yellow-500/20",
-  },
-  {
-    emoji: "🧠",
-    label: "Getting Smarter",
-    whyItMatters:
-      "City-specific patterns are now being used. EdgeCast has learned that some cities run warmer than forecast, others cooler — and it adjusts for those tendencies automatically.",
-    color: "text-blue-400",
-    bgColor: "bg-blue-500/10 border-blue-500/20",
-  },
-  {
-    emoji: "🎯",
-    label: "Fully Trained",
-    whyItMatters:
-      "EdgeCast is using measured data for all major cities and fine-tuning its probability outputs based on its own track record.",
-    color: "text-emerald-400",
-    bgColor: "bg-emerald-500/10 border-emerald-500/20",
-  },
-];
-
-type Readiness = { dot: string; label: string; sub: string; color: string };
-
-function getReadiness(summary: {
-  totalUsableObservations: number;
-  citiesLearned: number;
-  citiesPartiallyLearned: number;
-  v2TradesUsingHistorical: number;
-}): Readiness {
-  const { totalUsableObservations, citiesLearned, v2TradesUsingHistorical } = summary;
-  if (citiesLearned >= 3 && v2TradesUsingHistorical > 0) {
-    return { dot: "🟢", label: "Ready", sub: "Using real-world data for predictions", color: "text-emerald-400" };
-  }
-  if (totalUsableObservations >= 5) {
-    return { dot: "🟡", label: "Still Learning", sub: "Building experience — predictions are educated estimates", color: "text-yellow-400" };
-  }
-  return { dot: "🔴", label: "Not Enough Data Yet", sub: "Very early stage — predictions use built-in defaults", color: "text-orange-400" };
-}
-
-function getLearningStage(summary: {
-  totalUsableObservations: number;
-  citiesLearned: number;
-  citiesPartiallyLearned: number;
-  v2TradesUsingHistorical: number;
-}): LearningStage {
-  const { totalUsableObservations, citiesLearned, citiesPartiallyLearned, v2TradesUsingHistorical } = summary;
-  if (citiesLearned >= 3 && v2TradesUsingHistorical > 0) return STAGES[3]; // Fully Trained
-  if (v2TradesUsingHistorical > 0 || citiesLearned > 0 || citiesPartiallyLearned > 0) return STAGES[2]; // Getting Smarter
-  if (totalUsableObservations >= 5) return STAGES[1]; // Learning From Real Weather
-  return STAGES[0]; // Just Getting Started
-}
 
 const CITY_CHIP_COLORS: Record<string, string> = {
-  learned:             "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
-  partially_learned:   "bg-blue-500/20   text-blue-400   border-blue-500/30",
-  insufficient_sample: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-  collecting:          "bg-orange-500/20 text-orange-400 border-orange-500/30",
-  not_collecting:      "bg-muted/50      text-muted-foreground border-border",
-  data_quality_issue:  "bg-red-500/20    text-red-400    border-red-500/30",
+  learned:             COLOR_SYSTEM.green,
+  partially_learned:   COLOR_SYSTEM.blue,
+  collecting:          COLOR_SYSTEM.blue,
+  insufficient_sample: COLOR_SYSTEM.amber,
+  data_quality_issue:  COLOR_SYSTEM.red,
+  not_collecting:      COLOR_SYSTEM.gray,
 };
 
 const CITY_STATUS_LABEL: Record<string, string> = {
@@ -185,236 +62,172 @@ const CITY_STATUS_LABEL: Record<string, string> = {
   data_quality_issue:  "Data issue",
 };
 
-// ── How EdgeCast Learns section ───────────────────────────────────────────────
+// ── Inline Helpers ───────────────────────────────────────────────────────────
 
-function HowEdgeCastLearns() {
-  const { data, isLoading } = useGetV2LearningProgress();
-
-  if (isLoading) {
-    return (
-      <Card className="border-border/50 bg-card/50">
-        <CardContent className="pt-5 pb-5">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-16 rounded" />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!data) return null;
-
-  const { summary, cities } = data;
-  const stage     = getLearningStage(summary);
-  const readiness = getReadiness(summary);
-
-  // Overall learning progress: milestones reached across all cities ÷ total possible
-  // Each city has 5 milestones (5 / 15 / 30 / 50 / 100 observations)
-  const totalReached = cities.reduce(
-    (sum, c) => sum + (c.milestoneProgress?.reached?.filter(Boolean).length ?? 0),
-    0,
-  );
-  const totalPossible  = summary.totalCities * 5;
-  const overallPct     = totalPossible > 0 ? Math.round((totalReached / totalPossible) * 100) : 0;
-
-  // Cities actively learning = any city with at least 1 observation
-  const activelyLearning = cities.filter(
-    c => !["not_collecting", "data_quality_issue"].includes(c.readinessStatus),
-  ).length;
-
-  // Sort: fully trained first, then partial, then collecting, then not started
-  const SORT_ORDER = ["learned", "partially_learned", "insufficient_sample", "collecting", "not_collecting", "data_quality_issue"];
-  const sortedCities = [...cities].sort((a, b) => {
-    const ai = SORT_ORDER.indexOf(a.readinessStatus);
-    const bi = SORT_ORDER.indexOf(b.readinessStatus);
-    return ai !== bi ? ai - bi : b.usableObservations - a.usableObservations;
-  });
-
+function InfoTooltip({ text, maxWidth = 260 }: { text: string; maxWidth?: number }) {
   return (
-    <Card className="border-border/50 bg-card/50">
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-4">
-          <CardTitle className="text-sm font-mono text-muted-foreground flex items-center gap-2">
-            <Brain className="h-4 w-4 text-primary" />
-            HOW EDGECAST LEARNS
-          </CardTitle>
-          <Link
-            href="/strategy-audit?tab=v2-learning"
-            className="text-[10px] font-mono text-primary hover:underline whitespace-nowrap flex items-center gap-1"
-          >
-            DEEP DIVE <ExternalLink className="h-3 w-3" />
-          </Link>
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Info className="h-3 w-3 text-muted-foreground hover:text-foreground cursor-help transition-colors" />
+        </TooltipTrigger>
+        <TooltipContent className="font-sans text-xs leading-relaxed" style={{ maxWidth }}>
+          {text}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+// ── Model Logic ──────────────────────────────────────────────────────────────
+
+function getModelStage(summary: {
+  totalUsableObservations: number;
+  citiesLearned: number;
+  citiesPartiallyLearned: number;
+  v2TradesUsingHistorical: number;
+}) {
+  const { totalUsableObservations, citiesLearned, citiesPartiallyLearned, v2TradesUsingHistorical } = summary;
+  
+  if (citiesLearned >= 3 && v2TradesUsingHistorical > 0) {
+    return {
+      color: "green",
+      icon: <Sun className="h-10 w-10 sm:h-12 sm:w-12" />,
+      label: "Fully Trained",
+      desc: "EdgeCast is using measured data for major cities and fine-tuning its probability outputs based on its own track record.",
+      readiness: "Predictions use real-world data"
+    };
+  }
+  if (v2TradesUsingHistorical > 0 || citiesLearned > 0 || citiesPartiallyLearned > 0) {
+    return {
+      color: "blue",
+      icon: <CloudLightning className="h-10 w-10 sm:h-12 sm:w-12" />,
+      label: "Getting Smarter",
+      desc: "City-specific patterns are now being used. EdgeCast has learned that some cities run warmer than forecast, others cooler — adjusting for bias automatically.",
+      readiness: "Predictions are educated estimates"
+    };
+  }
+  if (totalUsableObservations >= 5) {
+    return {
+      color: "amber",
+      icon: <CloudRain className="h-10 w-10 sm:h-12 sm:w-12" />,
+      label: "Learning From Real Weather",
+      desc: "Real temperature outcomes are now being compared to forecasts. The more settled markets EdgeCast sees, the better it understands prediction accuracy.",
+      readiness: "Building early experience"
+    };
+  }
+  return {
+    color: "gray",
+    icon: <Cloud className="h-10 w-10 sm:h-12 sm:w-12" />,
+    label: "Just Getting Started",
+    desc: "Every completed forecast teaches EdgeCast what actually happened so future predictions become more accurate.",
+    readiness: "Predictions use built-in defaults"
+  };
+}
+
+// ── Sub-components ───────────────────────────────────────────────────────────
+
+function StatCard({ title, value, color, icon }: { title: string; value: string; color: string; icon: React.ReactNode }) {
+  const scheme = COLOR_SYSTEM[color];
+  // Simple hack to get a subtle gradient based on the color word for Tailwind JIT 
+  const gradientMap: Record<string, string> = {
+    blue: "from-blue-500/10",
+    green: "from-emerald-500/10",
+    amber: "from-amber-500/10",
+    red: "from-red-500/10",
+    gray: "from-slate-500/10",
+  };
+  
+  return (
+    <Card className="border-border/50 bg-card/40 backdrop-blur shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
+      <div className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-br ${gradientMap[color]} to-transparent pointer-events-none`} />
+      <CardContent className="p-4 sm:p-5 flex flex-col gap-3">
+        <div className="flex items-center justify-between text-muted-foreground">
+          <span className="text-[10px] font-mono tracking-wider uppercase">{title}</span>
+          <div className={TEXT_COLORS[color]}>{icon}</div>
         </div>
-      </CardHeader>
-
-      <CardContent className="space-y-5 pt-0">
-
-        {/* Model Readiness + Stage — top row */}
-        <div className="flex flex-col sm:flex-row gap-3">
-          {/* Readiness pill */}
-          <div className="flex items-center gap-3 px-4 py-3 rounded-lg border bg-muted/20 sm:w-64 shrink-0">
-            <span className="text-2xl leading-none">{readiness.dot}</span>
-            <div>
-              <div className={`text-sm font-semibold ${readiness.color}`}>{readiness.label}</div>
-              <div className="text-[10px] text-muted-foreground mt-0.5">{readiness.sub}</div>
-            </div>
-          </div>
-
-          {/* Stage card */}
-          <div className={`flex-1 flex items-start gap-3 px-4 py-3 rounded-lg border ${stage.bgColor}`}>
-            <span className="text-2xl leading-none mt-0.5">{stage.emoji}</span>
-            <div className="space-y-1">
-              <div className={`text-sm font-semibold ${stage.color}`}>{stage.label}</div>
-              <div className="text-[11px] text-muted-foreground leading-relaxed">{stage.whyItMatters}</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Progress metrics */}
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="bg-muted/30 rounded-lg px-3 py-2.5 text-center">
-              <div className="text-xl font-mono font-bold text-foreground">{summary.totalUsableObservations}</div>
-              <div className="text-[10px] text-muted-foreground mt-0.5 flex items-center justify-center gap-1">
-                Forecasts Learned From
-                <InfoTooltip text="Each time a weather market settles, EdgeCast looks up what the temperature actually was and compares it to the forecast. That comparison is one lesson. The more lessons, the smarter the model gets." />
-              </div>
-            </div>
-            <div className="bg-muted/30 rounded-lg px-3 py-2.5 text-center">
-              <div className="text-xl font-mono font-bold text-foreground">
-                {activelyLearning}
-                <span className="text-muted-foreground text-base font-normal"> of {summary.totalCities}</span>
-              </div>
-              <div className="text-[10px] text-muted-foreground mt-0.5 flex items-center justify-center gap-1">
-                Cities Actively Learning
-                <InfoTooltip text="Cities where EdgeCast has started receiving real temperature data to compare against its forecasts. Cities not yet started are still waiting for their first settled market." />
-              </div>
-            </div>
-            <div className="bg-muted/30 rounded-lg px-3 py-2.5 text-center">
-              <div className="text-xl font-mono font-bold text-foreground">{summary.citiesLearned}</div>
-              <div className="text-[10px] text-muted-foreground mt-0.5 flex items-center justify-center gap-1">
-                Cities Fully Trained
-                <InfoTooltip text="Cities where EdgeCast has enough real-world data to use its own measured statistics instead of built-in defaults. A city needs at least 5 confirmed temperature observations to reach this stage." />
-              </div>
-            </div>
-            <div className="bg-muted/30 rounded-lg px-3 py-2.5 text-center">
-              <div className="text-xl font-mono font-bold text-foreground">{overallPct}%</div>
-              <div className="text-[10px] text-muted-foreground mt-0.5 flex items-center justify-center gap-1">
-                Overall Learning Progress
-                <InfoTooltip text="How far EdgeCast has come across all cities, measured against five learning milestones per city (5, 15, 30, 50, and 100 observations). 100% means all cities have reached every milestone." />
-              </div>
-            </div>
-          </div>
-
-          {/* Overall progress bar */}
-          <div className="space-y-1">
-            <div className="h-2 bg-muted rounded-full overflow-hidden">
-              <div
-                className="h-full bg-primary transition-all duration-700 rounded-full"
-                style={{ width: `${Math.max(overallPct, overallPct > 0 ? 2 : 0)}%` }}
-              />
-            </div>
-            <div className="flex justify-between text-[9px] text-muted-foreground font-mono">
-              <span>Getting Started</span>
-              <span>Learning</span>
-              <span>Getting Smarter</span>
-              <span>Fully Trained</span>
-            </div>
-          </div>
-        </div>
-
-        {/* City grid */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide">
-              Progress by City
-            </p>
-            <div className="flex items-center gap-2 text-[9px] text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-sm bg-emerald-500/40 border border-emerald-500/50 inline-block" />
-                Fully trained
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-sm bg-blue-500/40 border border-blue-500/50 inline-block" />
-                Partial
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-sm bg-orange-500/40 border border-orange-500/50 inline-block" />
-                Collecting
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-sm bg-muted border border-border inline-block" />
-                Not started
-              </span>
-            </div>
-          </div>
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2">
-            {sortedCities.map(c => {
-              const colors = CITY_CHIP_COLORS[c.readinessStatus] ?? "bg-muted/50 text-muted-foreground border-border";
-              const label  = CITY_STATUS_LABEL[c.readinessStatus] ?? c.readinessStatus;
-              return (
-                <div key={c.city} className={`rounded border px-2 py-1.5 text-[10px] font-mono ${colors}`}>
-                  <div className="font-semibold truncate">{c.city}</div>
-                  <div className="opacity-70 mt-0.5">
-                    {c.usableObservations > 0 ? `${c.usableObservations} lessons` : "0 lessons"} · {label}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Glossary strip */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border/50 pt-3 text-[10px] text-muted-foreground">
-          <span className="uppercase tracking-wide opacity-60">What do these mean?</span>
-          {[
-            {
-              label: "Lessons",
-              tip: "Each time a weather market settles and EdgeCast confirms the actual temperature, that counts as one lesson. More lessons = more accurate predictions.",
-            },
-            {
-              label: "Built-in defaults",
-              tip: "When EdgeCast is new to a city, it uses rough industry-standard estimates for how far off weather forecasts typically are. Think of it as the textbook answer before you have personal experience.",
-            },
-            {
-              label: "Systematic bias",
-              tip: "Some cities' forecasts consistently run a bit too warm or too cool. Once EdgeCast spots this pattern, it automatically corrects for it — like knowing your oven always runs 10° hot.",
-            },
-            {
-              label: "Probability fine-tuning",
-              tip: "After enough settled trades, EdgeCast checks: when it said '70% confident,' did that actually happen 70% of the time? If not, it adjusts its confidence levels to match reality.",
-            },
-            {
-              label: "Probability accuracy score",
-              tip: "A number that measures how well EdgeCast's confidence levels match real outcomes. Zero is perfect; 0.25 is no better than random guessing. Lower is better.",
-            },
-          ].map(({ label, tip }) => (
-            <TooltipProvider key={label} delayDuration={150}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="cursor-help hover:text-foreground transition-colors underline decoration-dotted underline-offset-2">
-                    {label}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent className="font-sans text-xs leading-relaxed max-w-[280px]">
-                  {tip}
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          ))}
+        <div className={`text-xl sm:text-2xl font-sans font-bold tracking-tight ${TEXT_COLORS[color]}`}>
+          {value}
         </div>
       </CardContent>
     </Card>
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+function LearningStat({ label, value, tip }: { label: string; value: string | number; tip: string }) {
+  return (
+    <div className="p-4 flex flex-col items-center justify-center text-center">
+      <div className="text-2xl font-mono font-bold text-foreground mb-1">{value}</div>
+      <div className="text-[9px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+        {label}
+        <InfoTooltip text={tip} />
+      </div>
+    </div>
+  );
+}
+
+function GlossaryStrip() {
+  const items = [
+    { label: "Lessons", tip: "Each time a weather market settles and EdgeCast confirms the actual temperature, that counts as one lesson." },
+    { label: "Built-in defaults", tip: "Rough industry-standard estimates used before EdgeCast builds local experience in a city." },
+    { label: "Bias correction", tip: "Automatic adjustments for cities whose forecasts consistently run a bit too warm or too cool." },
+    { label: "Probability tuning", tip: "Adjusting confidence levels to match reality (e.g. if '70% confident' only happens 50% of the time, the model recalibrates)." },
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 p-4 border-t border-border/50 bg-muted/10 text-[10px] font-mono text-muted-foreground">
+      <span className="uppercase tracking-widest opacity-60 flex items-center gap-1">
+        <Info className="h-3 w-3" /> Terminology
+      </span>
+      {items.map(({ label, tip }) => (
+        <TooltipProvider key={label} delayDuration={150}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="cursor-help hover:text-primary transition-colors underline decoration-dotted underline-offset-4">
+                {label}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent className="font-sans text-xs leading-relaxed max-w-[280px]">
+              {tip}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ))}
+    </div>
+  );
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-8 animate-pulse pb-20">
+      <div className="flex justify-between items-end">
+        <div className="space-y-2">
+          <div className="h-10 w-64 bg-muted/20 rounded"></div>
+          <div className="h-4 w-48 bg-muted/20 rounded"></div>
+        </div>
+        <div className="h-10 w-32 bg-muted/20 rounded"></div>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
+         <div className="lg:col-span-8 space-y-6 md:space-y-8">
+            <div className="h-64 bg-card/40 border border-border/50 rounded-xl"></div>
+            <div className="h-24 bg-card/40 border border-border/50 rounded-xl"></div>
+            <div className="h-96 bg-card/40 border border-border/50 rounded-xl"></div>
+         </div>
+         <div className="lg:col-span-4 space-y-6 md:space-y-8">
+            <div className="h-48 bg-card/40 border border-border/50 rounded-xl"></div>
+            <div className="h-64 bg-card/40 border border-border/50 rounded-xl"></div>
+         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Page ────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
-  const { data: dashboard, isLoading, error } = useGetDashboard();
+  const { data: dashboard, isLoading: dashLoading, error: dashError } = useGetDashboard();
+  const { data: learning, isLoading: learnLoading, error: learnError } = useGetV2LearningProgress();
+  const { data: metrics, isLoading: metricsLoading } = useGetPaperTradeMetrics();
   const triggerMutation = useTriggerCollection();
 
   const handleTrigger = () => {
@@ -429,205 +242,268 @@ export default function DashboardPage() {
     });
   };
 
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-3xl font-mono font-bold tracking-tight">DASHBOARD</h1>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-28 w-full" />)}
-        </div>
-        <Skeleton className="h-96 w-full" />
-      </div>
-    );
+  if (dashLoading || learnLoading) {
+    return <DashboardSkeleton />;
   }
 
-  if (error || !dashboard) {
+  if (dashError || learnError || !dashboard || !learning) {
     return (
-      <div className="p-6 bg-destructive/10 border border-destructive rounded-md text-destructive flex items-center gap-3">
+      <div className="p-6 bg-red-500/10 border border-red-500/30 rounded-md text-red-400 flex items-center gap-3">
         <AlertTriangle className="h-5 w-5" />
-        <span className="font-mono">ERROR RETRIEVING DASHBOARD METRICS</span>
+        <span className="font-mono">ERROR RETRIEVING MISSION CONTROL DATA</span>
       </div>
     );
   }
 
-  const {
-    totalActiveMarkets,
-    marketsWithWeather,
-    marketsCollected,
-    marketsParseFailures,
-    lastCollectionTime,
-    lastCollectionStatus,
-    lastCollectionDuration,
-    lastCollectionMarketsFound,
-    lastCollectionMarketsSkipped,
-    collectionSummary,
-    markets,
-    recentErrors,
-    lastJob,
-  } = dashboard;
-
-  const coverage = totalActiveMarkets > 0
-    ? Math.round((marketsWithWeather / totalActiveMarkets) * 100)
+  // Derived dashboard metrics
+  const coverage = dashboard.totalActiveMarkets > 0
+    ? Math.round((dashboard.marketsWithWeather / dashboard.totalActiveMarkets) * 100)
     : 0;
 
+  // Derived learning metrics
+  const totalReached = learning.cities.reduce(
+    (sum, c) => sum + (c.milestoneProgress?.reached?.filter(Boolean).length ?? 0),
+    0,
+  );
+  const totalPossible = learning.summary.totalCities * 5;
+  const overallPct = totalPossible > 0 ? Math.round((totalReached / totalPossible) * 100) : 0;
+  
+  const activelyLearning = learning.cities.filter(
+    c => !["not_collecting", "data_quality_issue"].includes(c.readinessStatus),
+  ).length;
+
+  const SORT_ORDER = ["learned", "partially_learned", "insufficient_sample", "collecting", "not_collecting", "data_quality_issue"];
+  const sortedCities = [...learning.cities].sort((a, b) => {
+    const ai = SORT_ORDER.indexOf(a.readinessStatus);
+    const bi = SORT_ORDER.indexOf(b.readinessStatus);
+    return ai !== bi ? ai - bi : b.usableObservations - a.usableObservations;
+  });
+
+  const stage = getModelStage(learning.summary);
+  const heroGlowMap: Record<string, string> = {
+    blue: "bg-blue-500",
+    green: "bg-emerald-500",
+    amber: "bg-amber-500",
+    red: "bg-red-500",
+    gray: "bg-slate-500",
+  };
+
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-3xl font-mono font-bold tracking-tight">DASHBOARD</h1>
+    <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
+      
+      {/* ── Header ── */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-4">
+        <div className="space-y-1">
+          <h1 className="text-3xl md:text-4xl font-sans font-black tracking-tighter text-foreground flex items-center gap-3">
+            <Brain className="h-7 w-7 md:h-8 md:w-8 text-primary" />
+            Mission Control
+          </h1>
+          <p className="text-muted-foreground text-[11px] md:text-xs font-mono tracking-widest uppercase">
+            EdgeCast Weather Prediction Engine
+          </p>
+        </div>
         <Button
           onClick={handleTrigger}
           disabled={triggerMutation.isPending}
-          className="font-mono"
+          className="font-mono tracking-widest text-[10px] md:text-xs h-10 px-6 bg-primary hover:bg-primary/90 text-primary-foreground shadow-[0_0_15px_rgba(59,130,246,0.2)] hover:shadow-[0_0_20px_rgba(59,130,246,0.4)] transition-all"
         >
           <RefreshCw className={`h-4 w-4 mr-2 ${triggerMutation.isPending ? "animate-spin" : ""}`} />
-          {triggerMutation.isPending ? "COLLECTING..." : "RUN COLLECTION NOW"}
+          {triggerMutation.isPending ? "SYNCING..." : "SYNC MARKETS"}
         </Button>
       </div>
 
-      {collectionSummary && (
-        <div className="flex items-start gap-2 p-3 rounded-md border border-yellow-500/30 bg-yellow-500/5 text-yellow-400 text-sm font-mono">
+      {/* ── Global Alerts ── */}
+      {dashboard.collectionSummary && (
+        <div className="flex items-start gap-3 p-4 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-400 text-sm font-mono shadow-[0_0_15px_rgba(245,158,11,0.05)]">
           <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-          {collectionSummary}
+          <span className="leading-relaxed">{dashboard.collectionSummary}</span>
         </div>
       )}
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <Card className="border-border/50 bg-card/50 backdrop-blur">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-xs font-mono text-muted-foreground">ACTIVE</CardTitle>
-            <Database className="h-3 w-3 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-mono font-bold">{totalActiveMarkets}</div>
-            <p className="text-[10px] text-muted-foreground font-mono">MARKETS</p>
-          </CardContent>
-        </Card>
+      {/* ── Main Grid ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
+      
+        {/* Left Column (8 cols): Primary Model Status, Performance, Cities, Markets */}
+        <div className="lg:col-span-8 flex flex-col gap-6 md:gap-8">
+          
+          {/* 1. MODEL STATUS HERO */}
+          <Card className={`relative overflow-hidden border ${COLOR_SYSTEM[stage.color].split(' ')[2]} bg-card/50 backdrop-blur shadow-lg`}>
+            {/* Ambient background glow */}
+            <div className={`absolute -right-20 -top-20 w-72 h-72 blur-3xl opacity-20 ${heroGlowMap[stage.color]} rounded-full pointer-events-none`} />
+            
+            <CardContent className="p-6 md:p-8">
+              <div className="flex flex-col md:flex-row md:items-center gap-6 md:gap-8">
+                
+                {/* Big Status */}
+                <div className="flex-1">
+                   <h2 className="text-xs font-mono font-semibold tracking-widest text-muted-foreground uppercase mb-3 flex items-center gap-2">
+                     Model Readiness
+                   </h2>
+                   <div className="flex items-start sm:items-center gap-4 sm:gap-5">
+                      <div className={`p-4 rounded-2xl ${COLOR_SYSTEM[stage.color]} shadow-inner shrink-0`}>
+                         {stage.icon}
+                      </div>
+                      <div>
+                        <h3 className={`text-3xl sm:text-4xl md:text-5xl font-sans font-black tracking-tight ${TEXT_COLORS[stage.color]}`}>
+                          {stage.label}
+                        </h3>
+                        <p className="text-sm font-mono text-muted-foreground mt-2 font-medium">
+                          {stage.readiness}
+                        </p>
+                      </div>
+                   </div>
+                   <p className="text-sm text-muted-foreground mt-4 leading-relaxed max-w-lg">
+                     {stage.desc}
+                   </p>
+                </div>
 
-        <Card className="border-border/50 bg-card/50 backdrop-blur">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-xs font-mono text-muted-foreground">COVERAGE</CardTitle>
-            <CloudRain className="h-3 w-3 text-blue-400" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-mono font-bold">{coverage}%</div>
-            <p className="text-[10px] text-muted-foreground font-mono">{marketsWithWeather} MATCHED</p>
-          </CardContent>
-        </Card>
+                {/* Quick Overall KPIs */}
+                <div className="flex gap-8 md:text-right shrink-0">
+                   <div className="space-y-1">
+                     <div className="text-4xl font-mono font-bold text-foreground">{overallPct}%</div>
+                     <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Trained</div>
+                   </div>
+                   <div className="space-y-1">
+                     <div className="text-4xl font-mono font-bold text-foreground">{learning.summary.citiesLearned}</div>
+                     <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Cities Locked</div>
+                   </div>
+                </div>
+              </div>
 
-        <Card className="border-border/50 bg-card/50 backdrop-blur">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-xs font-mono text-muted-foreground">FOUND</CardTitle>
-            <TrendingUp className="h-3 w-3 text-emerald-400" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-mono font-bold">{marketsCollected ?? 0}</div>
-            <p className="text-[10px] text-muted-foreground font-mono">LAST RUN</p>
-          </CardContent>
-        </Card>
+              {/* Progress Bar inside Hero */}
+              <div className="mt-8 space-y-2">
+                <div className="flex justify-between text-[9px] sm:text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+                   <span className={overallPct >= 0 ? "text-foreground" : ""}>Waiting</span>
+                   <span className={overallPct >= 5 ? "text-foreground" : ""}>Learning</span>
+                   <span className={overallPct >= 30 ? "text-foreground" : ""}>Getting Smarter</span>
+                   <span className={overallPct === 100 ? "text-emerald-400" : ""}>Fully Trained</span>
+                </div>
+                <div className="h-2.5 sm:h-3 bg-muted/50 rounded-full overflow-hidden border border-border/50">
+                  <div
+                    className={`h-full ${overallPct === 100 ? 'bg-emerald-500' : 'bg-primary'} transition-all duration-1000 ease-out rounded-full shadow-[0_0_10px_currentColor]`}
+                    style={{ width: `${Math.max(overallPct, 2)}%` }}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-        <Card className="border-border/50 bg-card/50 backdrop-blur">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-xs font-mono text-muted-foreground">PARSE FAIL</CardTitle>
-            <XOctagon className="h-3 w-3 text-orange-400" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-mono font-bold text-orange-400">{marketsParseFailures ?? 0}</div>
-            <p className="text-[10px] text-muted-foreground font-mono">NO CITY MATCH</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/50 bg-card/50 backdrop-blur">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-xs font-mono text-muted-foreground">SKIPPED</CardTitle>
-            <SkipForward className="h-3 w-3 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-mono font-bold text-muted-foreground">
-              {lastCollectionMarketsSkipped ?? '—'}
+          {/* 2. PERFORMANCE ROW (Paper Trading Analytics) */}
+          {metrics && !metricsLoading && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <StatCard title="WIN RATE" value={metrics.winRate ? `${metrics.winRate.toFixed(1)}%` : '—'} color={metrics.winRate && metrics.winRate > 50 ? 'green' : 'gray'} icon={<Target className="h-4 w-4" />} />
+              <StatCard title="ROI" value={metrics.roi ? `${metrics.roi > 0 ? '+' : ''}${metrics.roi.toFixed(1)}%` : '—'} color={metrics.roi && metrics.roi > 0 ? 'green' : (metrics.roi && metrics.roi < 0 ? 'red' : 'gray')} icon={<TrendingUp className="h-4 w-4" />} />
+              <StatCard title="OPEN TRADES" value={metrics.openCount.toString()} color="blue" icon={<Briefcase className="h-4 w-4" />} />
+              <StatCard title="NET P&L" value={metrics.netProfitLoss ? `$${metrics.netProfitLoss.toFixed(2)}` : '—'} color={metrics.netProfitLoss >= 0 ? 'green' : 'red'} icon={<DollarSign className="h-4 w-4" />} />
             </div>
-            <p className="text-[10px] text-muted-foreground font-mono">NON-WEATHER</p>
-          </CardContent>
-        </Card>
+          )}
 
-        <Card className="border-border/50 bg-card/50 backdrop-blur">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-xs font-mono text-muted-foreground">LAST RUN</CardTitle>
-            <Activity className="h-3 w-3 text-emerald-400" />
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-1">
-              <span className="text-lg font-mono font-bold">
-                {lastCollectionTime ? format(new Date(lastCollectionTime), "HH:mm") : "—"}
-              </span>
-              {lastCollectionStatus && (
-                <Badge
-                  variant={lastCollectionStatus === 'success' ? 'success' : 'destructive'}
-                  className="font-mono text-[9px]"
-                >
-                  {lastCollectionStatus === 'success' ? '✓' : '✗'}
-                </Badge>
-              )}
-            </div>
-            <p className="text-[10px] text-muted-foreground font-mono">
-              {lastCollectionDuration != null ? `${lastCollectionDuration.toFixed(1)}s` : ''}
-              {lastCollectionMarketsFound != null ? ` · ${lastCollectionMarketsFound} found` : ''}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+          {/* 3. CITY LEARNING MATRIX */}
+          <Card className="border-border/50 bg-card/40 backdrop-blur shadow-sm overflow-hidden">
+            <CardHeader className="flex flex-row items-center justify-between pb-4 border-b border-border/50 bg-muted/5">
+               <CardTitle className="text-xs font-mono tracking-widest text-muted-foreground uppercase flex items-center gap-2">
+                 <Database className="h-4 w-4 text-primary" /> City Learning Matrix
+               </CardTitle>
+               <Link href="/strategy-audit?tab=v2-learning" className="text-[10px] font-mono text-primary hover:text-primary-foreground hover:underline flex items-center gap-1 transition-colors">
+                 AUDIT REPORT <ExternalLink className="h-3 w-3" />
+               </Link>
+            </CardHeader>
+            <CardContent className="p-0">
+               {/* Detail Stats */}
+               <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-border/50 border-b border-border/50 bg-muted/10">
+                  <LearningStat 
+                    label="Lessons Logged" 
+                    value={learning.summary.totalUsableObservations}
+                    tip="Total confirmed temperature outcomes compared to forecasts across all cities" />
+                  <LearningStat 
+                    label="Active Cities" 
+                    value={`${activelyLearning} / ${learning.summary.totalCities}`}
+                    tip="Cities currently receiving real temperature data" />
+                  <LearningStat 
+                    label="Fully Trained" 
+                    value={learning.summary.citiesLearned}
+                    tip="Cities that have collected enough data to use measured statistics" />
+                  <LearningStat 
+                    label="Total Progress" 
+                    value={`${overallPct}%`}
+                    tip="Overall progression across 5 milestones per city" />
+               </div>
 
-      {/* How EdgeCast Learns */}
-      <HowEdgeCastLearns />
+               {/* City Grid */}
+               <div className="p-4 sm:p-6">
+                 <div className="flex items-center justify-between mb-4">
+                   <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+                     Location Status Snapshot
+                   </p>
+                 </div>
+                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2 sm:gap-3">
+                   {sortedCities.map(c => {
+                     const scheme = CITY_CHIP_COLORS[c.readinessStatus] || CITY_CHIP_COLORS.not_collecting;
+                     const label  = CITY_STATUS_LABEL[c.readinessStatus] || c.readinessStatus;
+                     return (
+                       <div key={c.city} className={`rounded border px-2 py-1.5 sm:px-2.5 sm:py-2 text-[10px] font-mono transition-colors ${scheme}`}>
+                         <div className="font-bold tracking-tight truncate">{c.city}</div>
+                         <div className="opacity-80 mt-1 text-[8px] sm:text-[9px] uppercase tracking-wider">
+                           {c.usableObservations} LSN<br/>{label}
+                         </div>
+                       </div>
+                     );
+                   })}
+                 </div>
+               </div>
 
-      {/* Market Watch + Side Panel */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-mono font-bold tracking-tight">MARKET WATCH</h2>
-            <Link href="/markets" className="text-xs font-mono text-primary hover:underline">VIEW ALL →</Link>
-          </div>
-          <Card className="border-border/50">
+               <GlossaryStrip />
+            </CardContent>
+          </Card>
+
+          {/* 4. MARKET WATCH */}
+          <Card className="border-border/50 bg-card/40 backdrop-blur shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between pb-4 border-b border-border/50 bg-muted/5">
+              <CardTitle className="text-xs font-mono tracking-widest text-muted-foreground uppercase flex items-center gap-2">
+                <Activity className="h-4 w-4 text-emerald-500" /> Market Watch
+              </CardTitle>
+              <Link href="/markets" className="text-[10px] font-mono text-primary hover:text-primary-foreground hover:underline flex items-center gap-1 transition-colors">
+                VIEW ALL <ExternalLink className="h-3 w-3" />
+              </Link>
+            </CardHeader>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm font-mono text-left">
-                <thead className="bg-muted/30 border-b border-border text-muted-foreground">
+              <table className="w-full text-sm font-mono text-left whitespace-nowrap">
+                <thead className="bg-muted/30 border-b border-border/50 text-muted-foreground text-[10px] uppercase tracking-wider">
                   <tr>
-                    <th className="p-3 font-medium">TICKER</th>
-                    <th className="p-3 font-medium">CITY</th>
-                    <th className="p-3 font-medium">YES ASK</th>
-                    <th className="p-3 font-medium">NO ASK</th>
-                    <th className="p-3 font-medium">VOL</th>
-                    <th className="p-3 font-medium text-center">MATCH</th>
+                    <th className="px-4 py-3 font-medium">Ticker</th>
+                    <th className="px-4 py-3 font-medium">City</th>
+                    <th className="px-4 py-3 font-medium text-right">Yes Ask</th>
+                    <th className="px-4 py-3 font-medium text-right">No Ask</th>
+                    <th className="px-4 py-3 font-medium text-center">Match</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border/50">
-                  {markets.slice(0, 8).map(m => (
-                    <tr key={m.id} className="hover:bg-muted/20 transition-colors">
-                      <td className="p-3">
-                        <Link href={`/markets/${m.ticker}`} className="text-primary hover:underline font-bold">
+                <tbody className="divide-y divide-border/20">
+                  {dashboard.markets.slice(0, 8).map(m => (
+                    <tr key={m.id} className="hover:bg-muted/20 transition-colors group">
+                      <td className="px-4 py-3">
+                        <Link href={`/markets/${m.ticker}`} className="text-primary group-hover:text-primary-foreground group-hover:underline font-bold transition-colors">
                           {m.ticker}
                         </Link>
                       </td>
-                      <td className="p-3 text-muted-foreground text-xs">{m.city || '—'}</td>
-                      <td className="p-3 text-emerald-400">
+                      <td className="px-4 py-3 text-muted-foreground text-xs">{m.city || '—'}</td>
+                      <td className="px-4 py-3 text-right text-emerald-400 font-medium">
                         {m.yesAsk !== null && m.yesAsk !== undefined ? `${m.yesAsk}¢` : '-'}
                       </td>
-                      <td className="p-3 text-red-400">
+                      <td className="px-4 py-3 text-right text-red-400 font-medium">
                         {m.noAsk !== null && m.noAsk !== undefined ? `${m.noAsk}¢` : '-'}
                       </td>
-                      <td className="p-3 text-muted-foreground">{m.volume ?? 0}</td>
-                      <td className="p-3 text-center">
+                      <td className="px-4 py-3 text-center">
                         {m.weatherMatched ? (
                           <CheckCircle2 className="h-4 w-4 text-emerald-500 inline" />
                         ) : (
-                          <span className="text-muted-foreground">—</span>
+                          <span className="text-muted-foreground text-xs opacity-50">—</span>
                         )}
                       </td>
                     </tr>
                   ))}
-                  {markets.length === 0 && (
+                  {dashboard.markets.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                      <td colSpan={6} className="p-8 text-center text-muted-foreground text-xs">
                         NO ACTIVE MARKETS
                       </td>
                     </tr>
@@ -638,65 +514,141 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        <div className="space-y-4">
-          {lastJob && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-mono font-bold tracking-tight text-muted-foreground">LAST JOB</h2>
-                <Link href="/jobs" className="text-xs font-mono text-primary hover:underline">VIEW ALL →</Link>
-              </div>
-              <Card className="border-border/50 p-4 font-mono text-xs space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">STARTED</span>
-                  <span>{format(new Date(lastJob.startedAt), "HH:mm:ss")}</span>
+        {/* Right Column (4 cols): System Health, Collection Stats, Errors */}
+        <div className="lg:col-span-4 flex flex-col gap-6 md:gap-8">
+          
+          {/* DATA INGESTION */}
+          <Card className="border-border/50 bg-card/40 backdrop-blur shadow-md flex flex-col relative overflow-hidden">
+             <div className="absolute inset-0 bg-gradient-to-b from-blue-500/5 to-transparent pointer-events-none" />
+             <CardHeader className="pb-4 border-b border-border/50 bg-muted/5 relative z-10">
+                <CardTitle className="text-xs font-mono tracking-widest text-muted-foreground uppercase flex items-center gap-2">
+                  <CloudRain className="h-4 w-4 text-blue-400" /> Data Ingestion
+                </CardTitle>
+             </CardHeader>
+             <CardContent className="p-0 flex flex-col relative z-10">
+                {/* Coverage & Active paired together */}
+                <div className="grid grid-cols-2 divide-x divide-border/50 border-b border-border/50">
+                   <div className="p-6 text-center flex flex-col items-center justify-center bg-card/50">
+                      <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-1">Active Markets</div>
+                      <div className="text-3xl md:text-4xl font-mono font-bold text-foreground">{dashboard.totalActiveMarkets}</div>
+                   </div>
+                   <div className="p-6 text-center flex flex-col items-center justify-center bg-blue-500/5">
+                      <div className="text-[10px] font-mono uppercase tracking-widest text-blue-400 mb-1">Coverage</div>
+                      <div className="text-3xl md:text-4xl font-mono font-bold text-primary">{coverage}%</div>
+                      <div className="text-[9px] font-mono text-muted-foreground mt-1 uppercase tracking-wider">{dashboard.marketsWithWeather} Matched</div>
+                   </div>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">DURATION</span>
-                  <span>
-                    {lastJob.durationSeconds != null ? `${lastJob.durationSeconds.toFixed(2)}s` : '—'}
-                  </span>
+                
+                {/* Micro stats */}
+                <div className="grid grid-cols-3 divide-x divide-border/50 bg-muted/10">
+                   <div className="p-4 text-center">
+                      <div className="text-2xl font-mono font-semibold text-emerald-400">{dashboard.marketsCollected ?? 0}</div>
+                      <div className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground mt-1">Found</div>
+                   </div>
+                   <div className="p-4 text-center">
+                      <div className="text-2xl font-mono font-semibold text-slate-400">{dashboard.lastCollectionMarketsSkipped ?? '—'}</div>
+                      <div className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground mt-1">Skipped</div>
+                   </div>
+                   <div className="p-4 text-center">
+                      <div className="text-2xl font-mono font-semibold text-red-400">{dashboard.marketsParseFailures ?? 0}</div>
+                      <div className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground mt-1">Errors</div>
+                   </div>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">FOUND</span>
-                  <span className="text-emerald-400 font-bold">{lastJob.marketsFound ?? '—'}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">SKIPPED</span>
-                  <span>{lastJob.marketsSkipped ?? '—'}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">FORECASTS</span>
-                  <span className="text-blue-400 font-bold">{lastJob.forecastsRetrieved ?? '—'}</span>
-                </div>
-              </Card>
-            </div>
-          )}
+             </CardContent>
+          </Card>
 
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-mono font-bold tracking-tight text-muted-foreground">RECENT ERRORS</h2>
-            <Link href="/errors" className="text-xs font-mono text-primary hover:underline">VIEW ALL →</Link>
-          </div>
-          <Card className="border-border/50">
-            <div className="divide-y divide-border/50">
-              {recentErrors.slice(0, 4).map(err => (
-                <div key={err.id} className="p-3 text-sm">
-                  <div className="flex items-start gap-2 mb-1">
-                    <AlertCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
-                    <span className="font-mono font-bold truncate">{err.errorType}</span>
+          {/* SYSTEM ACTIVITY (Last Job) */}
+          <Card className="border-border/50 bg-card/40 backdrop-blur shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between pb-4 border-b border-border/50 bg-muted/5">
+              <CardTitle className="text-xs font-mono tracking-widest text-muted-foreground uppercase flex items-center gap-2">
+                <Database className="h-4 w-4 text-amber-500" /> Recent Activity
+              </CardTitle>
+              <Link href="/jobs" className="text-[10px] font-mono text-primary hover:text-primary-foreground hover:underline flex items-center gap-1 transition-colors">
+                LOGS <ExternalLink className="h-3 w-3" />
+              </Link>
+            </CardHeader>
+            <CardContent className="p-5">
+              {dashboard.lastJob ? (
+                <div className="space-y-5">
+                  <div className="flex items-center justify-between">
+                    <div className="text-[10px] uppercase tracking-widest font-mono text-muted-foreground">Last Run Time</div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-mono font-bold text-foreground">
+                        {format(new Date(dashboard.lastJob.startedAt), "HH:mm")}
+                      </span>
+                      <Badge variant="outline" className={`text-[9px] font-mono border-emerald-500/30 text-emerald-400 bg-emerald-500/10 rounded-sm px-1.5 py-0`}>
+                        SUCCESS
+                      </Badge>
+                    </div>
                   </div>
-                  <p className="text-xs text-muted-foreground line-clamp-2 ml-6">{err.message}</p>
-                  <p className="text-[10px] text-muted-foreground/60 font-mono mt-2 ml-6">
-                    {format(new Date(err.occurredAt), "HH:mm:ss yyyy-MM-dd")}
-                  </p>
+                  
+                  <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                    <div className="flex flex-col gap-1 bg-muted/20 p-3 rounded border border-border/50">
+                      <span className="text-[9px] uppercase tracking-widest text-muted-foreground">Duration</span>
+                      <span className="font-semibold text-foreground">{dashboard.lastJob.durationSeconds}s</span>
+                    </div>
+                    <div className="flex flex-col gap-1 bg-muted/20 p-3 rounded border border-border/50">
+                      <span className="text-[9px] uppercase tracking-widest text-muted-foreground">Forecasts</span>
+                      <span className="font-semibold text-blue-400">{dashboard.lastJob.forecastsRetrieved ?? 0}</span>
+                    </div>
+                    <div className="flex flex-col gap-1 bg-muted/20 p-3 rounded border border-border/50">
+                      <span className="text-[9px] uppercase tracking-widest text-muted-foreground">Markets Found</span>
+                      <span className="font-semibold text-emerald-400">{dashboard.lastJob.marketsFound ?? 0}</span>
+                    </div>
+                    <div className="flex flex-col gap-1 bg-muted/20 p-3 rounded border border-border/50">
+                      <span className="text-[9px] uppercase tracking-widest text-muted-foreground">Skipped</span>
+                      <span className="font-semibold text-slate-400">{dashboard.lastJob.marketsSkipped ?? 0}</span>
+                    </div>
+                  </div>
                 </div>
-              ))}
-              {recentErrors.length === 0 && (
-                <div className="p-6 text-center text-muted-foreground font-mono text-sm">
-                  NO RECENT ERRORS
+              ) : (
+                <div className="text-xs font-mono text-muted-foreground text-center py-6">NO RECENT ACTIVITY</div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* RECENT ERRORS */}
+          <Card className="border-border/50 bg-card/40 backdrop-blur shadow-sm flex flex-col flex-1">
+            <CardHeader className="flex flex-row items-center justify-between pb-4 border-b border-border/50 bg-muted/5 shrink-0">
+              <CardTitle className="text-xs font-mono tracking-widest text-muted-foreground uppercase flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-red-500" /> System Alerts
+              </CardTitle>
+              <Link href="/errors" className="text-[10px] font-mono text-primary hover:text-primary-foreground hover:underline flex items-center gap-1 transition-colors">
+                ALL ALERTS <ExternalLink className="h-3 w-3" />
+              </Link>
+            </CardHeader>
+            <CardContent className="p-0 flex-1 flex flex-col">
+              {dashboard.recentErrors && dashboard.recentErrors.length > 0 ? (
+                <div className="divide-y divide-border/30">
+                  {dashboard.recentErrors.slice(0, 4).map(err => (
+                    <div key={err.id} className="p-4 hover:bg-muted/10 transition-colors">
+                      <div className="flex items-start justify-between gap-3 mb-2">
+                        <span className="text-[9px] font-mono font-bold text-red-400 bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20">
+                          {err.errorType}
+                        </span>
+                        <span className="text-[9px] font-mono text-muted-foreground whitespace-nowrap opacity-60">
+                          {format(new Date(err.occurredAt), "MMM d, HH:mm")}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground font-sans line-clamp-2 leading-relaxed">
+                        {err.message}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-8 text-center flex-1 flex flex-col items-center justify-center gap-3">
+                  <div className="p-3 rounded-full bg-emerald-500/10 text-emerald-400">
+                    <CheckCircle2 className="h-6 w-6" />
+                  </div>
+                  <div className="text-xs font-mono tracking-widest text-emerald-400 uppercase">
+                    ALL SYSTEMS NOMINAL
+                  </div>
                 </div>
               )}
-            </div>
+            </CardContent>
           </Card>
+
         </div>
       </div>
     </div>
