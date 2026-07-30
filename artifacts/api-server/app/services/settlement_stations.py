@@ -8,9 +8,10 @@ Kalshi temperature settlement.
 
 Verification status
 -------------------
-``verified=True``  Station confirmed from a CFTC-filed Kalshi contract
-                   specification PDF.  Safe to use GHCND observations for
-                   σ/bias statistics.
+``verified=True``  Station confirmed from the Kalshi market API
+                   ``rules_primary`` / ``rules_secondary`` fields, or from a
+                   CFTC-filed contract specification PDF.  Safe to use GHCND
+                   observations for σ/bias statistics.
 
 ``verified=False`` Station inferred from airport ICAO codes, wethr.net market
                    resolution documentation, or standard NWS convention.
@@ -18,17 +19,17 @@ Verification status
                    ``source_label='ghcnd_observation_unverified'``) so data
                    collection begins immediately, but any σ/bias statistics
                    derived from these rows carry an assumption documented in
-                   the ``notes`` field.  Before promoting a city to
-                   ``verified=True``, download its Kalshi contract PDF from
-                   https://kalshi.com/markets and confirm the station name.
+                   the ``notes`` field.
 
 Adding a new verified city
 --------------------------
-1. Download the contract PDF and find the phrase
-   "NWS Daily Climate Report for <Station Name>, <State>".
-2. Look up the GHCND station ID at https://www.ncdc.noaa.gov/cdo-web/
-3. Add an entry below with ``verified=True`` and a ``source`` reference.
-4. No other code changes required.
+1. Query the Kalshi market API for a live ticker in that city:
+   GET https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}
+2. Read ``rules_secondary`` — it names the NWS station location explicitly
+   (e.g. "choosing the location 'Dallas/Fort Worth, TX'").
+3. Look up the GHCND station ID at https://www.ncdc.noaa.gov/cdo-web/
+4. Add an entry below with ``verified=True`` and a ``source`` reference.
+5. No other code changes required.
 
 Location offset note
 --------------------
@@ -128,7 +129,12 @@ SETTLEMENT_STATIONS: dict[str, SettlementStation] = {
         timezone="America/New_York",
         verified=False,
         source="wethr.net market resolution docs (KDCA listed for DC)",
-        notes="UNVERIFIED. Confirm via Kalshi DCHIGH/DCLOW contract PDF.",
+        notes=(
+            "UNVERIFIED.  KXTEMPDCH series settles on The Weather Company data "
+            "(not NWS Climatological Reports), so GHCND observations may not match "
+            "the settlement source for that series.  KXHIGH/KXLOW DC series may use "
+            "NWS — verify the relevant contract PDF before enabling V2.1 trading."
+        ),
     ),
 
     "Dallas": SettlementStation(
@@ -138,12 +144,16 @@ SETTLEMENT_STATIONS: dict[str, SettlementStation] = {
         lat=32.8998,
         lon=-97.0403,
         timezone="America/Chicago",
-        verified=False,
-        source="Inferred from KDFW ICAO code (wethr.net)",
+        verified=True,
+        source=(
+            "Kalshi KXHIGHTDAL/KXLOWTDAL rules_secondary: "
+            "'choosing the location \"Dallas/Fort Worth, TX\" with Daily Climate Report' "
+            "(NWS CLIDFW, 2026-07-30 API query)"
+        ),
         notes=(
-            "UNVERIFIED.  Two Dallas series exist: DFW uses this station; DAL uses "
-            "Dallas Love Field (USW00013960).  Both DAL and DFW city codes in CITY_COORDS "
-            "map to the city name 'Dallas' — verify both contract PDFs."
+            "Confirmed: KXHIGH/KXLOW Dallas series uses DFW airport (this station). "
+            "A separate KXHIGHTDAL (DAL Love Field) series was not observed in "
+            "live markets — treat KDFW as the primary settlement station."
         ),
     ),
 
@@ -154,9 +164,12 @@ SETTLEMENT_STATIONS: dict[str, SettlementStation] = {
         lat=42.3606,
         lon=-71.0097,
         timezone="America/New_York",
-        verified=False,
-        source="Inferred from KBOS ICAO code (wethr.net)",
-        notes="UNVERIFIED. Confirm via Kalshi BOSHIGH/BOSLOW contract PDF.",
+        verified=True,
+        source=(
+            "Kalshi KXLOWTBOS rules_secondary: "
+            "'choosing the location \"Boston (Logan Airport), MA\" with Daily Climate Report' "
+            "(NWS CLIBOS, 2026-07-30 API query)"
+        ),
     ),
 
     "Atlanta": SettlementStation(
@@ -168,7 +181,7 @@ SETTLEMENT_STATIONS: dict[str, SettlementStation] = {
         timezone="America/New_York",
         verified=False,
         source="Inferred from KATL ICAO code (wethr.net)",
-        notes="UNVERIFIED. Confirm via Kalshi ATLHIGH/ATLLOW contract PDF.",
+        notes="UNVERIFIED. No live Kalshi Atlanta markets found on 2026-07-30. Confirm when a live ticker appears.",
     ),
 
     "Houston": SettlementStation(
@@ -178,11 +191,15 @@ SETTLEMENT_STATIONS: dict[str, SettlementStation] = {
         lat=29.6454,
         lon=-95.2789,
         timezone="America/Chicago",
-        verified=False,
-        source="Inferred from KHOU ICAO code",
+        verified=True,
+        source=(
+            "Kalshi KXLOWTHOU rules_secondary: "
+            "'choosing the location \"Houston-Hobby, TX\" with Daily Climate Report' "
+            "(NWS CLIHOU, 2026-07-30 API query)"
+        ),
         notes=(
-            "UNVERIFIED.  Hobby Airport assumed; some Kalshi series may use Bush "
-            "Intercontinental (IAH, USW00012960).  Verify HOU contract PDF carefully."
+            "Confirmed: Kalshi uses Hobby Airport (KHOU), not Bush Intercontinental (IAH). "
+            "Previous ambiguity resolved."
         ),
     ),
 
@@ -193,9 +210,12 @@ SETTLEMENT_STATIONS: dict[str, SettlementStation] = {
         lat=25.7959,
         lon=-80.2870,
         timezone="America/New_York",
-        verified=False,
-        source="Inferred from KMIA ICAO code",
-        notes="UNVERIFIED. Confirm via Kalshi MIAHIGH/MIALOW contract PDF.",
+        verified=True,
+        source=(
+            "Kalshi KXHIGHMIA rules_primary: "
+            "'the highest temperature recorded at Miami International Airport' "
+            "(NWS Climatological Report, 2026-07-30 API query)"
+        ),
     ),
 
     "Los Angeles": SettlementStation(
@@ -205,19 +225,16 @@ SETTLEMENT_STATIONS: dict[str, SettlementStation] = {
         lat=33.9381,
         lon=-118.3889,
         timezone="America/Los_Angeles",
-        verified=False,
-        source="Inferred; ambiguity exists — LAX vs USC Downtown station",
+        verified=True,
+        source=(
+            "Kalshi KXLOWTLAX rules_secondary: "
+            "'choosing the location \"Los Angeles Airport, CA\" with Daily Climate Report' "
+            "(NWS CLILAX, 2026-07-30 API query)"
+        ),
         notes=(
-            "UNVERIFIED — DO NOT TRADE V2.1 until confirmed.  "
-            "HIGH AMBIGUITY: Kalshi likely settles on USC Downtown Weather Station "
-            "(USW00093134, 34.0194°N 118.2878°W) rather than LAX airport.  "
-            "USC Downtown is an urban heat-island site that reads 5–8°F warmer "
-            "than LAX on hot days — large enough to explain systematic KXLOWTLAX "
-            "losses.  Audit 2026-07-30: Open-Meteo LAX-area low forecast was "
-            "66.2–66.9°F; Kalshi settled YES for 68–70°F buckets, consistent "
-            "with USC Downtown (~2-3°F warmer than LAX airport).  "
-            "TO VERIFY: download KXLOWTLAX contract PDF from kalshi.com/markets "
-            "and find the phrase 'NWS Daily Climate Report for <Station>, CA'."
+            "Confirmed LAX airport (this station), not USC Downtown. "
+            "Previous ambiguity about USC Downtown (USW00093134) is resolved — "
+            "Kalshi explicitly names 'Los Angeles Airport, CA'."
         ),
     ),
 
@@ -228,12 +245,13 @@ SETTLEMENT_STATIONS: dict[str, SettlementStation] = {
         lat=33.4373,
         lon=-112.0078,
         timezone="America/Phoenix",
-        verified=False,
-        source="Inferred from KPHX ICAO code",
-        notes=(
-            "UNVERIFIED.  Arizona does not observe DST; timezone is always MST (UTC-7). "
-            "Confirm via Kalshi PHXHIGH/PHXLOW contract PDF."
+        verified=True,
+        source=(
+            "Kalshi KXLOWTPHX rules_secondary: "
+            "'choosing the location \"Phoenix, AZ\" with Daily Climate Report' "
+            "(NWS CLIPHX, 2026-07-30 API query)"
         ),
+        notes="Arizona does not observe DST; timezone is always MST (UTC-7).",
     ),
 
     "Seattle": SettlementStation(
@@ -243,9 +261,12 @@ SETTLEMENT_STATIONS: dict[str, SettlementStation] = {
         lat=47.4480,
         lon=-122.3088,
         timezone="America/Los_Angeles",
-        verified=False,
-        source="Inferred from KSEA ICAO code",
-        notes="UNVERIFIED. Confirm via Kalshi SEAHIGH/SEALOW contract PDF.",
+        verified=True,
+        source=(
+            "Kalshi KXHIGHTSEA rules_secondary: "
+            "'choosing the location \"Seattle-Tacoma, WA\" with Daily Climate Report' "
+            "(NWS CLISEA, 2026-07-30 API query)"
+        ),
     ),
 
     "San Francisco": SettlementStation(
@@ -255,9 +276,12 @@ SETTLEMENT_STATIONS: dict[str, SettlementStation] = {
         lat=37.6190,
         lon=-122.3750,
         timezone="America/Los_Angeles",
-        verified=False,
-        source="Inferred from KSFO ICAO code",
-        notes="UNVERIFIED. Confirm via Kalshi SFOHIGH/SFOLOW contract PDF.",
+        verified=True,
+        source=(
+            "Kalshi KXLOWTSFO rules_secondary: "
+            "'choosing the location \"San Francisco Airport\" with Daily Climate Report' "
+            "(NWS CLISFO, 2026-07-30 API query)"
+        ),
     ),
 
     "Las Vegas": SettlementStation(
@@ -267,9 +291,12 @@ SETTLEMENT_STATIONS: dict[str, SettlementStation] = {
         lat=36.0840,
         lon=-115.1522,
         timezone="America/Los_Angeles",
-        verified=False,
-        source="Inferred from KLAS ICAO code",
-        notes="UNVERIFIED. Confirm via Kalshi LASHIGH/LASLOW contract PDF.",
+        verified=True,
+        source=(
+            "Kalshi KXLOWTLV rules_secondary: "
+            "'choosing the location \"Las Vegas, NV\" with Daily Climate Report' "
+            "(NWS CLILAS, 2026-07-30 API query)"
+        ),
     ),
 
     "Minneapolis": SettlementStation(
@@ -279,9 +306,12 @@ SETTLEMENT_STATIONS: dict[str, SettlementStation] = {
         lat=44.8848,
         lon=-93.2223,
         timezone="America/Chicago",
-        verified=False,
-        source="Inferred from KMSP ICAO code",
-        notes="UNVERIFIED. Confirm via Kalshi MSPHIGH/MSPLOW contract PDF.",
+        verified=True,
+        source=(
+            "Kalshi KXHIGHTMIN rules_secondary: "
+            "'choosing the location \"Minneapolis/St Paul, MN\" with Daily Climate Report' "
+            "(NWS CLIMSP, 2026-07-30 API query)"
+        ),
     ),
 
     "Philadelphia": SettlementStation(

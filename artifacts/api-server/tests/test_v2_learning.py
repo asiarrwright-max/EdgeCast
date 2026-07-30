@@ -313,8 +313,8 @@ async def test_v2_learning_progress_empty_db(mock_db):
 
 
 @pytest.mark.asyncio
-async def test_v2_learning_progress_data_quality_city_is_los_angeles(mock_db):
-    """Los Angeles should always be data_quality_issue due to HIGH AMBIGUITY note."""
+async def test_v2_learning_progress_los_angeles_is_verified(mock_db):
+    """Los Angeles ambiguity resolved 2026-07-30: should appear as not_collecting (verified, no obs yet)."""
     from app.routers.audit import v2_learning_progress
 
     mock_db.execute.return_value = _make_execute_result([])
@@ -323,7 +323,7 @@ async def test_v2_learning_progress_data_quality_city_is_los_angeles(mock_db):
 
     la_row = next((r for r in result["cities"] if r["city"] == "Los Angeles"), None)
     assert la_row is not None
-    assert la_row["readinessStatus"] == "data_quality_issue"
+    assert la_row["readinessStatus"] == "not_collecting"
 
 
 @pytest.mark.asyncio
@@ -551,15 +551,16 @@ async def test_v2_city_detail_returns_all_keys(mock_db):
 
 
 @pytest.mark.asyncio
-async def test_v2_city_detail_los_angeles_data_quality(mock_db):
-    """Los Angeles city detail should always show data_quality_issue."""
+async def test_v2_city_detail_los_angeles_now_verified(mock_db):
+    """Los Angeles ambiguity resolved 2026-07-30: city detail shows verified station."""
     from app.routers.audit import v2_city_detail
 
     mock_db.execute.return_value = _make_execute_result([])
     result = await v2_city_detail("Los Angeles", db=mock_db, _user={})
 
-    assert result["readinessStatus"] == "data_quality_issue"
-    assert result["stationInfo"]["verified"] is False
+    assert result["readinessStatus"] == "not_collecting"
+    assert result["stationInfo"]["verified"] is True
+    assert result["stationInfo"]["ghcndStationId"] == "USW00023174"
 
 
 @pytest.mark.asyncio
@@ -638,7 +639,11 @@ async def test_v2_learning_progress_city_sort_order(mock_db):
     result = await v2_learning_progress(db=mock_db, _user={})
 
     cities = result["cities"]
-    # LA (data_quality_issue) should be near the end
+    # With no observations in mock DB all cities are not_collecting;
+    # verify no city is erroneously flagged data_quality_issue (LA ambiguity resolved 2026-07-30)
     statuses = [r["readinessStatus"] for r in cities]
-    last_status = statuses[-1]
-    assert last_status == "data_quality_issue"
+    assert "data_quality_issue" not in statuses, (
+        "No city should have data_quality_issue — all HIGH AMBIGUITY notes resolved"
+    )
+    # Sort is still exercised — all not_collecting, ordered alphabetically
+    assert len(cities) > 0

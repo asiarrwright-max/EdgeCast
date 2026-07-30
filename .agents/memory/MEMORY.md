@@ -6,4 +6,5 @@
 - [sqlalchemy-python-defaults](sqlalchemy-python-defaults.md) — mapped_column(default=X) applies at INSERT time, not Python instantiation; tests must pass values explicitly.
 - [auth-ts-to-tsx](auth-ts-to-tsx.md) — Files containing JSX must use .tsx extension; Vite caches old resolution, requires workflow restart after rename.
 - [orval-zod-integer](orval-zod-integer.md) — Orval generates zod.int() for type:integer which doesn't exist in Zod v3; use type:number in OpenAPI spec instead.
-- [v21-pipeline-fixes](v21-pipeline-fixes.md) — Sigma floor 3.5°F, MIN_SAMPLE=30, station coords, 4h quote staleness, consensus guard; OKC verified, LAX still unverified.
+- [v21-pipeline-fixes](v21-pipeline-fixes.md) — Sigma floor 3.5°F, MIN_SAMPLE=30, station coords, 4h quote staleness, consensus guard; OKC verified, LAX now verified as LAX airport.
+- [kalshi-rules-api](kalshi-rules-api.md) — Kalshi market API rules_secondary field names the NWS station explicitly; no PDFs needed to verify settlement stations.

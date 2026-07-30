@@ -22,12 +22,16 @@ class TestSettlementStations:
         assert "Chicago" in vc
         assert "Denver" in vc
 
-    def test_verified_count_is_four(self):
-        """Exactly 4 verified cities as of current data (NYC, Chicago, Denver, Oklahoma City)."""
+    def test_verified_count_is_fourteen(self):
+        """Exactly 14 verified cities: NYC, Chicago, Denver, OKC + 10 confirmed via Kalshi API 2026-07-30."""
         from app.services.settlement_stations import verified_cities
         vc = verified_cities()
-        assert len(vc) == 4
+        assert len(vc) == 14
         assert "Oklahoma City" in vc
+        # Confirmed 2026-07-30 via Kalshi market rules_secondary API field:
+        for city in ("Dallas", "Boston", "Houston", "Miami", "Los Angeles",
+                     "Phoenix", "Seattle", "San Francisco", "Las Vegas", "Minneapolis"):
+            assert city in vc, f"{city} should now be verified"
 
     def test_all_cities_count_is_24(self):
         """All 24 Kalshi cities have entries."""
@@ -60,7 +64,7 @@ class TestSettlementStations:
 
     def test_unverified_city_returns_entry(self):
         from app.services.settlement_stations import get_station
-        s = get_station("Boston")
+        s = get_station("Atlanta")  # Atlanta has no live Kalshi markets yet, still unverified
         assert s is not None
         assert s.verified is False
 
@@ -68,14 +72,15 @@ class TestSettlementStations:
         from app.services.settlement_stations import get_station
         assert get_station("Atlantis") is None
 
-    def test_los_angeles_is_unverified_and_has_ambiguity_note(self):
-        """LA has documented station ambiguity — must stay unverified."""
+    def test_los_angeles_is_verified_as_lax(self):
+        """LA ambiguity resolved 2026-07-30: Kalshi rules_secondary confirms LAX airport."""
         from app.services.settlement_stations import get_station
         s = get_station("Los Angeles")
         assert s is not None
-        assert s.verified is False
+        assert s.verified is True
+        assert s.ghcnd_station_id == "USW00023174"
         assert s.notes is not None
-        assert "AMBIGUITY" in s.notes.upper() or "ambiguit" in s.notes.lower()
+        assert "LAX" in s.notes or "ambiguity" in s.notes.lower()
 
     def test_every_entry_has_required_fields(self):
         """Ensure no entry was added with a blank GHCND ID or timezone."""
@@ -302,15 +307,15 @@ class TestFetchObservationRouting:
 
         with patch("app.services.forecast_verifier.fetch_ghcnd_daily", return_value=good_ghcnd):
             temps, src, station_id = await _fetch_observation(
-                city="Boston",
-                lat=42.3601,
-                lon=-71.0589,
+                city="Atlanta",
+                lat=33.6407,
+                lon=-84.4277,
                 date_str="2024-07-01",
                 noaa_token="test-token",
             )
 
         assert src == SRC_GHCND_UNVERIFIED
-        assert station_id == "USW00014739"
+        assert station_id == "USW00013874"
 
     @pytest.mark.asyncio
     async def test_no_token_falls_back_to_era5(self):

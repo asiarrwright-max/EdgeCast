@@ -81,17 +81,16 @@ def test_okc_station_is_now_verified():
     )
 
 
-def test_lax_station_remains_unverified():
-    """LAX has high ambiguity (LAX airport vs USC Downtown); must stay unverified."""
+def test_lax_station_is_now_verified_as_lax_airport():
+    """LAX ambiguity resolved 2026-07-30 via Kalshi API rules_secondary; confirmed LAX airport."""
     station = get_station("Los Angeles")
     assert station is not None, "Los Angeles must be in station registry"
-    assert station.verified is False, (
-        "LAX should remain unverified — USC Downtown vs LAX airport ambiguity "
-        "documented in audit notes"
+    assert station.verified is True, (
+        "Los Angeles should be verified — Kalshi rules_secondary confirmed 'Los Angeles Airport, CA'"
     )
-    # Also confirm it does NOT appear in the verified cities list
-    assert "Los Angeles" not in verified_cities(), (
-        "'Los Angeles' must not appear in verified_cities() list"
+    assert station.ghcnd_station_id == "USW00023174", "Must be LAX airport station"
+    assert "Los Angeles" in verified_cities(), (
+        "'Los Angeles' must appear in verified_cities() after 2026-07-30 API confirmation"
     )
 
 
@@ -228,8 +227,8 @@ def test_min_sample_is_30():
 
 def test_unverified_city_blocked():
     """Cities with verified=False must not pass the station guard."""
-    ok, reason = _check_station_verified("Los Angeles")
-    assert ok is False, "Unverified city (LAX) must be blocked"
+    ok, reason = _check_station_verified("Atlanta")  # Atlanta has no live Kalshi markets, still unverified
+    assert ok is False, "Unverified city (Atlanta) must be blocked"
     assert reason is not None and "UNVERIFIED" in reason.upper()
 
 
