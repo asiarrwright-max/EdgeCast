@@ -10,3 +10,5 @@
 - [kalshi-rules-api](kalshi-rules-api.md) — Kalshi market API rules_secondary field names the NWS station explicitly; no PDFs needed to verify settlement stations.
 - [v3-lookahead-ordering](v3-lookahead-ordering.md) — LOOKAHEAD_VIOLATION fires before VALID_TIME_INCONSISTENCY; tests for valid_time < init_time must accept either reason.
 - [api-client-react-rebuild](api-client-react-rebuild.md) — After adding a new .ts file to lib/api-client-react/src/, run `pnpm tsc --build` in that package before the frontend will see the exports.
+- [ncei-access-api-units](ncei-access-api-units.md) — NCEI access API returns full degrees (not tenths); TMAX_SCALE_FACTOR must be 1.0, not 10.
+- [open-meteo-historical-forecast-api-constraint](open-meteo-historical-forecast-api-constraint.md) — forecast_days mutually exclusive with start_date/end_date; V3 gets one lead-time bucket only from this provider.

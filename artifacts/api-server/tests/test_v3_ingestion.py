@@ -63,17 +63,24 @@ class TestUnitConversion:
         assert celsius_to_fahrenheit(-40.0) == pytest.approx(-40.0)
         assert celsius_to_fahrenheit(37.0) == pytest.approx(98.6, rel=1e-3)
 
-    def test_conversion_from_raw_tmax_tenths(self):
-        """NOAA GHCND stores TMAX in tenths of degrees Celsius."""
-        from app.services.v3_providers.noaa_ghcnd_observations import celsius_to_fahrenheit, TMAX_SCALE_FACTOR
-        raw = 350  # = 35.0°C
-        celsius = raw / TMAX_SCALE_FACTOR
+    def test_conversion_from_raw_tmax_full_degrees(self):
+        """NCEI access API (v1) returns TMAX in full degrees Celsius (not tenths).
+        TMAX_SCALE_FACTOR must be 1.0 so we do not divide by 10."""
+        from app.services.v3_providers.noaa_ghcnd_observations import (
+            celsius_to_fahrenheit, TMAX_SCALE_FACTOR,
+        )
+        assert TMAX_SCALE_FACTOR == pytest.approx(1.0), (
+            "TMAX_SCALE_FACTOR must be 1.0 for the NCEI access API. "
+            "The old value of 10 was only correct for raw GHCND .dly files."
+        )
+        raw = 35.0  # full degrees Celsius, as returned by NCEI access API
+        celsius = raw / TMAX_SCALE_FACTOR  # 35.0 / 1.0 = 35.0°C
         fahrenheit = celsius_to_fahrenheit(celsius)
         assert fahrenheit == pytest.approx(95.0)
 
     def test_freezing_point_conversion(self):
         from app.services.v3_providers.noaa_ghcnd_observations import celsius_to_fahrenheit, TMAX_SCALE_FACTOR
-        raw = 0  # 0°C
+        raw = 0.0  # 0°C — NCEI returns full degrees, scale factor is 1.0
         fahrenheit = celsius_to_fahrenheit(raw / TMAX_SCALE_FACTOR)
         assert fahrenheit == pytest.approx(32.0)
 
@@ -141,9 +148,12 @@ class TestProviderInterface:
         assert OpenMeteoForecastHistoryProvider.MODEL == "GFS"
 
     def test_open_meteo_provider_has_fetch_history(self):
-        from app.services.v3_providers.open_meteo_forecast_history import OpenMeteoForecastHistoryProvider
+        from app.services.v3_providers.open_meteo_forecast_history import (
+            OpenMeteoForecastHistoryProvider, EFFECTIVE_LEAD_TIME_HOURS,
+        )
         provider = OpenMeteoForecastHistoryProvider()
         assert callable(provider.fetch_history)
+        assert EFFECTIVE_LEAD_TIME_HOURS == 24
 
     def test_mock_provider_satisfies_interface(self):
         """Any class implementing the interface should work as a drop-in."""
@@ -200,8 +210,8 @@ class TestOpenMeteoResponseParsing:
         assert records[0].model == "GFS"
         assert records[0].provider == "open-meteo-forecast-history"
 
-        # init_time should be 2 days before valid date
-        assert records[0].forecast_init_time.date().isoformat() == "2026-01-13"
+        # init_time is always 1 day before valid date (provider uses 1-day conservative offset)
+        assert records[0].forecast_init_time.date().isoformat() == "2026-01-14"
 
     def test_parse_response_with_none_tmax(self):
         """None values (station gap) should still produce records but with flag."""

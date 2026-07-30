@@ -32,10 +32,16 @@ logger = logging.getLogger(__name__)
 
 GHCND_API_URL = "https://www.ncei.noaa.gov/access/services/data/v1"
 
-# NOAA CDO uses TMAX in tenths of degrees Celsius.
-# Formula: tmax_celsius = tmax_raw / 10.0
-# Formula: tmax_fahrenheit = tmax_celsius * 9/5 + 32
-TMAX_SCALE_FACTOR = 10.0
+# The NCEI access services API (v1) returns TMAX in full degrees — NOT tenths.
+# units=metric  → full degrees Celsius (e.g. 31.7°C)
+# units=standard → full degrees Fahrenheit (e.g. 89.0°F)
+#
+# IMPORTANT: This is different from the older CDO v1 API (ncdc.noaa.gov) and the
+# raw GHCND .dly file format, which store values in tenths of degrees Celsius.
+# Do NOT apply a divide-by-10 scale factor to NCEI access API responses.
+#
+# We request units=metric and convert C→F ourselves for full auditability.
+TMAX_SCALE_FACTOR = 1.0  # kept for test compatibility; MUST be 1.0 for NCEI access API
 
 
 class NoaaGhcndObservationError(Exception):
@@ -86,7 +92,7 @@ async def fetch_tmax_observations(
                 "startDate": chunk_start,
                 "endDate": chunk_end,
                 "format": "json",
-                "units": "standard",   # returns metric units; we convert ourselves
+                "units": "metric",  # returns full degrees Celsius; we convert C→F ourselves
                 "includeAttributes": "false",
             }
             headers = {"token": token}
@@ -121,6 +127,8 @@ async def fetch_tmax_observations(
                 raw_tmax = row.get("TMAX")
                 if obs_date and raw_tmax is not None:
                     try:
+                        # NCEI access API returns full degrees Celsius (units=metric)
+                        # TMAX_SCALE_FACTOR is 1.0 — no division needed.
                         tmax_celsius = float(raw_tmax) / TMAX_SCALE_FACTOR
                         tmax_fahrenheit = celsius_to_fahrenheit(tmax_celsius)
                         all_observations[obs_date] = tmax_fahrenheit
