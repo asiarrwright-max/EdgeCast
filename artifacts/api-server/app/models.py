@@ -323,6 +323,11 @@ class PredictionSnapshot(Base):
     )
     analysis_reason: Mapped[str | None] = mapped_column(Text)
 
+    # V3 comparison linkage (added via migration; nullable on all pre-V3 rows)
+    # Set by v3_predictor.run_v3_predictions() to the UUID shared with the
+    # paired V3PredictionSnapshot row, enabling A/B JOIN queries.
+    comparison_group_id: Mapped[str | None] = mapped_column(String(36), index=True)
+
 
 class PaperTrade(Base):
     """
