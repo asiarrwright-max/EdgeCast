@@ -176,8 +176,11 @@ async def init_db() -> None:
     await repair_stale_parse_failures()
     # V3: seed feature flags (idempotent — only inserts if missing)
     from app.services.v3_flags import ensure_v3_feature_flags
+    # V2.2: seed feature flags (idempotent — only inserts if missing)
+    from app.services.paper_trading_v22 import ensure_v22_feature_flags
     async with AsyncSessionLocal() as session:
         await ensure_v3_feature_flags(session)
+        await ensure_v22_feature_flags(session)
         await session.commit()
     logger.info("Database ready.")
 

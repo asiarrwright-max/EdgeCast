@@ -46,6 +46,129 @@ router = APIRouter(tags=["V3 Analytics"])
 
 
 # ---------------------------------------------------------------------------
+# Shared helpers — exported so tests can import and call them directly
+# ---------------------------------------------------------------------------
+
+def _fee_estimate(side_price: float | None, quantity: float | None) -> float | None:
+    """
+    Estimate Kalshi entry fee per trade:
+        fee = max($0.01, 3.5¢ × min(price, 1−price) × contracts)
+
+    The 3.5% rate applies to the cheaper side.  Returns None when inputs are
+    missing or quantity ≤ 0 (non-executable trades have quantity=0).
+    """
+    if side_price is None or quantity is None or quantity <= 0:
+        return None
+    return round(max(0.01, 0.035 * min(side_price, 1.0 - side_price) * quantity), 4)
+
+
+def _v3_brier_score(trades: list) -> float | None:
+    """
+    Brier score on a collection of settled V3PaperTrade objects.
+
+    Uses ec_yes_probability as the predicted P(YES resolves).
+    Outcome encoding:
+        YES-WIN  → actual_yes = 1   YES-LOSS → actual_yes = 0
+        NO-WIN   → actual_yes = 0   NO-LOSS  → actual_yes = 1
+    Returns None when no settled trades exist.
+    """
+    settled = [
+        t for t in trades
+        if t.status == "SETTLED" and t.outcome in ("WIN", "LOSS")
+    ]
+    if not settled:
+        return None
+    scores = []
+    for t in settled:
+        p_yes = t.ec_yes_probability if t.ec_yes_probability is not None else 0.5
+        if t.direction == "YES":
+            actual_yes = 1.0 if t.outcome == "WIN" else 0.0
+        else:  # NO trade: win means NO resolved → YES did NOT
+            actual_yes = 0.0 if t.outcome == "WIN" else 1.0
+        scores.append((p_yes - actual_yes) ** 2)
+    return round(sum(scores) / len(scores), 4)
+
+
+def _compute_v3_trade_sections(trades: list, observation_only_count: int) -> dict:
+    """
+    Split V3PaperTrade objects into three sections and compute metrics.
+
+    Parameters
+    ----------
+    trades : list of V3PaperTrade (or duck-typed objects with the same attributes)
+    observation_only_count : int
+        Count of PENDING prediction snapshots with no linked V3PaperTrade row.
+
+    Returns
+    -------
+    dict with keys: executable, non_executable, observation_only
+    """
+    executable     = [t for t in trades if t.is_executable is True]
+    non_executable = [t for t in trades if t.is_executable is not True]
+
+    def _build(subset: list, include_roi: bool) -> dict:
+        settled  = [t for t in subset if t.status == "SETTLED"]
+        open_    = [t for t in subset if t.status == "OPEN"]
+        pending  = [t for t in subset if t.status == "PENDING_SETTLEMENT"]
+        wins     = sum(1 for t in settled if t.outcome == "WIN")
+        losses   = sum(1 for t in settled if t.outcome == "LOSS")
+        stake    = sum(t.stake or 0 for t in subset)
+        gross_pl = sum(t.profit_loss or 0 for t in settled)
+
+        fees_list = [
+            _fee_estimate(getattr(t, "side_market_price", None),
+                          getattr(t, "quantity", None))
+            for t in subset
+        ]
+        fees_total = round(sum(f for f in fees_list if f is not None), 4)
+        net_pl = round(gross_pl - fees_total, 4)
+
+        result: dict = {
+            "count":         len(subset),
+            "open":          len(open_),
+            "pending_settlement": len(pending),
+            "settled":       len(settled),
+            "wins":          wins,
+            "losses":        losses,
+            "win_rate_pct":  round(100 * wins / len(settled), 1) if settled else None,
+            "total_stake":   round(stake, 2),
+            "gross_pl":      round(gross_pl, 2),
+            "estimated_fees": fees_total,
+            "net_pl":        net_pl,
+        }
+        if include_roi:
+            result["roi_pct"]     = round(100 * gross_pl / stake, 1) if stake and settled else None
+            result["brier_score"] = _v3_brier_score(subset)
+        else:
+            result["note"] = (
+                "Excluded from official win rate, P/L, and ROI. "
+                "Signal accuracy is tracked here for research only."
+            )
+        return result
+
+    exec_section = _build(executable, include_roi=True)
+    exec_section["label"] = "Executable paper trades (is_executable=True)"
+
+    nonexec_section = _build(non_executable, include_roi=False)
+    nonexec_section["label"] = (
+        "Non-executable signals (is_executable=False) — excluded from official ROI"
+    )
+
+    return {
+        "executable": exec_section,
+        "non_executable": nonexec_section,
+        "observation_only": {
+            "label": "Observation-only predictions (PENDING snap, no linked trade)",
+            "count": observation_only_count,
+            "note": (
+                "PENDING V3PredictionSnapshot rows with no V3PaperTrade row. "
+                "Excluded from all trade performance metrics."
+            ),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # GET /analytics/v3/flags — feature flag status
 # ---------------------------------------------------------------------------
 
@@ -643,28 +766,31 @@ async def get_live_paper_trades(
     result = await session.execute(q)
     trades = result.scalars().all()
 
-    # Summary P/L
-    total_stake   = sum(t.stake for t in trades if t.stake)
-    total_pl      = sum(t.profit_loss for t in trades if t.profit_loss is not None)
-    settled       = [t for t in trades if t.status == "SETTLED"]
-    wins          = sum(1 for t in settled if t.outcome == "WIN")
-    losses        = sum(1 for t in settled if t.outcome == "LOSS")
-    open_count    = sum(1 for t in trades if t.status == "OPEN")
-    pending_count = sum(1 for t in trades if t.status == "PENDING_SETTLEMENT")
+    # Count observation-only predictions: PENDING snaps with no linked V3PaperTrade
+    from app.models_v3 import V3PredictionSnapshot
+    obs_q = await session.execute(
+        select(func.count()).select_from(V3PredictionSnapshot).where(
+            V3PredictionSnapshot.trade_decision == "PENDING",
+            ~select(V3PaperTrade.id).where(
+                V3PaperTrade.v3_snapshot_id == V3PredictionSnapshot.id
+            ).exists(),
+        )
+    )
+    observation_only_count = obs_q.scalar_one() or 0
+
+    # Three-section performance summary
+    sections = _compute_v3_trade_sections(list(trades), observation_only_count)
 
     return {
         "count": len(trades),
-        "summary": {
-            "open":               open_count,
-            "pending_settlement": pending_count,
-            "settled":            len(settled),
-            "wins":               wins,
-            "losses":             losses,
-            "win_rate_pct":       round(100 * wins / len(settled), 1) if settled else None,
-            "total_stake":        round(total_stake, 2),
-            "total_pl":           round(total_pl, 2),
-            "roi_pct":            round(100 * total_pl / total_stake, 1) if total_stake else None,
-        },
+        "official_performance_note": (
+            "Official ROI, win rate, and Brier score use EXECUTABLE trades only "
+            "(is_executable=True). Non-executable signals are recorded for research "
+            "but never contribute to headline metrics."
+        ),
+        "executable":       sections["executable"],
+        "non_executable":   sections["non_executable"],
+        "observation_only": sections["observation_only"],
         "trades": [
             {
                 "id":                   t.id,

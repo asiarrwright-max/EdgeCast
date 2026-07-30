@@ -1,0 +1,115 @@
+The read-only audit confirms that V2.1’s bias formula is inverted, but also confirms that the formula has never fired because no ForecastErrorStats bucket has reached the minimum sample size of 30.
+
+Proceed with two separate tasks.
+
+TASK 1 — Correct V3 official analytics
+
+Update V3 analytics so official performance metrics include only executable paper trades.
+
+The summary must clearly separate:
+
+1. Executable paper trades
+- is_executable = true
+- count
+- settled count
+- wins
+- losses
+- win rate
+- stake
+- gross P/L
+- fees
+- net P/L
+- ROI
+- Brier score where applicable
+
+2. Non-executable signals
+- is_executable = false
+- count
+- settled outcomes
+- signal accuracy or calibration if useful
+- explicitly excluded from official win rate, P/L, and ROI
+
+3. Observation-only predictions
+- prediction snapshots with no linked V3PaperTrade
+- count
+- explicitly excluded from trade performance
+
+Requirements:
+- Official headline ROI and win rate must use executable trades only.
+- Never combine executable and non-executable trades in the headline metrics.
+- Preserve historical rows.
+- Add tests proving non-executable trades cannot affect official ROI or win rate.
+- Clearly label the three categories in the UI and API.
+- Confirm the current 10 executable and 17 non-executable open V3 trades are classified correctly.
+
+TASK 2 — Build V2.2 as an isolated parallel challenger
+
+Do not modify, overwrite, backfill, relabel, or recalculate V2.1.
+
+Create a separate strategy version named V2.2.
+
+V2.2 should be identical to V2.1 except for the corrected bias direction:
+
+Current V2.1:
+signed_error = actual - forecast
+mean_error = mean(signed_error)
+mu = forecast - mean_error
+
+Correct V2.2:
+signed_error = actual - forecast
+mean_error = mean(signed_error)
+mu = forecast + mean_error
+
+Preserve all other V2.1 behavior:
+- MIN_SAMPLE = 30
+- same sigma rules
+- same fallback table
+- same station eligibility
+- same quote freshness and executability rules
+- same market interpretation
+- same paper-trade threshold
+- same settlement and fee logic
+- same paper-trade sizing
+
+Isolation requirements:
+- strategy_version = "v2.2"
+- separate predictions
+- separate paper trades
+- separate analytics
+- no V2.1 state mutation
+- no V2.1 trade or prediction recalculation
+- no historical backfill presented as forward performance
+
+Run V2.2 on the same future eligible markets as V2.1 and V3 whenever possible.
+
+Add shared comparison identifiers so future markets can be compared across:
+- V2.1
+- V2.2
+- V3
+
+Add tests proving:
+- positive mean_error raises V2.2 mu
+- negative mean_error lowers V2.2 mu
+- V2.1 outputs remain unchanged
+- V2.2 bias remains zero below MIN_SAMPLE
+- V2.2 applies the corrected bias only after MIN_SAMPLE is met
+- strategy state and trades are isolated
+- no real Kalshi orders can be placed
+
+Feature flags:
+- v2.2.predictions_enabled = false by default
+- v2.2.paper_trading_enabled = false by default
+
+Do not enable V2.2 automatically.
+
+At completion, provide:
+- exact files changed
+- tests and results
+- proof V2.1 was unchanged
+- example calculations for positive and negative mean_error
+- comparison of V2.1 and V2.2 on synthetic threshold-crossing cases
+- rollout plan for prediction-only smoke testing before paper trading
+
+Keep V3 running in paper mode during this work, but do not make further V3 model or threshold changes.
+
+Stop for review before enabling V2.2.

@@ -353,6 +353,20 @@ async def run_collection_job(job_id: int | None = None) -> None:
                 except Exception as exc:
                     logger.warning("Paper trading v2.1 step failed (non-fatal): %s", exc)
 
+                # ---- Step 5e_b: V2.2 paper trading (parallel challenger) ----
+                pt_v22_stats: dict = {"candidates": 0, "created": 0, "excluded": 0, "skipped": 0, "errors": 0}
+                try:
+                    from app.services.paper_trading_v22 import run_paper_trading_v22
+                    pt_v22_stats = await run_paper_trading_v22(session)
+                    logger.info(
+                        "Paper trading v2.2: %d candidates, %d created, "
+                        "%d excluded, %d skipped, %d errors",
+                        pt_v22_stats["candidates"], pt_v22_stats["created"],
+                        pt_v22_stats["excluded"], pt_v22_stats["skipped"], pt_v22_stats["errors"],
+                    )
+                except Exception as exc:
+                    logger.warning("Paper trading v2.2 step failed (non-fatal): %s", exc)
+
                 # ---- Step 5f: V3 predictions (parallel paper trading) -------
                 pt_v3_stats: dict = {
                     "status": "disabled", "created": 0, "errors": 0,
