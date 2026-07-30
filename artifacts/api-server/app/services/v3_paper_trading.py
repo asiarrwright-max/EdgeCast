@@ -25,8 +25,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import AsyncSessionLocal
 from app.models import AppSetting, KalshiMarket
 from app.models_v3 import V3PaperTrade, V3PredictionSnapshot
 from app.services.paper_trading import (
@@ -237,15 +237,26 @@ def _decide_v3(
 # Batch runner
 # ---------------------------------------------------------------------------
 
-async def run_paper_trading_v3(session: AsyncSession) -> dict[str, int]:
+async def run_paper_trading_v3() -> dict[str, int]:
     """
     Review all recent V3PredictionSnapshot rows and create V3PaperTrade rows.
     Called after run_v3_predictions() in the collection job.
+
+    Opens its own isolated AsyncSession so the entire batch is committed
+    atomically.  If an exception escapes before the final commit the session
+    is closed without committing, leaving zero partial trade rows written.
+    Because run_v3_predictions() commits first (its own isolated session),
+    this session sees all V3 snapshot data via READ COMMITTED.
 
     Returns: {"status", "candidates", "created", "skipped", "errors"}
     """
     stats: dict = {"candidates": 0, "created": 0, "skipped": 0, "errors": 0}
 
+    async with AsyncSessionLocal() as session:
+        return await _run_paper_trading_v3_inner(session, stats)
+
+
+async def _run_paper_trading_v3_inner(session, stats: dict) -> dict[str, int]:
     if not await get_v3_flag(session, "v3.paper_trading_enabled"):
         logger.info("V3 paper trading disabled — skipping.")
         return {"status": "disabled", **stats}

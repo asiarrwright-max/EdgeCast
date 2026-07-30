@@ -785,11 +785,10 @@ async def get_live_comparison(
 @router.post("/analytics/v3/run-v3-predictions")
 async def trigger_v3_predictions(
     _user: dict = Depends(get_current_user),
-    session: AsyncSession = Depends(get_db),
 ) -> dict:
     """Manually trigger V3 predictions for all active markets."""
     from app.services.v3_predictor import run_v3_predictions
-    stats = await run_v3_predictions(session)
+    stats = await run_v3_predictions()
     return {"triggered": True, "stats": stats}
 
 
@@ -800,11 +799,10 @@ async def trigger_v3_predictions(
 @router.post("/analytics/v3/run-v3-paper-trading")
 async def trigger_v3_paper_trading(
     _user: dict = Depends(get_current_user),
-    session: AsyncSession = Depends(get_db),
 ) -> dict:
     """Manually trigger V3 paper-trading evaluation."""
     from app.services.v3_paper_trading import run_paper_trading_v3
-    stats = await run_paper_trading_v3(session)
+    stats = await run_paper_trading_v3()
     return {"triggered": True, "stats": stats}
 
 

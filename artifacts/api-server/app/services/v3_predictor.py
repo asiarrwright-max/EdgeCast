@@ -33,8 +33,8 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import AsyncSessionLocal
 from app.models import KalshiMarket, PredictionSnapshot
 from app.models_v3 import CURRENT_PRELOAD_VERSION, V3PredictionSnapshot
 from app.services.settlement_stations import get_station
@@ -117,9 +117,14 @@ def _is_city_ok(city: str | None) -> bool:
 # Main runner
 # ---------------------------------------------------------------------------
 
-async def run_v3_predictions(session: AsyncSession) -> dict:
+async def run_v3_predictions() -> dict:
     """
     Create V3PredictionSnapshot rows for all active markets.
+
+    Opens its own isolated AsyncSession so that the entire batch is
+    committed atomically at the end.  If any exception escapes before
+    the final commit the session is closed without committing, leaving
+    zero partial rows in the database.
 
     Returns:
         {
@@ -129,7 +134,7 @@ async def run_v3_predictions(session: AsyncSession) -> dict:
           "skipped_no_market":    int,   # no active KalshiMarket found
           "skipped_unverified":   int,   # city/station not verified
           "skipped_unsupported":  int,   # analysis_status != "supported" or hourly
-          "errors":               int,   # exceptions caught
+          "errors":               int,   # exceptions caught per-market
         }
     """
     stats: dict = {
@@ -138,6 +143,11 @@ async def run_v3_predictions(session: AsyncSession) -> dict:
         "skipped_unsupported": 0, "errors": 0,
     }
 
+    async with AsyncSessionLocal() as session:
+        return await _run_v3_predictions_inner(session, stats)
+
+
+async def _run_v3_predictions_inner(session, stats: dict) -> dict:
     if not await get_v3_flag(session, "v3.predictions_enabled"):
         logger.info("V3 predictions disabled (flag v3.predictions_enabled=false) — skipping.")
         return {"status": "disabled", **stats}
@@ -254,12 +264,14 @@ async def run_v3_predictions(session: AsyncSession) -> dict:
                 bias_applied=output.bias_applied,
                 bias_suppressed_reason=output.bias_suppressed_reason or None,
             )
-            session.add(v3_snap)
 
-            # Write comparison_group_id to the V2.1 snapshot if still unset
+            # Write comparison_group_id to the V2.1 snapshot BEFORE session.add
+            # so that both mutations are either both in the session or neither is.
+            # (Fixes Mode B: add-before-link ordering bug.)
             if snap.comparison_group_id is None:
                 snap.comparison_group_id = comp_id
 
+            session.add(v3_snap)
             stats["created"] += 1
 
         except Exception as exc:

@@ -359,7 +359,7 @@ async def run_collection_job(job_id: int | None = None) -> None:
                 }
                 try:
                     from app.services.v3_predictor import run_v3_predictions
-                    pt_v3_stats = await run_v3_predictions(session)
+                    pt_v3_stats = await run_v3_predictions()
                     logger.info(
                         "V3 predictions: %d created, %d unverified, %d unsupported, %d errors",
                         pt_v3_stats.get("created", 0),
@@ -376,7 +376,7 @@ async def run_collection_job(job_id: int | None = None) -> None:
                 }
                 try:
                     from app.services.v3_paper_trading import run_paper_trading_v3
-                    pt_v3_pt_stats = await run_paper_trading_v3(session)
+                    pt_v3_pt_stats = await run_paper_trading_v3()
                     logger.info(
                         "V3 paper trading: %d created, %d skipped, %d errors",
                         pt_v3_pt_stats.get("created", 0),

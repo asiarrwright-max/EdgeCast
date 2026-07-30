@@ -222,18 +222,32 @@ class TestDecideV3:
 # run_paper_trading_v3 smoke tests
 # ---------------------------------------------------------------------------
 
+def _make_session_cm(mock_session):
+    """Return an async context manager that yields mock_session."""
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=mock_session)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    return cm
+
+
 class TestRunPaperTradingV3:
     @pytest.mark.asyncio
     async def test_disabled_flag_returns_early(self):
         from app.services.v3_paper_trading import run_paper_trading_v3
 
         mock_session = AsyncMock()
-        with patch(
-            "app.services.v3_paper_trading.get_v3_flag",
-            new_callable=AsyncMock,
-            return_value=False,
+        with (
+            patch(
+                "app.services.v3_paper_trading.AsyncSessionLocal",
+                return_value=_make_session_cm(mock_session),
+            ),
+            patch(
+                "app.services.v3_paper_trading.get_v3_flag",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
         ):
-            result = await run_paper_trading_v3(mock_session)
+            result = await run_paper_trading_v3()
 
         assert result["status"] == "disabled"
         assert result["created"] == 0
@@ -247,6 +261,10 @@ class TestRunPaperTradingV3:
 
         with (
             patch(
+                "app.services.v3_paper_trading.AsyncSessionLocal",
+                return_value=_make_session_cm(mock_session),
+            ),
+            patch(
                 "app.services.v3_paper_trading.get_v3_flag",
                 new_callable=AsyncMock,
                 return_value=True,
@@ -257,7 +275,7 @@ class TestRunPaperTradingV3:
                 return_value=_DEFAULT_SETTINGS,
             ),
         ):
-            result = await run_paper_trading_v3(mock_session)
+            result = await run_paper_trading_v3()
 
         assert result["status"] == "ok"
         assert result["created"] == 0

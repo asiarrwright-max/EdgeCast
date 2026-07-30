@@ -157,6 +157,14 @@ class TestIsCityOk:
 # run_v3_predictions integration
 # ---------------------------------------------------------------------------
 
+def _make_session_cm(mock_session):
+    """Return an async context manager that yields mock_session."""
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=mock_session)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    return cm
+
+
 class TestRunV3Predictions:
     """Smoke tests for the batch runner with a mocked DB session."""
 
@@ -165,12 +173,18 @@ class TestRunV3Predictions:
         from app.services.v3_predictor import run_v3_predictions
 
         mock_session = AsyncMock()
-        with patch(
-            "app.services.v3_predictor.get_v3_flag",
-            new_callable=AsyncMock,
-            return_value=False,
+        with (
+            patch(
+                "app.services.v3_predictor.AsyncSessionLocal",
+                return_value=_make_session_cm(mock_session),
+            ),
+            patch(
+                "app.services.v3_predictor.get_v3_flag",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
         ):
-            result = await run_v3_predictions(mock_session)
+            result = await run_v3_predictions()
 
         assert result["status"] == "disabled"
         assert result["created"] == 0
@@ -182,12 +196,18 @@ class TestRunV3Predictions:
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(side_effect=_empty_execute)
 
-        with patch(
-            "app.services.v3_predictor.get_v3_flag",
-            new_callable=AsyncMock,
-            return_value=True,
+        with (
+            patch(
+                "app.services.v3_predictor.AsyncSessionLocal",
+                return_value=_make_session_cm(mock_session),
+            ),
+            patch(
+                "app.services.v3_predictor.get_v3_flag",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
         ):
-            result = await run_v3_predictions(mock_session)
+            result = await run_v3_predictions()
 
         assert result["status"] == "ok"
         assert result["created"] == 0
