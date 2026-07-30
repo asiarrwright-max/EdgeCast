@@ -392,6 +392,8 @@ async def maybe_create_paper_trade_v22(
     snap: PredictionSnapshot,
     settings: dict[str, Any],
     now: datetime | None = None,
+    comparison_snapshot_id: str | None = None,
+    batch_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Create a V2.2 PaperTrade (or V2_EXCLUDED log entry) for the market/snapshot.
@@ -461,6 +463,8 @@ async def maybe_create_paper_trade_v22(
             quote_timestamp=decision["quote_timestamp"],
             est_available_qty=decision["est_available_qty"],
             is_executable=decision["is_executable"],
+            comparison_snapshot_id=comparison_snapshot_id,
+            collection_batch_id=batch_id,
         )
         session.add(trade)
         await session.flush()
@@ -513,6 +517,8 @@ async def maybe_create_paper_trade_v22(
         quote_timestamp=decision["quote_timestamp"],
         est_available_qty=decision["est_available_qty"],
         is_executable=decision["is_executable"],
+        comparison_snapshot_id=comparison_snapshot_id,
+        collection_batch_id=batch_id,
     )
     session.add(trade)
     await session.flush()
@@ -531,10 +537,18 @@ async def maybe_create_paper_trade_v22(
 
 # ── Batch runner ──────────────────────────────────────────────────────────────
 
-async def run_paper_trading_v22(session: AsyncSession) -> dict[str, int]:
+async def run_paper_trading_v22(
+    session: AsyncSession,
+    batch_id: str | None = None,
+    comparison_snapshot_ids: dict[str, str] | None = None,
+) -> dict[str, int]:
     """
     Review all recently-analyzed markets and create V2.2 paper trades.
     Called after V2.1 paper trading in each collection run.
+
+    ``batch_id`` and ``comparison_snapshot_ids`` are supplied by the collector
+    after creating ComparisonSnapshot rows.  When provided, every new trade
+    stores its comparison_snapshot_id + collection_batch_id for pairing.
 
     Gated by ``v2.2.paper_trading_enabled`` flag — no-ops if false.
 
@@ -556,6 +570,7 @@ async def run_paper_trading_v22(session: AsyncSession) -> dict[str, int]:
         return stats
 
     now = datetime.now(timezone.utc)
+    comp_ids: dict[str, str] = comparison_snapshot_ids or {}
 
     # Latest snapshot per ticker (same pool as V2.1)
     snaps_q = await session.execute(
@@ -585,7 +600,11 @@ async def run_paper_trading_v22(session: AsyncSession) -> dict[str, int]:
 
         stats["candidates"] += 1
         try:
-            result = await maybe_create_paper_trade_v22(session, market, snap, settings, now=now)
+            result = await maybe_create_paper_trade_v22(
+                session, market, snap, settings, now=now,
+                comparison_snapshot_id=comp_ids.get(snap.market_ticker),
+                batch_id=batch_id,
+            )
             if result["created"]:
                 stats["created"] += 1
             elif result.get("excluded"):

@@ -496,6 +496,8 @@ async def maybe_create_paper_trade_v21(
     snap: PredictionSnapshot,
     settings: dict[str, Any],
     now: datetime | None = None,
+    comparison_snapshot_id: str | None = None,
+    batch_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Create a v2.1 PaperTrade (or V2_EXCLUDED log entry) for the market/snapshot.
@@ -565,6 +567,8 @@ async def maybe_create_paper_trade_v21(
             quote_timestamp=decision["quote_timestamp"],
             est_available_qty=decision["est_available_qty"],
             is_executable=decision["is_executable"],
+            comparison_snapshot_id=comparison_snapshot_id,
+            collection_batch_id=batch_id,
         )
         session.add(trade)
         await session.flush()
@@ -618,6 +622,8 @@ async def maybe_create_paper_trade_v21(
         quote_timestamp=decision["quote_timestamp"],
         est_available_qty=decision["est_available_qty"],
         is_executable=decision["is_executable"],
+        comparison_snapshot_id=comparison_snapshot_id,
+        collection_batch_id=batch_id,
     )
     session.add(trade)
     await session.flush()

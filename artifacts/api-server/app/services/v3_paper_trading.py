@@ -237,10 +237,17 @@ def _decide_v3(
 # Batch runner
 # ---------------------------------------------------------------------------
 
-async def run_paper_trading_v3() -> dict[str, int]:
+async def run_paper_trading_v3(
+    batch_id: str | None = None,
+    comparison_snapshot_ids: dict[str, str] | None = None,
+) -> dict[str, int]:
     """
     Review all recent V3PredictionSnapshot rows and create V3PaperTrade rows.
     Called after run_v3_predictions() in the collection job.
+
+    ``batch_id`` and ``comparison_snapshot_ids`` are supplied by the collector
+    to link each new V3PaperTrade to the same ComparisonSnapshot shared with
+    V2.1/V2.2, enabling strictly-paired cross-strategy analysis.
 
     Opens its own isolated AsyncSession so the entire batch is committed
     atomically.  If an exception escapes before the final commit the session
@@ -253,10 +260,20 @@ async def run_paper_trading_v3() -> dict[str, int]:
     stats: dict = {"candidates": 0, "created": 0, "skipped": 0, "errors": 0}
 
     async with AsyncSessionLocal() as session:
-        return await _run_paper_trading_v3_inner(session, stats)
+        return await _run_paper_trading_v3_inner(
+            session, stats,
+            batch_id=batch_id,
+            comparison_snapshot_ids=comparison_snapshot_ids,
+        )
 
 
-async def _run_paper_trading_v3_inner(session, stats: dict) -> dict[str, int]:
+async def _run_paper_trading_v3_inner(
+    session,
+    stats: dict,
+    batch_id: str | None = None,
+    comparison_snapshot_ids: dict[str, str] | None = None,
+) -> dict[str, int]:
+    comp_ids: dict[str, str] = comparison_snapshot_ids or {}
     if not await get_v3_flag(session, "v3.paper_trading_enabled"):
         logger.info("V3 paper trading disabled — skipping.")
         return {"status": "disabled", **stats}
@@ -345,6 +362,8 @@ async def _run_paper_trading_v3_inner(session, stats: dict) -> dict[str, int]:
                 strategy_version=STRATEGY_VERSION,
                 v3_snapshot_id=v3_snap.id,
                 comparison_group_id=v3_snap.comparison_group_id,
+                comparison_snapshot_id=comp_ids.get(v3_snap.market_ticker),
+                collection_batch_id=batch_id,
                 direction=decision["direction"],
                 ec_yes_probability=decision["ec_yes_probability"],
                 ec_side_probability=decision["ec_side_probability"],

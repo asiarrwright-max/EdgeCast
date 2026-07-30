@@ -339,11 +339,41 @@ async def run_collection_job(job_id: int | None = None) -> None:
                 except Exception as exc:
                     logger.warning("Paper trading v2 step failed (non-fatal): %s", exc)
 
+                # ---- Step 5e-pre: Build shared ComparisonSnapshot rows ------
+                # One frozen (quote + forecast) record per ticker, created
+                # before ANY paper trading runs so all three strategies can
+                # reference the same snapshot and be "strictly paired".
+                import uuid as _uuid
+                _batch_id: str | None = None
+                _comp_snap_ids: dict[str, str] = {}
+                try:
+                    from app.services.comparison_snapshot_service import (
+                        create_comparison_snapshots_for_batch,
+                    )
+                    _batch_id = str(_uuid.uuid4())
+                    _comp_snap_ids = await create_comparison_snapshots_for_batch(
+                        session, _batch_id
+                    )
+                    logger.info(
+                        "Comparison snapshots: %d created for batch %s",
+                        len(_comp_snap_ids), _batch_id[:8],
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Comparison snapshot step failed (non-fatal): %s", exc
+                    )
+                    _batch_id = None
+                    _comp_snap_ids = {}
+
                 # ---- Step 5e: Paper trading (v2.1 hardened) -----------------
                 pt_v21_stats: dict = {"candidates": 0, "created": 0, "excluded": 0, "skipped": 0, "errors": 0}
                 try:
                     from app.services.paper_trading_v21 import run_paper_trading_v21
-                    pt_v21_stats = await run_paper_trading_v21(session)
+                    pt_v21_stats = await run_paper_trading_v21(
+                        session,
+                        batch_id=_batch_id,
+                        comparison_snapshot_ids=_comp_snap_ids,
+                    )
                     logger.info(
                         "Paper trading v2.1: %d candidates, %d created, "
                         "%d excluded, %d skipped, %d errors",
@@ -357,7 +387,11 @@ async def run_collection_job(job_id: int | None = None) -> None:
                 pt_v22_stats: dict = {"candidates": 0, "created": 0, "excluded": 0, "skipped": 0, "errors": 0}
                 try:
                     from app.services.paper_trading_v22 import run_paper_trading_v22
-                    pt_v22_stats = await run_paper_trading_v22(session)
+                    pt_v22_stats = await run_paper_trading_v22(
+                        session,
+                        batch_id=_batch_id,
+                        comparison_snapshot_ids=_comp_snap_ids,
+                    )
                     logger.info(
                         "Paper trading v2.2: %d candidates, %d created, "
                         "%d excluded, %d skipped, %d errors",
@@ -390,7 +424,10 @@ async def run_collection_job(job_id: int | None = None) -> None:
                 }
                 try:
                     from app.services.v3_paper_trading import run_paper_trading_v3
-                    pt_v3_pt_stats = await run_paper_trading_v3()
+                    pt_v3_pt_stats = await run_paper_trading_v3(
+                        batch_id=_batch_id,
+                        comparison_snapshot_ids=_comp_snap_ids,
+                    )
                     logger.info(
                         "V3 paper trading: %d created, %d skipped, %d errors",
                         pt_v3_pt_stats.get("created", 0),

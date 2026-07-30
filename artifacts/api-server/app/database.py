@@ -108,6 +108,12 @@ async def _apply_migrations(conn) -> None:
         # bias_suppressed_reason explains why bias was NOT applied (gate failed).
         "ALTER TABLE v3_prediction_snapshots ADD COLUMN IF NOT EXISTS bias_applied BOOLEAN",
         "ALTER TABLE v3_prediction_snapshots ADD COLUMN IF NOT EXISTS bias_suppressed_reason VARCHAR(200)",
+        # Prospective comparison linkage — added to both paper trade tables so
+        # all three strategies can reference the same ComparisonSnapshot row.
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS comparison_snapshot_id VARCHAR(36)",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS collection_batch_id VARCHAR(36)",
+        "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS comparison_snapshot_id VARCHAR(36)",
+        "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS collection_batch_id VARCHAR(36)",
     ]
     for stmt in migrations:
         try:
@@ -168,6 +174,7 @@ async def init_db() -> None:
     )
     # Create all tables if they don't exist yet
     from app import models  # noqa: F401 – ensure models are registered
+    from app import models_comparison  # noqa: F401 – register ComparisonSnapshot table
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _apply_migrations(conn)

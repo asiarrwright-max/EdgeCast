@@ -427,3 +427,10 @@ class PaperTrade(Base):
     # Station location used for this forecast (may differ from city-centre in V2.1+)
     station_lat: Mapped[float | None] = mapped_column(Float)
     station_lon: Mapped[float | None] = mapped_column(Float)
+
+    # Prospective comparison linkage (NULL on all pre-comparison-snapshot trades)
+    # Shared across V2.1, V2.2, and V3 for the same market in the same cycle.
+    # When all three have the same non-NULL comparison_snapshot_id the trade is
+    # "strictly paired" — all strategies evaluated identical quote + forecast.
+    comparison_snapshot_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    collection_batch_id: Mapped[str | None] = mapped_column(String(36), index=True)

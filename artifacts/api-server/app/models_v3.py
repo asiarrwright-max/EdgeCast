@@ -451,6 +451,10 @@ class V3PaperTrade(Base):
     v3_snapshot_id: Mapped[int | None] = mapped_column(Integer)
     # Reference to V3PredictionSnapshot.id
     comparison_group_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    # Prospective comparison linkage — shared with V2.1 + V2.2 for the same
+    # (cycle, ticker).  NULL on pre-comparison-snapshot trades.
+    comparison_snapshot_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    collection_batch_id: Mapped[str | None] = mapped_column(String(36), index=True)
 
     # Trade decision (immutable)
     direction: Mapped[str] = mapped_column(String(10), nullable=False)

@@ -60,6 +60,8 @@ export interface TradeSlot {
   outcome: string | null;
   profit_loss: number | null;
   hist_sample_count?: number | null;
+  comparison_snapshot_id: string | null;
+  collection_batch_id: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,6 +76,9 @@ export interface MarketComparisonRow {
   market_prob: number | null;
   versions_present: string[];
   versions_agreed: boolean;
+  /** True when V2.1, V2.2, and V3 all share the same comparison_snapshot_id
+   *  (same collection cycle, identical frozen quote + forecast inputs). */
+  is_paired: boolean;
   v21?: TradeSlot;
   v22?: TradeSlot;
   v3?: TradeSlot;
@@ -111,6 +116,33 @@ export interface SmokeTestStatus {
 }
 
 // ---------------------------------------------------------------------------
+// Pairing stats
+// ---------------------------------------------------------------------------
+
+export interface PairingStats {
+  strictly_paired: number;
+  timing_mismatched: number;
+  note: string;
+}
+
+// ---------------------------------------------------------------------------
+// Readiness tracker
+// ---------------------------------------------------------------------------
+
+export interface ReadinessMilestone {
+  target: number;
+  reached: boolean;
+  remaining: number;
+  pct: number;
+}
+
+export interface ReadinessTracker {
+  shared_settled_executable: number;
+  milestones: ReadinessMilestone[];
+  note: string;
+}
+
+// ---------------------------------------------------------------------------
 // Full response
 // ---------------------------------------------------------------------------
 
@@ -124,6 +156,8 @@ export interface StrategyComparisonData {
   shared_count: number;
   total_markets: number;
   market_rows: MarketComparisonRow[];
+  pairing_stats: PairingStats;
+  readiness_tracker: ReadinessTracker;
   smoke_test: SmokeTestStatus;
 }
 

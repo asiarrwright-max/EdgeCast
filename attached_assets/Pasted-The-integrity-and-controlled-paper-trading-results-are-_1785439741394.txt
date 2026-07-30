@@ -1,0 +1,56 @@
+The integrity and controlled paper-trading results are approved.
+
+Keep V2.1, V2.2, and V3 running in parallel paper-trading mode. Do not make further model, threshold, bias, sigma, station, or trade-selection changes while we begin collecting forward results.
+
+One final prospective comparison improvement:
+
+For all future shared strategy comparisons, ensure V2.1, V2.2, and V3 evaluate the same immutable market opportunity snapshot.
+
+For each collection cycle and ticker, create or use one shared input record containing:
+
+- collection batch ID
+- market ticker
+- quote timestamp
+- YES bid and ask
+- NO bid and ask
+- executable entry prices
+- market probability
+- quote freshness
+- forecast value
+- forecast timestamp
+- station
+- contract bounds
+- settlement date
+- all other shared market inputs
+
+Pass that same frozen snapshot to all three strategies.
+
+Requirements:
+
+- Do not let V2.1, V2.2, and V3 independently refetch or substitute newer quotes when creating a paired comparison.
+- Each strategy may calculate its own probability, edge, and trade decision.
+- The market and forecast inputs used for the comparison must remain identical.
+- Link all three outputs to the same comparison_group_id and shared opportunity snapshot.
+- Preserve the actual entry timestamp and price for each trade.
+- If a version evaluates the opportunity later, it should still use the frozen comparison snapshot or be marked as not directly paired.
+- Never overwrite or recalculate existing historical trades.
+- Apply this only to future cycles.
+- Add tests proving all paired strategy rows used identical quote and forecast inputs.
+
+On the Strategy Comparison page, distinguish:
+
+1. Strictly paired comparisons
+   Same frozen opportunity inputs across all versions.
+
+2. Unpaired or timing-mismatched records
+   Useful operational history, but excluded from direct model-versus-model conclusions.
+
+After this prospective improvement, continue collecting data without changing the models.
+
+Also add a visible readiness tracker showing progress toward:
+- 50 shared settled executable trades
+- 100 shared settled executable trades
+- 250 shared settled executable trades
+- 500 shared settled executable trades
+
+Do not treat trade counts as performance evidence until the trades settle.

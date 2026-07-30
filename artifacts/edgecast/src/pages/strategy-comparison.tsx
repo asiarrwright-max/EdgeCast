@@ -15,8 +15,10 @@ import {
   type StrategySection,
   type MarketComparisonRow,
   type TradeSlot,
+  type ReadinessTracker,
+  type PairingStats,
 } from "@workspace/api-client-react";
-import { AlertTriangle, CheckCircle, Info } from "lucide-react";
+import { AlertTriangle, CheckCircle, Info, Link2, Link2Off } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Formatters
@@ -270,11 +272,15 @@ type FilterMode =
   | "open"
   | "executable"
   | "non-executable"
-  | "traded-all";
+  | "traded-all"
+  | "paired"
+  | "unpaired";
 
 const FILTER_TABS: { id: FilterMode; label: string }[] = [
   { id: "all",            label: "All markets" },
   { id: "shared",         label: "Shared (≥2 strategies)" },
+  { id: "paired",         label: "Strictly paired" },
+  { id: "unpaired",       label: "Timing-mismatched" },
   { id: "agreed",         label: "Versions agreed" },
   { id: "disagreed",      label: "Versions disagreed" },
   { id: "traded-all",     label: "All-3 traded" },
@@ -324,6 +330,8 @@ function applyFilter(rows: MarketComparisonRow[], filter: FilterMode, city: stri
     case "open":           return r.filter(isOpen);
     case "executable":     return r.filter(isExecutable);
     case "non-executable": return r.filter((row) => !isExecutable(row));
+    case "paired":         return r.filter((row) => row.is_paired);
+    case "unpaired":       return r.filter((row) => row.versions_present.length >= 2 && !row.is_paired);
     default:               return r;
   }
 }
@@ -488,6 +496,15 @@ function MarketTable({
                       {row.versions_agreed ? "agreed" : "disagreed"}
                     </span>
                   )}
+                  {row.versions_present.length === 3 && (
+                    <span className={`inline-block px-1 rounded text-[9px] ${
+                      row.is_paired
+                        ? "bg-sky-500/10 text-sky-400"
+                        : "bg-muted text-muted-foreground"
+                    }`} title={row.is_paired ? "All 3 strategies used identical frozen inputs (same collection cycle)" : "Timing mismatch — inputs may differ across strategies"}>
+                      {row.is_paired ? "⊕ paired" : "~ async"}
+                    </span>
+                  )}
                 </div>
               </td>
 
@@ -553,6 +570,79 @@ function CityFilter({ rows, value, onChange }: {
           <option key={c} value={c}>{c}</option>
         ))}
       </select>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Readiness tracker
+// ---------------------------------------------------------------------------
+
+function ReadinessTrackerPanel({ tracker, pairing }: {
+  tracker: ReadinessTracker;
+  pairing: PairingStats;
+}) {
+  const { shared_settled_executable, milestones } = tracker;
+
+  return (
+    <div className="space-y-3">
+      {/* Pairing stat row */}
+      <div className="flex flex-wrap gap-3">
+        <div className="flex items-center gap-1.5 text-xs">
+          <Link2 className="h-3.5 w-3.5 text-sky-400" />
+          <span className="text-foreground font-medium">{pairing.strictly_paired}</span>
+          <span className="text-muted-foreground">strictly paired</span>
+        </div>
+        <div className="flex items-center gap-1.5 text-xs">
+          <Link2Off className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-foreground font-medium">{pairing.timing_mismatched}</span>
+          <span className="text-muted-foreground">timing-mismatched</span>
+        </div>
+        <p className="text-xs text-muted-foreground ml-auto italic">{pairing.note}</p>
+      </div>
+
+      {/* Progress toward milestones */}
+      <div className="space-y-2">
+        <p className="text-xs text-muted-foreground">
+          Shared settled executable trades:{" "}
+          <span className="text-foreground font-mono font-medium">{shared_settled_executable}</span>
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {milestones.map((m) => (
+            <div
+              key={m.target}
+              className={`rounded-md border px-3 py-2 ${
+                m.reached
+                  ? "border-emerald-500/40 bg-emerald-500/10"
+                  : "border-border bg-muted/20"
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className={`text-xs font-semibold ${m.reached ? "text-emerald-400" : "text-muted-foreground"}`}>
+                  {m.target} trades
+                </span>
+                {m.reached && <CheckCircle className="h-3 w-3 text-emerald-400" />}
+              </div>
+              {m.reached ? (
+                <p className="text-[10px] text-emerald-400">✓ reached</p>
+              ) : (
+                <>
+                  <div className="w-full bg-muted rounded-full h-1.5 mb-1">
+                    <div
+                      className="bg-sky-500 rounded-full h-1.5 transition-all"
+                      style={{ width: `${Math.min(100, m.pct)}%` }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    {m.remaining} remaining ({m.pct.toFixed(0)}%)
+                  </p>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground italic">{tracker.note}</p>
     </div>
   );
 }
@@ -729,6 +819,21 @@ export default function StrategyComparisonPage() {
           <StrategyCards data={data} />
         </div>
       </SectionCard>
+
+      {/* Readiness tracker */}
+      {data.readiness_tracker && data.pairing_stats && (
+        <SectionCard
+          title="Comparison Readiness"
+          subtitle="Progress toward sufficient shared settled executable trades for paired model-vs-model analysis."
+        >
+          <div className="p-4">
+            <ReadinessTrackerPanel
+              tracker={data.readiness_tracker}
+              pairing={data.pairing_stats}
+            />
+          </div>
+        </SectionCard>
+      )}
 
       {/* V2.1 vs V2.2 identical probability explanation */}
       <SectionCard
