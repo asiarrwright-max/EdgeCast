@@ -133,8 +133,12 @@ class V3PredictionOutput:
     forward_weight:       float
     config_snapshot:      dict
 
+    # Two-component architecture — bias gate result
+    bias_applied:         bool           # True = bias correction was applied to mu
+    bias_suppressed_reason: str = ""     # non-empty when bias_applied is False
+
     # Status
-    status:               str            # "ok" | "no_stats" | "unsupported"
+    status:               str = "ok"     # "ok" | "no_stats" | "unsupported"
     note:                 str = ""
 
 
@@ -185,27 +189,36 @@ async def run_v3_prediction(
         fwd_bias_adj  = statistics.mean(fwd_errors)
         fwd_sigma_adj = statistics.stdev(fwd_errors) if fwd_n >= 2 else hist_sigma
 
-    # ── Step 3: Combine with weights ──────────────────────────────────────
+    # ── Step 3: Sigma component (always applied) ──────────────────────────
+    # Sigma is the primary calibration signal.  It is ALWAYS used regardless
+    # of whether the bias gate passes.  Forward learning blends variance.
     if cfg.forward_weight == 0.0 or fwd_n == 0:
-        # Pure historical prior — common Phase 2 case
-        final_bias  = hist_bias
         final_sigma = hist_sigma
     else:
-        # Weighted blend: bias is linear, sigma uses variance decomposition
-        final_bias  = cfg.hist_weight * hist_bias + cfg.forward_weight * fwd_bias_adj
         var_hist    = hist_sigma ** 2
         var_fwd     = (fwd_sigma_adj or hist_sigma) ** 2
         final_sigma = math.sqrt(
             cfg.hist_weight * var_hist + cfg.forward_weight * var_fwd
         )
-
     final_sigma = max(cfg.sigma_floor, min(cfg.sigma_ceiling, final_sigma))
 
+    # ── Step 3b: Bias component (gated) ───────────────────────────────────
+    # Bias correction is applied ONLY when the prior's bias gate passed.
+    # When suppressed, mu stays at the raw forecast and only sigma changes.
+    bias_applied          = prior.bias_gate_passed
+    bias_suppressed_reason = prior.bias_suppressed_reason
+
+    if bias_applied:
+        if cfg.forward_weight == 0.0 or fwd_n == 0:
+            final_bias = hist_bias
+        else:
+            final_bias = cfg.hist_weight * hist_bias + cfg.forward_weight * fwd_bias_adj
+    else:
+        final_bias = 0.0  # bias suppressed — preserve raw forecast
+
     # ── Step 4: Gaussian probability ──────────────────────────────────────
-    # Bias-corrected mu: add the signed error bias (positive bias = model ran cold
-    # → shift mu upward to correct)
     mu_raw      = inputs.forecast_value
-    mu_adjusted = inputs.forecast_value + final_bias
+    mu_adjusted = inputs.forecast_value + final_bias  # = mu_raw when bias suppressed
 
     if inputs.contract_type == "range":
         if inputs.lower_bound is None or inputs.upper_bound is None:
@@ -219,25 +232,27 @@ async def run_v3_prediction(
         adj_prob = _calc_prob_threshold(inputs.operator, inputs.threshold, mu_adjusted, final_sigma)
 
     return V3PredictionOutput(
-        ec_probability     = _clamp(adj_prob),
-        raw_ec_probability = _clamp(raw_prob),
-        historical_bias    = hist_bias,
-        historical_sigma   = hist_sigma,
-        forward_bias_adj   = fwd_bias_adj,
-        forward_sigma_adj  = fwd_sigma_adj,
-        final_bias         = final_bias,
-        final_sigma        = final_sigma,
-        mu_adjusted        = mu_adjusted,
-        fallback_level_used= prior.fallback_level,
-        hist_raw_n         = prior.raw_n,
-        hist_effective_n   = prior.effective_n,
-        forward_n          = fwd_n,
-        source_key         = prior.source_key,
-        hist_weight        = cfg.hist_weight,
-        forward_weight     = cfg.forward_weight,
-        config_snapshot    = cfg.to_dict(),
-        status             = "ok",
-        note               = "",
+        ec_probability          = _clamp(adj_prob),
+        raw_ec_probability      = _clamp(raw_prob),
+        historical_bias         = hist_bias,
+        historical_sigma        = hist_sigma,
+        forward_bias_adj        = fwd_bias_adj,
+        forward_sigma_adj       = fwd_sigma_adj,
+        final_bias              = final_bias,
+        final_sigma             = final_sigma,
+        mu_adjusted             = mu_adjusted,
+        fallback_level_used     = prior.fallback_level,
+        hist_raw_n              = prior.raw_n,
+        hist_effective_n        = prior.effective_n,
+        forward_n               = fwd_n,
+        source_key              = prior.source_key,
+        hist_weight             = cfg.hist_weight,
+        forward_weight          = cfg.forward_weight,
+        config_snapshot         = cfg.to_dict(),
+        bias_applied            = bias_applied,
+        bias_suppressed_reason  = bias_suppressed_reason,
+        status                  = "ok",
+        note                    = "",
     )
 
 
@@ -248,23 +263,25 @@ def _error_output(
 ) -> V3PredictionOutput:
     """Return a status='unsupported' output when inputs are invalid."""
     return V3PredictionOutput(
-        ec_probability     = None,
-        raw_ec_probability = None,
-        historical_bias    = prior.bias,
-        historical_sigma   = prior.sigma,
-        forward_bias_adj   = 0.0,
-        forward_sigma_adj  = 0.0,
-        final_bias         = prior.bias,
-        final_sigma        = prior.sigma,
-        mu_adjusted        = inputs.forecast_value + prior.bias,
-        fallback_level_used= prior.fallback_level,
-        hist_raw_n         = prior.raw_n,
-        hist_effective_n   = prior.effective_n,
-        forward_n          = 0,
-        source_key         = prior.source_key,
-        hist_weight        = inputs.config.hist_weight,
-        forward_weight     = inputs.config.forward_weight,
-        config_snapshot    = inputs.config.to_dict(),
-        status             = "unsupported",
-        note               = note,
+        ec_probability          = None,
+        raw_ec_probability      = None,
+        historical_bias         = prior.bias,
+        historical_sigma        = prior.sigma,
+        forward_bias_adj        = 0.0,
+        forward_sigma_adj       = 0.0,
+        final_bias              = 0.0,
+        final_sigma             = prior.sigma,
+        mu_adjusted             = inputs.forecast_value,
+        fallback_level_used     = prior.fallback_level,
+        hist_raw_n              = prior.raw_n,
+        hist_effective_n        = prior.effective_n,
+        forward_n               = 0,
+        source_key              = prior.source_key,
+        hist_weight             = inputs.config.hist_weight,
+        forward_weight          = inputs.config.forward_weight,
+        config_snapshot         = inputs.config.to_dict(),
+        bias_applied            = False,
+        bias_suppressed_reason  = f"unsupported: {note}",
+        status                  = "unsupported",
+        note                    = note,
     )

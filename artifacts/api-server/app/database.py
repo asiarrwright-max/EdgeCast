@@ -97,6 +97,12 @@ async def _apply_migrations(conn) -> None:
         # Distinguishes API-provided init timestamps from conservatively derived ones.
         # Default is 'derived_prior_day_00z' (matches Open-Meteo date-range mode behavior).
         "ALTER TABLE v3_historical_records ADD COLUMN IF NOT EXISTS init_time_source VARCHAR(30) DEFAULT 'derived_prior_day_00z'",
+        # V3 Phase 3 design: bias gate fields on v3_error_stats.
+        # Separates sigma (always applied for calibration) from bias (gated on
+        # statistical significance, effective N, and magnitude thresholds).
+        "ALTER TABLE v3_error_stats ADD COLUMN IF NOT EXISTS bias_t_stat FLOAT",
+        "ALTER TABLE v3_error_stats ADD COLUMN IF NOT EXISTS bias_gate_passed BOOLEAN",
+        "ALTER TABLE v3_error_stats ADD COLUMN IF NOT EXISTS bias_suppressed_reason VARCHAR(200)",
     ]
     for stmt in migrations:
         try:

@@ -134,17 +134,50 @@ def _prob_gte(threshold: float, mu: float, sigma: float) -> float:
 # In-memory training-set stats (no DB call in walk-forward loop)
 # ---------------------------------------------------------------------------
 
+def _check_wf_bias_gate(
+    bias_shrunk: float,
+    rs: "_RawStats",
+    cfg: V3StatsConfig,
+) -> tuple[bool, str]:
+    """
+    Inline bias gate for walk-forward validation (no DB access).
+    Returns (gate_passed, suppressed_reason).
+    suppressed_reason is "" when gate_passed is True.
+    """
+    from app.services.v3_error_stats import BIAS_MIN_EFFECTIVE_N, BIAS_MIN_T_STAT, BIAS_MIN_MAGNITUDE
+    import math as _math
+    ne = rs.n_eff
+    bias_min_ne  = getattr(cfg, "bias_min_effective_n", BIAS_MIN_EFFECTIVE_N)
+    bias_min_t   = getattr(cfg, "bias_min_t_stat",      BIAS_MIN_T_STAT)
+    bias_min_mag = getattr(cfg, "bias_min_magnitude",   BIAS_MIN_MAGNITUDE)
+    if ne < bias_min_ne:
+        return False, f"n_eff={ne:.1f} < {bias_min_ne}"
+    if rs.sigma_raw is None or rs.sigma_raw <= 0:
+        return False, "sigma unavailable"
+    t = abs(bias_shrunk) / (rs.sigma_raw / _math.sqrt(ne))
+    if t < bias_min_t:
+        return False, f"|t|={t:.2f} < {bias_min_t}"
+    if abs(bias_shrunk) < bias_min_mag:
+        return False, f"|bias|={abs(bias_shrunk):.3f}°F < {bias_min_mag}°F"
+    return True, ""
+
+
 def _compute_wf_prior(
     training: list[V3HistoricalRecord],
     target: V3HistoricalRecord,
     cfg: V3StatsConfig,
-) -> tuple[float, float, int, str]:
+) -> tuple[float, float, int, str, bool, str]:
     """
-    Compute (bias, sigma, fallback_level, source_key) from the training set
-    for a single test record using the same shrinkage as the live model.
+    Compute (bias, sigma, fallback_level, source_key, bias_gate_passed,
+    bias_suppressed_reason) from the training set for a single test record.
 
     Returns the most-specific level with n >= cfg.min_sample, or falls back
     toward the global prior.
+
+    Two-component architecture:
+    - sigma is always the shrunk estimate (calibration signal).
+    - bias gate is evaluated at the selected fallback level; if it fails,
+      bias_gate_passed=False and the caller should use mu = raw forecast.
     """
     city   = target.city
     model  = target.forecast_model
@@ -220,20 +253,30 @@ def _compute_wf_prior(
     else:
         b0, s0 = b1, s1
 
-    # Walk the hierarchy — return the most specific level with enough data
+    # Walk the hierarchy — return the most specific level with enough data.
+    # Also evaluate the bias gate at the selected level.
     min_n = cfg.min_sample
+
+    def _gate(bias_shrunk: float, rs: "_RawStats") -> tuple[bool, str]:
+        return _check_wf_bias_gate(bias_shrunk, rs, cfg)
+
     if rs0.n >= min_n:
-        return b0, s0, 0, f"{city}/{model}/{lead}/{season}"
+        gp, gr = _gate(b0, rs0)
+        return b0, s0, 0, f"{city}/{model}/{lead}/{season}", gp, gr
     if rs1.n >= min_n:
-        return b1, s1, 1, f"{city}/{model}/{lead}/all-season"
+        gp, gr = _gate(b1, rs1)
+        return b1, s1, 1, f"{city}/{model}/{lead}/all-season", gp, gr
     if rs2.n >= min_n:
-        return b2, s2, 2, f"{city}/{model}/all-lead"
+        gp, gr = _gate(b2, rs2)
+        return b2, s2, 2, f"{city}/{model}/all-lead", gp, gr
     if rs3.n >= min_n:
-        return b3, s3, 3, f"global/{model}/{lead}"
-    # Use whatever we have at level 2 with shrinkage toward global
+        gp, gr = _gate(b3, rs3)
+        return b3, s3, 3, f"global/{model}/{lead}", gp, gr
+    # Use whatever we have at level 4 with shrinkage toward global
     if g_rs.n >= 1:
-        return g_bias, g_sigma, 4, "global/prior"
-    return GLOBAL_PRIOR_BIAS, GLOBAL_PRIOR_SIGMA, 4, "hardcoded/prior"
+        gp, gr = _gate(g_bias, g_rs)
+        return g_bias, g_sigma, 4, "global/prior", gp, gr
+    return GLOBAL_PRIOR_BIAS, GLOBAL_PRIOR_SIGMA, 4, "hardcoded/prior", False, "no training data"
 
 
 # ---------------------------------------------------------------------------
@@ -248,24 +291,28 @@ class WalkForwardRecord:
     season:            str | None
     forecast_tmax_f:   float
     observed_tmax_f:   float
-    bias_used:         float
-    sigma_used:        float
-    mu_adjusted:       float
+    bias_used:         float       # the shrunk bias (stored even when not applied)
+    sigma_used:        float       # always applied
+    mu_adjusted:       float       # = forecast + bias_used if bias_applied, else = forecast
     fallback_level:    int
     source_key:        str
-    training_n:        int    # raw training records at time of prediction
+    training_n:        int         # raw training records at time of prediction
 
-    raw_error:         float  # observed - forecast
-    adj_error:         float  # observed - (forecast + bias)
+    # Two-component architecture fields
+    bias_applied:      bool        # True = bias was applied to mu; False = sigma only
+    bias_suppressed_reason: str    # non-empty when bias_applied is False
+
+    raw_error:         float       # observed - forecast (no sigma or bias)
+    adj_error:         float       # observed - mu_adjusted (reflects bias gate decision)
     raw_abs:           float
     adj_abs:           float
-    preload_hurt:      bool   # abs(adj_error) > abs(raw_error)
-    crps_raw:          float
-    crps_adj:          float
+    preload_hurt:      bool        # abs(adj_error) > abs(raw_error) — only meaningful when bias_applied
+    crps_raw:          float       # CRPS with raw forecast as mean
+    crps_adj:          float       # CRPS with mu_adjusted as mean (sigma always used)
 
     # P(observed >= forecast) — binary Brier event
-    prob_adj:          float  # P(X >= forecast | mu_adj, sigma)
-    brier_obs:         float  # (prob_adj - 1.0)^2  [obs always >= forecast in this event]
+    prob_adj:          float       # P(X >= forecast | mu_adj, sigma)
+    brier_obs:         float       # (prob_adj - outcome)^2
 
 
 @dataclass
@@ -312,6 +359,10 @@ class WalkForwardSummary:
     # Preload impact
     preload_hurt_n:  int      # records where adjustment made it worse
     preload_hurt_pct: float   # percentage
+
+    # Bias gate: how often bias was actually applied (two-component architecture)
+    bias_applied_n:  int      # records where bias correction was applied to mu
+    bias_applied_pct: float   # percentage
 
     # Fallback distribution
     fallback_dist:   dict[int, int]    # level → count
@@ -417,16 +468,18 @@ def run_walk_forward_validation(
         test_rec = usable[i]
         training = usable[:i]  # strictly before index i
 
-        bias, sigma, fallback_level, source_key = _compute_wf_prior(
-            training, test_rec, cfg
+        bias, sigma, fallback_level, source_key, bias_gate_passed, bias_suppress_reason = (
+            _compute_wf_prior(training, test_rec, cfg)
         )
 
         forecast = test_rec.forecast_tmax_f
         observed = test_rec.observed_tmax_f
-        mu_adj   = forecast + bias
+
+        # Two-component architecture: sigma always applied; bias only when gate passes
+        mu_adj = forecast + (bias if bias_gate_passed else 0.0)
 
         raw_err = observed - forecast
-        adj_err = observed - mu_adj     # = raw_err - bias
+        adj_err = observed - mu_adj     # = raw_err when bias suppressed
         raw_abs = abs(raw_err)
         adj_abs = abs(adj_err)
 
@@ -439,26 +492,28 @@ def run_walk_forward_validation(
         brier    = (prob_adj - outcome) ** 2
 
         wf_records.append(WalkForwardRecord(
-            target_date     = test_rec.target_date,
-            city            = test_rec.city,
-            season          = test_rec.season,
-            forecast_tmax_f = forecast,
-            observed_tmax_f = observed,
-            bias_used       = bias,
-            sigma_used      = sigma,
-            mu_adjusted     = mu_adj,
-            fallback_level  = fallback_level,
-            source_key      = source_key,
-            training_n      = len(training),
-            raw_error       = raw_err,
-            adj_error       = adj_err,
-            raw_abs         = raw_abs,
-            adj_abs         = adj_abs,
-            preload_hurt    = adj_abs > raw_abs,
-            crps_raw        = crps_raw,
-            crps_adj        = crps_adj,
-            prob_adj        = prob_adj,
-            brier_obs       = brier,
+            target_date            = test_rec.target_date,
+            city                   = test_rec.city,
+            season                 = test_rec.season,
+            forecast_tmax_f        = forecast,
+            observed_tmax_f        = observed,
+            bias_used              = bias,
+            sigma_used             = sigma,
+            mu_adjusted            = mu_adj,
+            fallback_level         = fallback_level,
+            source_key             = source_key,
+            training_n             = len(training),
+            bias_applied           = bias_gate_passed,
+            bias_suppressed_reason = bias_suppress_reason,
+            raw_error              = raw_err,
+            adj_error              = adj_err,
+            raw_abs                = raw_abs,
+            adj_abs                = adj_abs,
+            preload_hurt           = adj_abs > raw_abs,
+            crps_raw               = crps_raw,
+            crps_adj               = crps_adj,
+            prob_adj               = prob_adj,
+            brier_obs              = brier,
         ))
 
     test_n = len(wf_records)
@@ -493,20 +548,22 @@ def run_walk_forward_validation(
     # ── Per-record detail for API ──────────────────────────────────────────
     records_detail = [
         {
-            "date":           r.target_date,
-            "city":           r.city,
-            "season":         r.season,
-            "forecast_f":     round(r.forecast_tmax_f, 2),
-            "observed_f":     round(r.observed_tmax_f, 2),
-            "raw_error":      round(r.raw_error, 3),
-            "adj_error":      round(r.adj_error, 3),
-            "bias_used":      round(r.bias_used, 3),
-            "sigma_used":     round(r.sigma_used, 3),
-            "fallback_level": r.fallback_level,
-            "training_n":     r.training_n,
-            "preload_hurt":   r.preload_hurt,
-            "crps_raw":       round(r.crps_raw, 4),
-            "crps_adj":       round(r.crps_adj, 4),
+            "date":                   r.target_date,
+            "city":                   r.city,
+            "season":                 r.season,
+            "forecast_f":             round(r.forecast_tmax_f, 2),
+            "observed_f":             round(r.observed_tmax_f, 2),
+            "raw_error":              round(r.raw_error, 3),
+            "adj_error":              round(r.adj_error, 3),
+            "bias_used":              round(r.bias_used, 3),
+            "sigma_used":             round(r.sigma_used, 3),
+            "fallback_level":         r.fallback_level,
+            "training_n":             r.training_n,
+            "bias_applied":           r.bias_applied,
+            "bias_suppressed_reason": r.bias_suppressed_reason,
+            "preload_hurt":           r.preload_hurt,
+            "crps_raw":               round(r.crps_raw, 4),
+            "crps_adj":               round(r.crps_adj, 4),
         }
         for r in wf_records
     ]
@@ -581,6 +638,7 @@ def _summarize(
             crps_raw=0.0, crps_adj=0.0,
             brier_score=0.0,
             preload_hurt_n=0, preload_hurt_pct=0.0,
+            bias_applied_n=0, bias_applied_pct=0.0,
             fallback_dist={},
         )
 
@@ -610,29 +668,34 @@ def _summarize(
     hurt_n   = sum(1 for r in records if r.preload_hurt)
     hurt_pct = 100.0 * hurt_n / n
 
+    bias_applied_n   = sum(1 for r in records if r.bias_applied)
+    bias_applied_pct = 100.0 * bias_applied_n / n
+
     fallback_dist: dict[int, int] = defaultdict(int)
     for r in records:
         fallback_dist[r.fallback_level] += 1
 
     return WalkForwardSummary(
-        label           = label,
-        n               = n,
-        mae_raw         = round(mae_raw, 4),
-        mae_adj         = round(mae_adj, 4),
-        mae_delta       = round(mae_adj - mae_raw, 4),
-        mae_ci95        = _ci95_mean(adj_abs),
-        rmse_raw        = round(rmse_raw, 4),
-        rmse_adj        = round(rmse_adj, 4),
-        mean_error_raw  = round(mean_err_raw, 4),
-        mean_error_adj  = round(mean_err_adj, 4),
-        sigma_coverage_68pct = round(cov68, 4),
-        sigma_coverage_95pct = round(cov95, 4),
-        crps_raw        = round(crps_raw, 4),
-        crps_adj        = round(crps_adj, 4),
-        brier_score     = round(brier, 4),
-        preload_hurt_n  = hurt_n,
-        preload_hurt_pct= round(hurt_pct, 1),
-        fallback_dist   = dict(fallback_dist),
+        label               = label,
+        n                   = n,
+        mae_raw             = round(mae_raw, 4),
+        mae_adj             = round(mae_adj, 4),
+        mae_delta           = round(mae_adj - mae_raw, 4),
+        mae_ci95            = _ci95_mean(adj_abs),
+        rmse_raw            = round(rmse_raw, 4),
+        rmse_adj            = round(rmse_adj, 4),
+        mean_error_raw      = round(mean_err_raw, 4),
+        mean_error_adj      = round(mean_err_adj, 4),
+        sigma_coverage_68pct= round(cov68, 4),
+        sigma_coverage_95pct= round(cov95, 4),
+        crps_raw            = round(crps_raw, 4),
+        crps_adj            = round(crps_adj, 4),
+        brier_score         = round(brier, 4),
+        preload_hurt_n      = hurt_n,
+        preload_hurt_pct    = round(hurt_pct, 1),
+        bias_applied_n      = bias_applied_n,
+        bias_applied_pct    = round(bias_applied_pct, 1),
+        fallback_dist       = dict(fallback_dist),
     )
 
 
@@ -787,6 +850,7 @@ def _insufficient_report(total_n: int, cfg: V3StatsConfig) -> WalkForwardReport:
         crps_raw=0.0, crps_adj=0.0,
         brier_score=0.0,
         preload_hurt_n=0, preload_hurt_pct=0.0,
+        bias_applied_n=0, bias_applied_pct=0.0,
         fallback_dist={},
     )
     return WalkForwardReport(

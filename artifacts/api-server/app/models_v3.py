@@ -305,13 +305,32 @@ class V3ErrorStats(Base):
     # = raw_sample_size * discount_factor; reflects autocorrelation in daily weather
 
     bias: Mapped[float | None] = mapped_column(Float)
-    # mean(observed - forecast) in °F; positive = model ran cold on average
+    # mean(observed - forecast) in °F; positive = model ran cold on average.
+    # This is the SHRUNK bias (after partial pooling); always stored even when
+    # the bias gate blocks it from being applied to a prediction.
     sigma_raw: Mapped[float | None] = mapped_column(Float)
     # std_dev of (observed - forecast) before shrinkage
     sigma_shrunk: Mapped[float | None] = mapped_column(Float)
-    # After partial pooling toward parent level; always >= SIGMA_FLOOR (3.5°F)
+    # After partial pooling toward parent level; always >= SIGMA_FLOOR (3.5°F).
+    # sigma_shrunk is ALWAYS applied to predictions regardless of the bias gate.
+    # It is the primary calibration signal from the historical preload.
     mae: Mapped[float | None] = mapped_column(Float)
     rmse: Mapped[float | None] = mapped_column(Float)
+
+    # ── Bias gate fields (Phase 3 two-component architecture) ──────────────
+    bias_t_stat: Mapped[float | None] = mapped_column(Float)
+    # |bias| / (sigma_raw / sqrt(n_eff)); measures if bias is statistically
+    # distinguishable from zero.  NULL when n_eff < 2 or sigma_raw unavailable.
+    bias_gate_passed: Mapped[bool | None] = mapped_column(Boolean)
+    # True only when ALL of the following hold:
+    #   1. n_eff >= config.bias_min_effective_n  (default 50)
+    #   2. |bias_t_stat| >= config.bias_min_t_stat  (default 2.0, ≈ 95% CI)
+    #   3. |bias| >= config.bias_min_magnitude  (default 0.3°F)
+    # When False, the bias field is stored for reference but NOT applied to
+    # predictions; only sigma_shrunk influences the probability distribution.
+    bias_suppressed_reason: Mapped[str | None] = mapped_column(String(200))
+    # Human-readable reason why bias_gate_passed is False, e.g.:
+    # "n_eff=28.2 < 50.0" | "|t|=1.34 < 2.0" | "|bias|=0.21°F < 0.3°F"
 
 
 # ---------------------------------------------------------------------------

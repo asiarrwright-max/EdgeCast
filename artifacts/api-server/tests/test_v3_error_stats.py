@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 from app.services.v3_error_stats import (
     V3StatsConfig,
     _compute_raw_stats,
+    _compute_bias_gate,
     _n_eff,
     _lambda,
     _shrink,
@@ -21,6 +22,9 @@ from app.services.v3_error_stats import (
     SHRINKAGE_K,
     GLOBAL_PRIOR_BIAS,
     GLOBAL_PRIOR_SIGMA,
+    BIAS_MIN_EFFECTIVE_N,
+    BIAS_MIN_T_STAT,
+    BIAS_MIN_MAGNITUDE,
 )
 
 
@@ -44,13 +48,22 @@ class TestV3StatsConfig:
     def test_to_dict_contains_all_fields(self):
         cfg = V3StatsConfig()
         d = cfg.to_dict()
-        assert "hist_weight"       in d
-        assert "forward_weight"    in d
-        assert "shrinkage_k"       in d
-        assert "autocorr_discount" in d
-        assert "sigma_floor"       in d
-        assert "sigma_ceiling"     in d
-        assert "min_sample"        in d
+        assert "hist_weight"          in d
+        assert "forward_weight"       in d
+        assert "shrinkage_k"          in d
+        assert "autocorr_discount"    in d
+        assert "sigma_floor"          in d
+        assert "sigma_ceiling"        in d
+        assert "min_sample"           in d
+        assert "bias_min_effective_n" in d
+        assert "bias_min_t_stat"      in d
+        assert "bias_min_magnitude"   in d
+
+    def test_default_bias_gate_constants_match_module_level(self):
+        cfg = V3StatsConfig()
+        assert cfg.bias_min_effective_n == pytest.approx(BIAS_MIN_EFFECTIVE_N)
+        assert cfg.bias_min_t_stat      == pytest.approx(BIAS_MIN_T_STAT)
+        assert cfg.bias_min_magnitude   == pytest.approx(BIAS_MIN_MAGNITUDE)
 
     def test_to_dict_values_match(self):
         cfg = V3StatsConfig(hist_weight=0.8, forward_weight=0.2)
@@ -330,3 +343,170 @@ class TestComputeErrorStats:
         cfg = V3StatsConfig(hist_weight=1.0, forward_weight=0.0, shrinkage_k=20.0)
         d = cfg.to_dict()
         assert d["shrinkage_k"] == pytest.approx(20.0)
+
+
+# ---------------------------------------------------------------------------
+# Bias gate (_compute_bias_gate)
+# ---------------------------------------------------------------------------
+
+class TestBiasGate:
+    """
+    Tests for the three-condition bias gate.
+
+    Philosophy: sigma is ALWAYS applied for calibration.  Bias is only applied
+    to mu when all three conditions hold simultaneously:
+      1. n_eff >= BIAS_MIN_EFFECTIVE_N (50)
+      2. |t_stat| >= BIAS_MIN_T_STAT   (2.0)
+      3. |bias| >= BIAS_MIN_MAGNITUDE  (0.3°F)
+    """
+
+    def _rs(self, n: int = 100, sigma_raw: float = 4.0) -> object:
+        """Return a _RawStats-like object with n_eff and sigma_raw set."""
+        from app.services.v3_error_stats import _RawStats
+        n_eff = n * AUTOCORR_DISCOUNT
+        return _RawStats(
+            n=n, n_eff=n_eff,
+            bias=None, sigma_raw=sigma_raw,
+            mae=None, rmse=None,
+        )
+
+    # ── Condition 1: n_eff threshold ─────────────────────────────────────
+
+    def test_gate_fails_when_n_eff_below_threshold(self):
+        """n_eff = 40*0.6 = 24 < 50 → gate must fail."""
+        rs  = self._rs(n=40, sigma_raw=4.0)
+        cfg = V3StatsConfig()
+        gate_passed, t_stat, reason = _compute_bias_gate(1.0, rs, cfg)
+        assert gate_passed is False
+        assert t_stat is None
+        assert "n_eff" in reason
+
+    def test_gate_still_fails_just_below_n_eff(self):
+        """n_eff = 49.9 (just below 50) → gate fails on n_eff condition."""
+        from app.services.v3_error_stats import _RawStats
+        rs = _RawStats(n=84, n_eff=49.9, bias=None, sigma_raw=4.0, mae=None, rmse=None)
+        cfg = V3StatsConfig()
+        gate_passed, _, reason = _compute_bias_gate(1.0, rs, cfg)
+        assert gate_passed is False
+        assert "n_eff" in reason
+
+    def test_n_eff_at_exact_threshold_passes_condition_1(self):
+        """n_eff = exactly 50 — n_eff condition passes; t-stat and magnitude checked."""
+        from app.services.v3_error_stats import _RawStats
+        # bias=3.0, sigma=4.0, n_eff=50 → t = 3.0/(4.0/sqrt(50)) = 3.0/0.566 = 5.3 (passes)
+        rs = _RawStats(n=84, n_eff=50.0, bias=None, sigma_raw=4.0, mae=None, rmse=None)
+        cfg = V3StatsConfig()
+        gate_passed, t_stat, _ = _compute_bias_gate(3.0, rs, cfg)
+        assert gate_passed is True
+        assert t_stat is not None
+        assert t_stat > 2.0
+
+    # ── Condition 2: t-stat threshold ─────────────────────────────────────
+
+    def test_gate_fails_when_t_stat_below_threshold(self):
+        """n_eff=60, sigma=4, bias=0.5 → t=0.5/(4/sqrt(60))=0.97 < 2.0 → gate fails."""
+        from app.services.v3_error_stats import _RawStats
+        rs = _RawStats(n=100, n_eff=60.0, bias=None, sigma_raw=4.0, mae=None, rmse=None)
+        cfg = V3StatsConfig()
+        gate_passed, t_stat, reason = _compute_bias_gate(0.5, rs, cfg)
+        assert gate_passed is False
+        assert t_stat is not None
+        assert t_stat < 2.0
+        assert "|t|" in reason
+
+    def test_t_stat_at_exact_threshold_passes_condition_2(self):
+        """Compute exact bias that gives |t|=2.0 and verify gate passes (assuming magnitude ok)."""
+        import math
+        from app.services.v3_error_stats import _RawStats
+        n_eff = 60.0
+        sigma_raw = 4.0
+        # bias that gives t=2: bias = 2.0 * sigma / sqrt(n_eff)
+        bias_at_t2 = 2.0 * sigma_raw / math.sqrt(n_eff)
+        rs = _RawStats(n=100, n_eff=n_eff, bias=None, sigma_raw=sigma_raw, mae=None, rmse=None)
+        cfg = V3StatsConfig()
+        gate_passed, t_stat, _ = _compute_bias_gate(bias_at_t2, rs, cfg)
+        assert gate_passed is True
+        assert t_stat == pytest.approx(2.0, rel=1e-3)
+
+    # ── Condition 3: magnitude threshold ─────────────────────────────────
+
+    def test_gate_fails_when_bias_below_magnitude_threshold(self):
+        """n_eff=60, high t-stat, but |bias|=0.1°F < 0.3°F → gate fails."""
+        from app.services.v3_error_stats import _RawStats
+        # bias=0.1, sigma=0.5, n_eff=60 → t=0.1/(0.5/sqrt(60))=1.55 ... let's use sigma small
+        # Actually let's make sigma tiny so t is huge but bias is small
+        rs = _RawStats(n=100, n_eff=60.0, bias=None, sigma_raw=0.1, mae=None, rmse=None)
+        cfg = V3StatsConfig()
+        gate_passed, t_stat, reason = _compute_bias_gate(0.1, rs, cfg)
+        assert gate_passed is False
+        assert "|bias|" in reason
+
+    def test_gate_passes_all_conditions(self):
+        """Large sample, significant bias → gate should pass."""
+        from app.services.v3_error_stats import _RawStats
+        # Denver-like scenario: n=200, n_eff=120, bias=0.6°F, sigma=4.2°F
+        # t = 0.6 / (4.2/sqrt(120)) = 0.6/0.383 = 1.57 < 2.0 → still fails!
+        # Must use a stronger signal to pass: n_eff=300, bias=0.6, sigma=4.2
+        # t = 0.6 / (4.2/sqrt(300)) = 0.6/0.242 = 2.48 → passes
+        rs = _RawStats(n=500, n_eff=300.0, bias=None, sigma_raw=4.2, mae=None, rmse=None)
+        cfg = V3StatsConfig()
+        gate_passed, t_stat, reason = _compute_bias_gate(0.6, rs, cfg)
+        assert gate_passed is True
+        assert reason == ""
+        assert t_stat == pytest.approx(0.6 / (4.2 / (300.0 ** 0.5)), rel=1e-3)
+
+    # ── Sigma always returned even when gate fails ─────────────────────────
+
+    def test_sigma_floor_independent_of_gate(self):
+        """The gate result has no bearing on sigma_shrunk (sigma is always applied).
+        This is a unit test verifying that gate=False does not set sigma to 0 or None."""
+        from app.services.v3_error_stats import _RawStats
+        rs = _RawStats(n=10, n_eff=6.0, bias=None, sigma_raw=5.0, mae=None, rmse=None)
+        cfg = V3StatsConfig()
+        gate_passed, t_stat, _ = _compute_bias_gate(2.0, rs, cfg)
+        assert gate_passed is False  # n_eff=6 < 50
+        # Caller still has sigma_raw from rs; the gate only controls bias application
+        assert rs.sigma_raw == pytest.approx(5.0)
+
+    def test_gate_with_no_sigma_fails_gracefully(self):
+        """If sigma_raw is None (too few records for std), gate should fail safely."""
+        from app.services.v3_error_stats import _RawStats
+        rs = _RawStats(n=100, n_eff=60.0, bias=None, sigma_raw=None, mae=None, rmse=None)
+        cfg = V3StatsConfig()
+        gate_passed, t_stat, reason = _compute_bias_gate(2.0, rs, cfg)
+        assert gate_passed is False
+        assert t_stat is None
+        assert "sigma" in reason.lower()
+
+    def test_gate_with_zero_sigma_fails_gracefully(self):
+        """sigma_raw=0 (degenerate sample) must not cause division by zero."""
+        from app.services.v3_error_stats import _RawStats
+        rs = _RawStats(n=100, n_eff=60.0, bias=None, sigma_raw=0.0, mae=None, rmse=None)
+        cfg = V3StatsConfig()
+        gate_passed, t_stat, reason = _compute_bias_gate(2.0, rs, cfg)
+        assert gate_passed is False
+
+    # ── Custom thresholds via V3StatsConfig ───────────────────────────────
+
+    def test_custom_effective_n_threshold(self):
+        """Lowering bias_min_effective_n allows smaller samples to pass condition 1."""
+        from app.services.v3_error_stats import _RawStats
+        # n_eff=30; normally fails default (50) but passes custom (20)
+        rs = _RawStats(n=50, n_eff=30.0, bias=None, sigma_raw=0.5, mae=None, rmse=None)
+        cfg_default = V3StatsConfig()
+        cfg_lenient  = V3StatsConfig(bias_min_effective_n=20.0)
+        assert _compute_bias_gate(2.0, rs, cfg_default)[0] is False  # fails default
+        assert _compute_bias_gate(2.0, rs, cfg_lenient)[0]  is True   # passes lenient
+
+    def test_custom_t_stat_threshold(self):
+        """Raising bias_min_t_stat to 3.0 rejects a bias that would pass at 2.0."""
+        import math
+        from app.services.v3_error_stats import _RawStats
+        n_eff, sigma_raw = 60.0, 4.0
+        # Bias that gives t = 2.5 (between 2.0 and 3.0)
+        bias_t25 = 2.5 * sigma_raw / math.sqrt(n_eff)
+        rs = _RawStats(n=100, n_eff=n_eff, bias=None, sigma_raw=sigma_raw, mae=None, rmse=None)
+        cfg_low  = V3StatsConfig(bias_min_t_stat=2.0)
+        cfg_high = V3StatsConfig(bias_min_t_stat=3.0)
+        assert _compute_bias_gate(bias_t25, rs, cfg_low)[0]  is True
+        assert _compute_bias_gate(bias_t25, rs, cfg_high)[0] is False

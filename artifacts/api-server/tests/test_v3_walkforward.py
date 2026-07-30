@@ -348,7 +348,99 @@ class TestReportStructure:
         report = run_walk_forward_validation(records)
         required = {"date", "city", "forecast_f", "observed_f", "raw_error",
                     "adj_error", "bias_used", "sigma_used", "fallback_level",
-                    "training_n", "preload_hurt", "crps_raw", "crps_adj"}
+                    "training_n", "preload_hurt", "crps_raw", "crps_adj",
+                    "bias_applied", "bias_suppressed_reason"}
         for r in report.records:
             missing = required - set(r.keys())
             assert not missing, f"Missing keys: {missing}"
+
+
+# ---------------------------------------------------------------------------
+# Two-component architecture: bias gate in walk-forward
+# ---------------------------------------------------------------------------
+
+class TestBiasGateInWalkForward:
+    """
+    Verify that the two-component architecture is correctly applied:
+    - sigma is ALWAYS taken from the preload (calibration).
+    - bias is only applied to mu when the bias gate passes.
+    """
+
+    def test_bias_applied_field_is_bool(self):
+        """Every WalkForwardRecord.bias_applied must be a bool."""
+        records = _make_records(MIN_TRAIN_SIZE + 30, signed_error=1.0)
+        report = run_walk_forward_validation(records)
+        for r in report.records:
+            assert isinstance(r["bias_applied"], bool)
+
+    def test_bias_suppressed_reason_present_when_not_applied(self):
+        """When bias_applied=False, bias_suppressed_reason must be non-empty."""
+        records = _make_records(MIN_TRAIN_SIZE + 30, signed_error=1.0)
+        report = run_walk_forward_validation(records)
+        for r in report.records:
+            if not r["bias_applied"]:
+                assert len(r["bias_suppressed_reason"]) > 0, (
+                    f"Date {r['date']}: bias_applied=False but reason is empty"
+                )
+
+    def test_bias_suppressed_reason_empty_when_applied(self):
+        """When bias_applied=True, bias_suppressed_reason should be empty."""
+        records = _make_records(MIN_TRAIN_SIZE + 30, signed_error=1.0)
+        report = run_walk_forward_validation(records)
+        for r in report.records:
+            if r["bias_applied"]:
+                assert r["bias_suppressed_reason"] == "", (
+                    f"Date {r['date']}: bias_applied=True but reason is non-empty: "
+                    f"{r['bias_suppressed_reason']}"
+                )
+
+    def test_summary_bias_applied_n_is_consistent(self):
+        """overall.bias_applied_n + bias_not_applied_n == test_n."""
+        records = _make_records(MIN_TRAIN_SIZE + 60, signed_error=2.0)
+        report = run_walk_forward_validation(records)
+        applied_count = sum(1 for r in report.records if r["bias_applied"])
+        assert report.overall.bias_applied_n == applied_count
+
+    def test_summary_bias_applied_pct_range(self):
+        """bias_applied_pct must be in [0, 100]."""
+        records = _make_records(MIN_TRAIN_SIZE + 60, signed_error=1.0)
+        report = run_walk_forward_validation(records)
+        assert 0.0 <= report.overall.bias_applied_pct <= 100.0
+
+    def test_small_training_set_suppresses_bias(self):
+        """
+        With only MIN_TRAIN_SIZE records in training and a small error signal,
+        the bias gate should fail (n_eff < 50) and bias should be suppressed
+        for the first several test records.
+        """
+        records = _make_records(MIN_TRAIN_SIZE + 5, signed_error=0.5)
+        report = run_walk_forward_validation(records)
+        # With only 30 training records at the first test step, n_eff = 30*0.6 = 18 < 50
+        # The bias gate must be suppressed for the first few records
+        first_records = report.records[:3]
+        for r in first_records:
+            assert r["bias_applied"] is False, (
+                f"Expected bias suppressed for early record (training_n={r['training_n']})"
+            )
+
+    def test_sigma_always_present_regardless_of_bias_gate(self):
+        """sigma_used must be > 0 for every record, even when bias is suppressed."""
+        records = _make_records(MIN_TRAIN_SIZE + 20, signed_error=0.1)
+        report = run_walk_forward_validation(records)
+        for r in report.records:
+            assert r["sigma_used"] > 0, (
+                f"sigma_used must always be positive (bias_applied={r['bias_applied']})"
+            )
+
+    def test_adj_error_equals_raw_error_when_bias_suppressed(self):
+        """
+        When bias_applied=False, mu_adjusted = forecast (no bias correction),
+        so adj_error = observed - forecast = raw_error.
+        """
+        records = _make_records(MIN_TRAIN_SIZE + 5, signed_error=0.5)
+        report = run_walk_forward_validation(records)
+        for r in report.records:
+            if not r["bias_applied"]:
+                assert r["adj_error"] == pytest.approx(r["raw_error"], abs=1e-6), (
+                    f"Date {r['date']}: bias suppressed but adj_error != raw_error"
+                )

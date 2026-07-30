@@ -407,6 +407,10 @@ async def get_error_stats(
             "sigma_shrunk":     r.sigma_shrunk,
             "mae":              r.mae,
             "rmse":             r.rmse,
+            # Two-component architecture: bias gate fields
+            "bias_t_stat":              r.bias_t_stat,
+            "bias_gate_passed":         r.bias_gate_passed,
+            "bias_suppressed_reason":   r.bias_suppressed_reason,
             "last_computed_at": r.last_computed_at.isoformat() if r.last_computed_at else None,
         }
 
@@ -414,8 +418,9 @@ async def get_error_stats(
         "rows": [_row_dict(r) for r in rows],
         "total": len(rows),
         "note": (
-            "sigma_shrunk is the value used in predictions; it incorporates "
-            "partial pooling toward the parent level and is always >= 3.5°F. "
+            "sigma_shrunk is ALWAYS applied to predictions (calibration signal). "
+            "bias is only applied to mu when bias_gate_passed=True (all three: "
+            "n_eff>=50, |t|>=2.0, |bias|>=0.3°F). "
             "fallback_level 0 = most specific (city+model+lead+season), "
             "4 = global conservative prior."
         ),

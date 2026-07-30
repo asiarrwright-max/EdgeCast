@@ -78,7 +78,7 @@ logger = logging.getLogger(__name__)
 
 SIGMA_FLOOR:   float = 3.5   # °F — same as V2.1 probability_engine_v2.SIGMA_FLOOR
 SIGMA_CEILING: float = 15.0  # °F — same as V2.1
-MIN_SAMPLE:    int   = 30    # raw rows needed for a level to be considered usable
+MIN_SAMPLE:    int   = 30    # raw rows needed for sigma; lower bar than bias gate
 AUTOCORR_DISCOUNT: float = 0.6   # n_eff = n_raw * 0.6 to discount autocorrelation
 SHRINKAGE_K:   float = 30.0  # pooling strength; at n_eff == K, lambda = 0.5
 
@@ -87,6 +87,32 @@ SHRINKAGE_K:   float = 30.0  # pooling strength; at n_eff == K, lambda = 0.5
 # multi-model averaging) and all timestamps are derived (not API-provided).
 GLOBAL_PRIOR_BIAS:  float = 0.0    # °F — no prior directional assumption
 GLOBAL_PRIOR_SIGMA: float = 6.0    # °F — conservative floor above SIGMA_FLOOR
+
+# ---------------------------------------------------------------------------
+# Bias gate constants (two-component architecture)
+# ---------------------------------------------------------------------------
+# The bias gate guards against applying noisy or transient bias corrections.
+# sigma_shrunk is ALWAYS applied; bias is only applied when all three pass.
+#
+# BIAS_MIN_EFFECTIVE_N (50)
+#   Higher than MIN_SAMPLE (30) because bias estimates converge more slowly
+#   than sigma estimates.  At n_eff = 50 the standard error of the mean is
+#   sigma / sqrt(50) ≈ 0.5–0.6°F for typical GFS errors — enough resolution
+#   to detect a real 0.3+°F systematic bias.
+#
+# BIAS_MIN_T_STAT (2.0)
+#   |bias| / (sigma_raw / sqrt(n_eff)) >= 2.0 → approximately 95% confidence
+#   that the bias is distinguishable from zero.  This directly captures the
+#   "statistically significant" requirement.
+#
+# BIAS_MIN_MAGNITUDE (0.3°F)
+#   Below this the bias is economically negligible for typical Kalshi markets
+#   (where thresholds are whole-degree integers).  Prevents applying tiny
+#   corrections that could add noise without adding value.
+
+BIAS_MIN_EFFECTIVE_N: float = 50.0   # higher bar than MIN_SAMPLE for sigma
+BIAS_MIN_T_STAT:      float = 2.0    # ~95% confidence bias ≠ 0
+BIAS_MIN_MAGNITUDE:   float = 0.3    # °F — below this, bias is negligible
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +138,13 @@ class V3StatsConfig:
     sigma_ceiling:  float = SIGMA_CEILING
     min_sample:     int   = MIN_SAMPLE
 
+    # ── Bias gate thresholds (two-component architecture) ─────────────────
+    # sigma_shrunk is always applied.
+    # bias is only applied to mu when ALL THREE of these conditions hold:
+    bias_min_effective_n: float = BIAS_MIN_EFFECTIVE_N  # n_eff must be >= this
+    bias_min_t_stat:      float = BIAS_MIN_T_STAT       # |t| must be >= this
+    bias_min_magnitude:   float = BIAS_MIN_MAGNITUDE    # |bias| must be >= this (°F)
+
     def __post_init__(self) -> None:
         total = round(self.hist_weight + self.forward_weight, 6)
         if abs(total - 1.0) > 1e-4:
@@ -121,13 +154,16 @@ class V3StatsConfig:
 
     def to_dict(self) -> dict:
         return {
-            "hist_weight":       self.hist_weight,
-            "forward_weight":    self.forward_weight,
-            "shrinkage_k":       self.shrinkage_k,
-            "autocorr_discount": self.autocorr_discount,
-            "sigma_floor":       self.sigma_floor,
-            "sigma_ceiling":     self.sigma_ceiling,
-            "min_sample":        self.min_sample,
+            "hist_weight":          self.hist_weight,
+            "forward_weight":       self.forward_weight,
+            "shrinkage_k":          self.shrinkage_k,
+            "autocorr_discount":    self.autocorr_discount,
+            "sigma_floor":          self.sigma_floor,
+            "sigma_ceiling":        self.sigma_ceiling,
+            "min_sample":           self.min_sample,
+            "bias_min_effective_n": self.bias_min_effective_n,
+            "bias_min_t_stat":      self.bias_min_t_stat,
+            "bias_min_magnitude":   self.bias_min_magnitude,
         }
 
 
@@ -175,6 +211,40 @@ def _safe_mean(errors: list[float]) -> float | None:
 
 def _clamp_sigma(sigma: float, floor: float = SIGMA_FLOOR, ceiling: float = SIGMA_CEILING) -> float:
     return max(floor, min(ceiling, sigma))
+
+
+def _compute_bias_gate(
+    bias_shrunk: float,
+    rs: "_RawStats",
+    cfg: "V3StatsConfig",
+) -> tuple[bool, float | None, str]:
+    """
+    Evaluate the three-condition bias gate.
+
+    Returns (gate_passed, t_stat_or_None, suppressed_reason).
+    suppressed_reason is empty string when gate_passed is True.
+
+    Conditions — ALL must hold:
+      1. n_eff >= cfg.bias_min_effective_n
+      2. |bias_t_stat| >= cfg.bias_min_t_stat  (≈ 95% CI)
+      3. |bias_shrunk| >= cfg.bias_min_magnitude
+    """
+    if rs.n_eff < cfg.bias_min_effective_n:
+        return False, None, (
+            f"n_eff={rs.n_eff:.1f} < {cfg.bias_min_effective_n}"
+        )
+    if rs.sigma_raw is None or rs.sigma_raw <= 0:
+        return False, None, "sigma unavailable"
+    t = abs(bias_shrunk) / (rs.sigma_raw / math.sqrt(rs.n_eff))
+    if t < cfg.bias_min_t_stat:
+        return False, round(t, 3), (
+            f"|t|={t:.2f} < {cfg.bias_min_t_stat} (not statistically significant)"
+        )
+    if abs(bias_shrunk) < cfg.bias_min_magnitude:
+        return False, round(t, 3), (
+            f"|bias|={abs(bias_shrunk):.3f}°F < {cfg.bias_min_magnitude}°F (economically negligible)"
+        )
+    return True, round(t, 3), ""
 
 
 @dataclass
@@ -361,6 +431,7 @@ async def compute_v3_error_stats(
         bias_shrunk: float,
         sigma_shrunk: float,
     ) -> None:
+        gate_passed, t_stat, suppress_reason = _compute_bias_gate(bias_shrunk, rs, cfg)
         rows_to_insert.append(V3ErrorStats(
             last_computed_at=now,
             preload_version=preload_version,
@@ -376,6 +447,9 @@ async def compute_v3_error_stats(
             sigma_shrunk=round(sigma_shrunk, 4),
             mae=round(rs.mae, 4) if rs.mae is not None else None,
             rmse=round(rs.rmse, 4) if rs.rmse is not None else None,
+            bias_t_stat=t_stat,
+            bias_gate_passed=gate_passed,
+            bias_suppressed_reason=suppress_reason or None,
         ))
 
     # Level 0: city + model + lead + season
@@ -471,7 +545,12 @@ async def compute_v3_error_stats(
 class V3Prior:
     """
     The bias and sigma to apply for one prediction, with full provenance.
-    Sigma is always >= SIGMA_FLOOR and <= SIGMA_CEILING.
+
+    Two-component architecture:
+    - sigma is always applied (calibration signal).
+    - bias is only applied to mu when bias_gate_passed is True.
+
+    sigma is always >= SIGMA_FLOOR and <= SIGMA_CEILING.
     """
     bias:           float
     sigma:          float
@@ -479,6 +558,11 @@ class V3Prior:
     raw_n:          int    # raw sample count backing this estimate
     effective_n:    float  # autocorrelation-discounted sample count
     source_key:     str    # human-readable group that provided the estimate
+
+    # Bias gate — determines whether bias correction is applied to mu
+    bias_gate_passed:      bool  = False   # True → apply bias to mu
+    bias_t_stat:           float | None = None  # |bias| / (sigma / sqrt(n_eff))
+    bias_suppressed_reason: str  = ""      # non-empty when gate is False
 
 
 async def get_v3_prior(
@@ -559,6 +643,9 @@ async def get_v3_prior(
             raw_n=row.raw_sample_size,
             effective_n=float(row.effective_n or 0.0),
             source_key=label_map[level],
+            bias_gate_passed=bool(row.bias_gate_passed) if row.bias_gate_passed is not None else False,
+            bias_t_stat=float(row.bias_t_stat) if row.bias_t_stat is not None else None,
+            bias_suppressed_reason=row.bias_suppressed_reason or "",
         )
 
     # Absolute fallback — conservative prior if DB is empty
@@ -569,4 +656,7 @@ async def get_v3_prior(
         raw_n=0,
         effective_n=0.0,
         source_key="hardcoded/prior",
+        bias_gate_passed=False,
+        bias_t_stat=None,
+        bias_suppressed_reason="no preload data",
     )
