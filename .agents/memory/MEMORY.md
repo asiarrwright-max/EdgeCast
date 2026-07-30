@@ -12,3 +12,4 @@
 - [api-client-react-rebuild](api-client-react-rebuild.md) — After adding a new .ts file to lib/api-client-react/src/, run `pnpm tsc --build` in that package before the frontend will see the exports.
 - [ncei-access-api-units](ncei-access-api-units.md) — NCEI access API returns full degrees (not tenths); TMAX_SCALE_FACTOR must be 1.0, not 10.
 - [open-meteo-historical-forecast-api-constraint](open-meteo-historical-forecast-api-constraint.md) — forecast_days mutually exclusive with start_date/end_date; V3 gets one lead-time bucket only from this provider.
+- [v3-phase2-walkforward-results](v3-phase2-walkforward-results.md) — walk-forward verdict: no_clear_improvement; raw model near-zero bias masks; OKC overshot; sigma floor dominates coverage.
