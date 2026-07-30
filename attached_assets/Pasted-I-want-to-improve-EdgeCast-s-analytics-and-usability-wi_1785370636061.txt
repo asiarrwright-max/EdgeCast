@@ -1,0 +1,172 @@
+I want to improve EdgeCast's analytics and usability without changing the prediction engine.
+
+IMPORTANT
+
+Do NOT modify:
+
+- Strategy V1
+- Strategy V2
+- probability calculations
+- sigma estimation
+- bias correction
+- calibration logic
+- trade-entry thresholds
+- position sizing
+- forecast generation
+- historical trades
+- prediction snapshots
+- learning algorithms
+
+This project should improve observability only.
+
+====================================================
+PHASE 1 — Audit All Performance Metrics
+====================================================
+
+Inspect the production code and document exactly how the following metrics are calculated:
+
+- ROI
+- Win Rate
+- Brier Score
+- Expected Value
+- Average Edge
+- Confidence
+
+For each metric provide:
+
+• Formula used
+• Code path
+• SQL query
+• Which trades are included
+• Whether only settled trades are used
+• Whether V1 and V2 use identical comparison sets
+• Any assumptions
+• Any inaccuracies or misleading comparisons
+
+For Brier Score specifically:
+
+Explain:
+
+- what probability is being scored
+- how YES/NO probabilities are handled
+- whether multiple snapshots are included
+- whether only executed trades are used
+- whether V1-only and V2-only trades are mixed
+- whether paired comparisons are available
+
+End Phase 1 with:
+
+✓ Correct
+⚠ Needs clarification
+✗ Should be corrected
+
+Do not modify code yet.
+
+====================================================
+PHASE 2 — Performance Analytics Dashboard
+====================================================
+
+Create a new read-only dashboard page called:
+
+Performance Analytics
+
+Include summary cards for:
+
+- Total Trades
+- Settled Trades
+- Open Trades
+- Win Rate
+- ROI
+- Brier Score
+- Average Edge
+- Average Confidence
+
+Charts
+
+- Cumulative ROI over time
+- Win Rate over time
+- Brier Score over time
+- Daily Profit/Loss
+- Daily Trade Count
+
+Strategy comparisons
+
+- V1 vs V2
+- Shared Trades
+- V1-only Trades
+- V2-only Trades
+- Opposite-side Trades
+
+Filters
+
+- Last 7 Days
+- Last 30 Days
+- All Time
+
+Everything should be read-only.
+
+====================================================
+PHASE 3 — Trade Details Report
+====================================================
+
+When clicking any trade, open a detailed Trade Report.
+
+Display:
+
+Market Information
+
+- Market
+- Settlement Date
+- Side
+- Entry Price
+- Exit Price (if settled)
+- Status
+
+Prediction Details
+
+- Market Probability
+- V1 Probability
+- V2 Probability
+- Expected Edge
+- Confidence
+
+Forecast Details
+
+- Forecast Temperature
+- Lead-Time Bucket
+- Historical Forecast Error
+- Sigma Used
+- Bias Adjustment
+- Whether Global or City Statistics were used
+
+Decision Details
+
+Explain in plain English:
+
+- Why the trade qualified
+- Why V2 differed from V1 (if applicable)
+- Why confidence is High / Medium / Low
+
+Outcome
+
+- Win/Loss
+- Profit/Loss
+- Payout
+- ROI contribution
+
+====================================================
+GENERAL REQUIREMENTS
+====================================================
+
+These features must:
+
+- NOT change prediction behavior
+- NOT affect learning
+- NOT alter paper trades
+- NOT alter historical metrics
+- NOT change strategy outcomes
+
+Only improve transparency, reporting, and analytics.
+
+Before implementing, review the existing architecture and propose the cleanest implementation plan.
+Identify any areas where metrics should be clarified before coding begins.
