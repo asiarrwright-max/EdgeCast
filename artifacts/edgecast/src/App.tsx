@@ -13,6 +13,7 @@ import ErrorsPage from '@/pages/errors';
 import PaperTradingPage from '@/pages/paper-trading';
 import PaperTradeDetailPage from '@/pages/paper-trade-detail';
 import StrategyAuditPage from '@/pages/strategy-audit';
+import StrategyComparisonPage from '@/pages/strategy-comparison';
 import PerformancePage from '@/pages/performance';
 import V21AuditPage from '@/pages/v21-audit';
 
@@ -97,6 +98,7 @@ function ProtectedRoutes() {
             <Route path="/paper-trading/:id" component={PaperTradeDetailPage} />
             <Route path="/paper-trading" component={PaperTradingPage} />
             <Route path="/performance" component={PerformancePage} />
+            <Route path="/strategy-comparison" component={StrategyComparisonPage} />
             <Route path="/v21-audit" component={V21AuditPage} />
             <Route path="/strategy-audit" component={StrategyAuditPage} />
             <Route path="/health" component={HealthPage} />

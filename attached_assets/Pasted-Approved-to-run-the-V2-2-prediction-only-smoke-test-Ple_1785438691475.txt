@@ -1,0 +1,147 @@
+Approved to run the V2.2 prediction-only smoke test.
+
+Please do the following:
+
+1. Confirm current strategy status
+
+Before changing anything, report the current live status of:
+
+- V2.1 predictions
+- V2.1 paper trading
+- V2.2 predictions
+- V2.2 paper trading
+- V3 predictions
+- V3 paper trading
+
+I specifically want confirmation that V3 is currently creating paper trades and remains paper-only with no real Kalshi execution.
+
+2. Enable V2.2 predictions only
+
+Set:
+
+- v2.2.predictions_enabled = true
+- v2.2.paper_trading_enabled = false
+
+Run one full collection cycle.
+
+After the cycle, report:
+
+- V2.1 predictions created
+- V2.2 predictions created
+- V3 predictions created
+- number matched across all three versions
+- unmatched markets and reasons
+- duplicate predictions
+- orphaned comparison links
+- warnings or errors
+- confirmation that V2.2 created zero paper trades
+- confirmation that V3 continued creating paper trades normally
+- confirmation that V1, V2, V2.1, and V3 were not changed by enabling V2.2
+
+3. Verify expected V2.1 versus V2.2 behavior
+
+Because no ForecastErrorStats bucket has reached MIN_SAMPLE = 30, confirm:
+
+- V2.1 and V2.2 probabilities are currently identical
+- prob_delta_pp = 0 for all shared markets
+- the corrected V2.2 bias formula remains inactive below the minimum sample
+- this identical output is expected, not an error
+
+Show several sample calculations.
+
+4. Build one comparison area for all versions
+
+Add a single dashboard page called something like:
+
+Strategy Comparison
+
+It should compare:
+
+- V2.1
+- V2.2
+- V3
+
+Use only shared eligible markets for direct comparisons.
+
+Include a summary section with:
+
+- predictions
+- paper trades
+- executable paper trades
+- settled executable trades
+- wins
+- losses
+- executable win rate
+- net executable ROI after fees
+- Brier score
+- calibration
+- average claimed edge
+- average sigma
+- trade frequency
+- number of shared markets
+
+Clearly label:
+
+- V2.1 as the original learning version
+- V2.2 as the corrected-bias version
+- V3 as the historical-preload version
+
+5. Add a market-level comparison table
+
+For each shared market, show:
+
+- ticker
+- city
+- contract
+- market probability
+- V2.1 probability
+- V2.2 probability
+- V3 probability
+- V2.1 edge
+- V2.2 edge
+- V3 edge
+- V2.1 trade decision
+- V2.2 trade decision
+- V3 trade decision
+- executable status
+- sigma by version
+- bias applied by version
+- settlement result when available
+- P/L by version when available
+
+Add filters for:
+
+- city
+- settled/open
+- executable/non-executable
+- all-traded
+- V2.1-only
+- V2.2-only
+- V3-only
+- versions disagreed
+- versions agreed
+
+6. Protect official performance reporting
+
+Only executable paper trades may count toward official:
+
+- ROI
+- win rate
+- P/L
+- trade totals
+
+Non-executable signals and observation-only predictions must be shown separately and excluded from headline performance.
+
+7. Preserve strategy isolation
+
+Do not:
+
+- modify V2.1
+- backfill V2.2 as historical forward performance
+- recalculate old trades
+- alter V3 logic or thresholds
+- create real Kalshi orders
+
+Keep V2.2 paper trading disabled after this smoke test.
+
+Stop after the cycle and comparison page are ready, and present the results for review before enabling V2.2 paper trading.

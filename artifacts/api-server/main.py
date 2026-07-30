@@ -8,7 +8,8 @@ from app.database import init_db
 from app.scheduler import start_scheduler, shutdown_scheduler
 from app.routers import audit, health, auth, dashboard, markets, weather, jobs, errors, analysis, paper_trades, analytics, v21_analytics
 from app.routers import v3_analytics  # V3: additive router import
-from app.routers import v22_analytics  # V2.2: isolated parallel challenger
+from app.routers import v22_analytics         # V2.2: isolated parallel challenger
+from app.routers import strategy_comparison  # Unified cross-strategy comparison
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,4 +57,5 @@ app.include_router(audit.router, prefix="/api")
 app.include_router(analytics.router, prefix="/api")
 app.include_router(v21_analytics.router, prefix="/api")
 app.include_router(v3_analytics.router, prefix="/api")   # V3: additive router registration
-app.include_router(v22_analytics.router, prefix="/api")  # V2.2: parallel challenger
+app.include_router(v22_analytics.router, prefix="/api")         # V2.2: parallel challenger
+app.include_router(strategy_comparison.router, prefix="/api")   # Unified comparison
