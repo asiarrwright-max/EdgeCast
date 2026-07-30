@@ -39,6 +39,16 @@ description: Root causes of V2.0 losses, V2.1 fix inventory, station status tabl
 - Default: DISABLED. Enable via `AppSetting paper_trading_v21.consensus_guard_enabled=true`.
 - Backtest results shown at `/v21-audit`. Do not enable until ≥100 settled V2.1 trades show consistent positive ROI.
 
+## Settlement Operator Storage
+- DB stores settlement_operator as `"gte"` / `"lte"` (not `">"` / `"<"`)
+- Frontend must check `operator === "gte"` not `">"` — important for normalCDF branch selection
+
+## Probability Chain Math (implemented in paper-trade-detail.tsx)
+- z = (threshold − forecast) / sigma
+- P(YES) for gte market = 1 − Φ(z);  for lte market = Φ(z)
+- normalCDF uses Abramowitz & Stegun polynomial approximation (exact to ~7 sig digits)
+- Verified: computed values match stored `ec_side_probability` to 4 decimal places
+
 ## Tests Updated
 - `test_verified_count_is_three` → `test_verified_count_is_four` (OKC now verified = 4 cities)
 - Dallas, Houston, LA coordinate assertions updated to station coords (not city-centre)

@@ -18,6 +18,23 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
+// ── Math helpers ─────────────────────────────────────────────────────────────
+
+/** Cumulative distribution function of N(0,1) — Abramowitz & Stegun approximation. */
+function normalCDF(z: number): number {
+  const absZ = Math.abs(z);
+  const t = 1 / (1 + 0.2316419 * absZ);
+  const poly =
+    t * (0.319381530 +
+    t * (-0.356563782 +
+    t * (1.781477937 +
+    t * (-1.821255978 +
+    t * 1.330274429))));
+  const pdf = Math.exp(-0.5 * z * z) / Math.sqrt(2 * Math.PI);
+  const cdf = 1 - pdf * poly;
+  return z >= 0 ? cdf : 1 - cdf;
+}
+
 // ── Formatters ────────────────────────────────────────────────────────────────
 
 function pct(n: number | null | undefined): string {
@@ -224,7 +241,7 @@ function buildReasoningBullets(
       tone: "blue",
       icon: <TrendingUp className="h-4 w-4" />,
       headline: `Bias correction applied: ${bias > 0 ? "+" : ""}${absBp} pp`,
-      detail: `Forecasts for ${trade.city ?? "this city"} have historically run ${dir} than actual temperatures. EdgeCast adjusted its probability estimate to account for this systematic pattern.`,
+      detail: `Forecasts for ${trade.city ?? "this city"} have historically run ${dir} than actual temperatures. EdgeCast adjusted its probability estimate to account for this pattern.`,
     });
   }
 
@@ -367,9 +384,453 @@ function ProbabilityBar({ trade }: { trade: PaperTrade & { [k: string]: any } })
   );
 }
 
+// ── Contract + Forecast context ───────────────────────────────────────────────
+
+function ContractSection({ snap, trade }: {
+  snap: Record<string, any> | null;
+  trade: Record<string, any>;
+}) {
+  if (!snap) return null;
+
+  const variable   = snap.settlementVariable as string | null;
+  const operator   = snap.settlementOperator as string | null;
+  const threshold  = snap.settlementThreshold as number | null;
+  const forecast   = snap.forecastValue as number | null;
+  const leadTime   = snap.leadTimeDays as number | null;
+  const contractType = snap.contractType as string | null;
+  const lowerBound = snap.lowerBound as number | null;
+  const upperBound = snap.upperBound as number | null;
+  const targetHour = snap.targetHour as number | null;
+  const targetTz   = snap.targetTimezoneStr as string | null;
+
+  if (forecast == null && threshold == null) return null;
+
+  const varLabel = variable === "high" ? "High Temperature" : variable === "low" ? "Low Temperature" : (variable ?? "Temperature");
+  const opLabel  = (operator === ">" || operator === "gte") ? "exceeds" : (operator === "<" || operator === "lte") ? "stays below" : (operator ?? "");
+
+  let questionText = "";
+  if (contractType === "range" && lowerBound != null && upperBound != null) {
+    questionText = `Will the ${varLabel.toLowerCase()} be between ${lowerBound.toFixed(1)}°F and ${upperBound.toFixed(1)}°F?`;
+  } else if (contractType === "hourly_threshold" && targetHour != null) {
+    const period = targetHour >= 12 ? "PM" : "AM";
+    const displayHour = targetHour % 12 || 12;
+    questionText = `Will the temperature at ${displayHour}${period}${targetTz ? ` ${targetTz}` : ""} ${opLabel} ${threshold?.toFixed(1) ?? "—"}°F?`;
+  } else if (threshold != null) {
+    questionText = `Will the ${varLabel.toLowerCase()} ${opLabel} ${threshold.toFixed(1)}°F?`;
+  }
+
+  const forecastVsThreshold = forecast != null && threshold != null ? forecast - threshold : null;
+
+  return (
+    <Card className="border-border/50 bg-card/40">
+      <CardHeader className="pb-2 border-b border-border/40">
+        <CardTitle className="text-xs font-mono tracking-widest text-muted-foreground uppercase">
+          What EdgeCast Was Predicting
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="pt-3 space-y-3">
+        {questionText && (
+          <div className="rounded bg-muted/40 px-3 py-2 text-sm font-medium">
+            {trade.city && <span className="text-muted-foreground text-xs mr-1">{trade.city} ·</span>}
+            {questionText}
+          </div>
+        )}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+          {forecast != null && (
+            <div className="bg-muted/30 rounded px-2 py-2">
+              <p className="text-muted-foreground uppercase tracking-wide text-[10px]">Forecast</p>
+              <p className="font-mono font-semibold mt-0.5">{forecast.toFixed(1)}°F</p>
+            </div>
+          )}
+          {threshold != null && contractType !== "range" && (
+            <div className="bg-muted/30 rounded px-2 py-2">
+              <p className="text-muted-foreground uppercase tracking-wide text-[10px]">Threshold</p>
+              <p className="font-mono font-semibold mt-0.5">{threshold.toFixed(1)}°F</p>
+            </div>
+          )}
+          {forecastVsThreshold != null && contractType !== "range" && (
+            <div className={`rounded px-2 py-2 ${Math.abs(forecastVsThreshold) < 2 ? "bg-amber-500/10" : forecastVsThreshold > 0 === (operator === ">") ? "bg-emerald-500/10" : "bg-rose-500/10"}`}>
+              <p className="text-muted-foreground uppercase tracking-wide text-[10px]">Forecast − Threshold</p>
+              <p className={`font-mono font-semibold mt-0.5 ${
+                forecastVsThreshold > 0 ? "text-emerald-400" : forecastVsThreshold < 0 ? "text-rose-400" : ""
+              }`}>
+                {forecastVsThreshold >= 0 ? "+" : ""}{forecastVsThreshold.toFixed(1)}°F
+              </p>
+            </div>
+          )}
+          {leadTime != null && (
+            <div className="bg-muted/30 rounded px-2 py-2">
+              <p className="text-muted-foreground uppercase tracking-wide text-[10px]">Lead Time</p>
+              <p className="font-mono font-semibold mt-0.5">{leadTime}d</p>
+            </div>
+          )}
+        </div>
+        {contractType === "range" && lowerBound != null && upperBound != null && forecast != null && (
+          <div className="text-xs text-muted-foreground">
+            Forecast {forecast.toFixed(1)}°F is {
+              forecast >= lowerBound && forecast <= upperBound
+                ? <span className="text-emerald-400 font-medium">within</span>
+                : <span className="text-rose-400 font-medium">outside</span>
+            } the {lowerBound.toFixed(1)}–{upperBound.toFixed(1)}°F range.
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Probability calculation chain ─────────────────────────────────────────────
+
+interface CalcStep {
+  label: string;
+  value: string;
+  note?: string;
+  highlight?: boolean;
+}
+
+function ProbabilityChain({ trade, snap }: {
+  trade: Record<string, any>;
+  snap: Record<string, any> | null;
+}) {
+  const stratVer = trade.strategyVersion as string | null;
+  if (!stratVer?.startsWith("v2")) return null;
+
+  const forecast  = snap?.forecastValue   as number | null;
+  const threshold = snap?.settlementThreshold as number | null;
+  const operator  = snap?.settlementOperator  as string | null;
+  const variable  = snap?.settlementVariable  as string | null;
+  const sigma     = trade.sigmaUsed           as number | null;
+  const bias      = trade.biasCorrection      as number | null;
+  const fallback  = trade.fallbackLevel       as string | null;
+  const finalEC   = trade.ecSideProbability   as number | null;
+  const marketP   = trade.sideMarketPrice     as number | null;
+  const edge      = trade.edgePctPoints       as number | null;
+  const direction = trade.direction           as string | null;
+  const contractType = snap?.contractType     as string | null;
+
+  // Only show the chain when we have the essential inputs
+  if (forecast == null || threshold == null || sigma == null || sigma === 0) return null;
+  if (contractType === "range") return null; // range uses CDF difference, different formula
+
+  const diff = forecast - threshold;               // positive means forecast above threshold
+  const z    = (threshold - forecast) / sigma;     // z for Φ
+  const isExceedOp = operator === ">" || operator === "gte";
+  const rawProbYES = isExceedOp ? 1 - normalCDF(z) : normalCDF(z);
+  const biasAdj   = bias != null ? bias : 0;
+  const computedEC = Math.max(0.001, Math.min(0.999, rawProbYES + biasAdj));
+
+  const varLabel    = variable === "high" ? "high temperature" : variable === "low" ? "low temperature" : "temperature";
+  const opLabel     = operator === ">" ? "exceeds" : "stays below";
+  const fallbackMap: Record<string, string> = {
+    city: "city-specific (learned)",
+    global: "global estimates (fallback)",
+    fixed_table: "fixed defaults (no learned data)",
+  };
+  const fallbackLabel = fallback ? (fallbackMap[fallback] ?? fallback) : "unknown";
+
+  const steps: CalcStep[] = [
+    {
+      label: "Forecast value",
+      value: `${forecast.toFixed(2)}°F`,
+      note: `Open-Meteo forecast for ${varLabel}`,
+    },
+    {
+      label: "Settlement threshold",
+      value: `${threshold.toFixed(2)}°F`,
+      note: `YES wins if ${varLabel} ${opLabel} this`,
+    },
+    {
+      label: "Difference (forecast − threshold)",
+      value: `${diff >= 0 ? "+" : ""}${diff.toFixed(2)}°F`,
+      note: diff > 0
+        ? `Forecast is ${Math.abs(diff).toFixed(2)}°F above the threshold`
+        : diff < 0
+          ? `Forecast is ${Math.abs(diff).toFixed(2)}°F below the threshold`
+          : "Forecast is exactly at the threshold (50/50 before uncertainty)",
+    },
+    {
+      label: "Forecast uncertainty (σ)",
+      value: `${sigma.toFixed(2)}°F`,
+      note: `Source: ${fallbackLabel}`,
+    },
+    {
+      label: "Z-score  =  (threshold − forecast) / σ",
+      value: `z = (${threshold.toFixed(2)} − ${forecast.toFixed(2)}) / ${sigma.toFixed(2)} = ${z.toFixed(3)}`,
+    },
+    {
+      label: `Raw P(YES)  =  ${isExceedOp ? "1 − Φ(z)" : "Φ(z)"}`,
+      value: `${(rawProbYES * 100).toFixed(2)}%`,
+      note: `Φ(${z.toFixed(3)}) = ${normalCDF(z).toFixed(4)}`,
+    },
+    {
+      label: "Bias correction",
+      value: bias != null && Math.abs(bias) >= 0.001
+        ? `${bias >= 0 ? "+" : ""}${(bias * 100).toFixed(2)} pp`
+        : "None (0 pp)",
+      note: bias != null && Math.abs(bias) >= 0.001
+        ? "Historical forecast bias for this city"
+        : undefined,
+    },
+    {
+      label: `Final EdgeCast P(YES)`,
+      value: `${(computedEC * 100).toFixed(2)}%`,
+      highlight: true,
+      note: finalEC != null && Math.abs(computedEC - finalEC) > 0.005
+        ? `Stored value: ${(finalEC * 100).toFixed(2)}% (minor rounding)`
+        : undefined,
+    },
+  ];
+
+  if (direction && marketP != null) {
+    const ecSide = direction === "YES" ? computedEC : 1 - computedEC;
+    const edgeCalc = ecSide - marketP;
+    steps.push({
+      label: `EdgeCast P(${direction})`,
+      value: `${(ecSide * 100).toFixed(2)}%`,
+    });
+    steps.push({
+      label: `Market price (${direction})`,
+      value: `${(marketP * 100).toFixed(2)}%`,
+    });
+    steps.push({
+      label: `Edge  =  EdgeCast P(${direction}) − Market P(${direction})`,
+      value: `${edgeCalc >= 0 ? "+" : ""}${(edgeCalc * 100).toFixed(2)} pp`,
+      highlight: true,
+      note: edge != null && Math.abs(edgeCalc - edge / 100) > 0.01
+        ? `Stored: ${edge >= 0 ? "+" : ""}${edge.toFixed(2)} pp`
+        : undefined,
+    });
+  }
+
+  const entryDecision = edge != null && edge > 0
+    ? `ENTER (${direction}) — edge exceeds minimum threshold`
+    : (trade.status === "V2_EXCLUDED"
+        ? `EXCLUDED despite positive edge — see skip reason below`
+        : "SKIP — edge below minimum threshold");
+
+  return (
+    <Card className="border-border/50 bg-card/40">
+      <CardHeader className="pb-2 border-b border-border/40">
+        <CardTitle className="text-xs font-mono tracking-widest text-muted-foreground uppercase">
+          Probability Calculation
+        </CardTitle>
+        <p className="text-xs text-muted-foreground mt-1">
+          Step-by-step derivation of EdgeCast's probability estimate at entry.
+        </p>
+      </CardHeader>
+      <CardContent className="pt-3 space-y-1.5 font-mono text-xs">
+        {steps.map((s, i) => (
+          <div key={i} className={`flex gap-3 items-start rounded px-2.5 py-2 ${
+            s.highlight ? "bg-primary/10 border border-primary/20" : "bg-muted/20"
+          }`}>
+            <span className="text-muted-foreground shrink-0 w-5 text-center text-[10px] mt-0.5">
+              {i + 1}
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                <span className={`font-sans text-[11px] ${s.highlight ? "text-foreground font-semibold" : "text-muted-foreground"}`}>
+                  {s.label}
+                </span>
+                <span className={`font-mono shrink-0 ${s.highlight ? "text-primary font-bold" : "text-foreground"}`}>
+                  {s.value}
+                </span>
+              </div>
+              {s.note && (
+                <p className="text-muted-foreground/70 text-[10px] mt-0.5 font-sans">{s.note}</p>
+              )}
+            </div>
+          </div>
+        ))}
+        {/* Decision */}
+        <div className={`flex gap-3 items-start rounded px-2.5 py-2 mt-1 border ${
+          trade.status === "V2_EXCLUDED"
+            ? "bg-amber-500/10 border-amber-500/30"
+            : edge != null && edge > 0
+              ? "bg-emerald-500/10 border-emerald-500/30"
+              : "bg-rose-500/10 border-rose-500/30"
+        }`}>
+          <span className="text-muted-foreground shrink-0 w-5 text-center text-[10px] mt-0.5">→</span>
+          <span className={`font-sans text-[11px] font-semibold ${
+            trade.status === "V2_EXCLUDED"
+              ? "text-amber-400"
+              : edge != null && edge > 0
+                ? "text-emerald-400"
+                : "text-rose-400"
+          }`}>
+            {entryDecision}
+          </span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Why this trade was skipped (V2_EXCLUDED) ──────────────────────────────────
+
+const SKIP_REASON_MAP: Record<string, { headline: string; detail: string; tone: BulletTone }> = {
+  v2_below_min_price: {
+    tone: "amber",
+    headline: "Entry price at or below 1¢ — near-certain loss",
+    detail:
+      "At a price of ≤1¢ per contract, this bet is priced as a near-certainty by the market. The maximum payout is tiny and the loss would be total. V2.1 excludes these to avoid asymmetric bad bets.",
+  },
+  v2_zero_volume: {
+    tone: "amber",
+    headline: "Zero trading volume — market likely illiquid",
+    detail:
+      "No contracts have traded. A market with zero volume typically has no active counterparties. V2.1 avoids these because fills would be unreliable and slippage unpredictable.",
+  },
+  v2_no_liquidity: {
+    tone: "amber",
+    headline: "No bid or ask prices recorded",
+    detail:
+      "The market had no bid or ask at the time of evaluation. Without a price, it's impossible to enter the trade. V2.1 requires at least one side to have a quoted price.",
+  },
+};
+
+function parseSkipReason(decisionExplanation: string | null | undefined): {
+  flag: string | null;
+  shortReason: string | null;
+  fullText: string | null;
+} {
+  if (!decisionExplanation) return { flag: null, shortReason: null, fullText: null };
+
+  // Pattern: "[v2.1 excluded: FLAG] rest..."
+  const excludedMatch = decisionExplanation.match(/^\[v2\.1 excluded:\s*([^\]]+)\]\s*(.*)/s);
+  if (excludedMatch) {
+    return {
+      flag: excludedMatch[1].trim(),
+      shortReason: null,
+      fullText: excludedMatch[2].trim() || null,
+    };
+  }
+
+  // Pattern: "Skipped: REASON"
+  const skippedMatch = decisionExplanation.match(/^Skipped:\s*(.*)/s);
+  if (skippedMatch) {
+    return { flag: null, shortReason: skippedMatch[1].trim(), fullText: null };
+  }
+
+  return { flag: null, shortReason: null, fullText: decisionExplanation };
+}
+
+function WhyThisWasSkipped({ trade }: { trade: Record<string, any> }) {
+  if (trade.status !== "V2_EXCLUDED") return null;
+
+  const { flag, shortReason, fullText } = parseSkipReason(trade.decisionExplanation);
+
+  const mapped = flag ? SKIP_REASON_MAP[flag] : null;
+
+  // Build bullets
+  const bullets: ReasoningBullet[] = [];
+
+  if (mapped) {
+    bullets.push({
+      tone: mapped.tone,
+      icon: <AlertTriangle className="h-4 w-4" />,
+      headline: mapped.headline,
+      detail: mapped.detail,
+    });
+  } else if (shortReason) {
+    bullets.push({
+      tone: "amber",
+      icon: <AlertTriangle className="h-4 w-4" />,
+      headline: shortReason,
+      detail: "V2.1 evaluated this market but excluded it based on this guard. See the Decision Log for the full system output.",
+    });
+  }
+
+  // If there was still a positive edge, note it
+  const edge = trade.edgePctPoints as number | null;
+  if (edge != null && edge > 0) {
+    bullets.push({
+      tone: "blue",
+      icon: <Zap className="h-4 w-4" />,
+      headline: `Edge was +${edge.toFixed(1)} pp — the signal was real`,
+      detail: `Despite being excluded, this market had a positive edge of +${edge.toFixed(1)} pp. The exclusion is a quality/execution guard, not a signal problem. Review the Probability Calculation above to see the full math.`,
+    });
+  }
+
+  // Explain what would have happened
+  const direction = trade.direction as string | null;
+  const ecSide = trade.ecSideProbability as number | null;
+  const marketP = trade.sideMarketPrice as number | null;
+  if (direction && ecSide != null && marketP != null) {
+    bullets.push({
+      tone: "gray",
+      icon: <Info className="h-4 w-4" />,
+      headline: `If entered: ${direction} at ${(marketP * 100).toFixed(1)}¢ with EdgeCast estimating ${(ecSide * 100).toFixed(1)}%`,
+      detail: "This is what the trade would have looked like. The exclusion prevented it from being logged as an active paper trade.",
+    });
+  }
+
+  if (bullets.length === 0) {
+    return (
+      <Card className="border-amber-500/30 bg-amber-500/5">
+        <CardContent className="pt-4">
+          <p className="text-sm text-amber-300/80">
+            This market was evaluated but excluded. Skip reason:{" "}
+            <span className="font-mono">{fullText ?? trade.decisionExplanation ?? "—"}</span>
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="border-amber-500/30 bg-amber-500/5">
+      <CardHeader className="pb-3 border-b border-amber-500/20">
+        <CardTitle className="text-sm font-semibold text-amber-300 flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4" />
+          Why EdgeCast Passed on This Trade
+        </CardTitle>
+        <p className="text-xs text-muted-foreground mt-1">
+          This market was fully evaluated but excluded before entry. Here's why.
+        </p>
+      </CardHeader>
+      <CardContent className="pt-4 space-y-3">
+        {bullets.map((b, i) => (
+          <div key={i} className={`rounded-lg border p-3 ${TONE_BG[b.tone]}`}>
+            <div className={`flex items-center gap-2 font-medium text-sm mb-1 ${TONE_TEXT[b.tone]}`}>
+              <span className="shrink-0">{b.icon}</span>
+              {b.headline}
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed pl-6">{b.detail}</p>
+          </div>
+        ))}
+        {fullText && (
+          <div className="text-xs text-muted-foreground border-t border-amber-500/20 pt-3 font-mono leading-relaxed">
+            {fullText}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Outcome section ───────────────────────────────────────────────────────────
 
-function OutcomeSection({ trade }: { trade: PaperTrade }) {
+function OutcomeSection({ trade }: { trade: PaperTrade & { [k: string]: any } }) {
+  // V2_EXCLUDED — evaluated but not entered
+  if ((trade as any).status === "V2_EXCLUDED") {
+    const direction = (trade as any).direction as string | null;
+    const edge = (trade as any).edgePctPoints as number | null;
+    return (
+      <Card className="border-amber-500/30 bg-amber-500/5">
+        <CardContent className="pt-4 flex items-start gap-3">
+          <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm text-amber-300 font-medium">Evaluated — Not Entered</p>
+            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+              V2.1 ran the full probability analysis{direction ? ` and identified a ${direction} opportunity` : ""}{edge != null && edge > 0 ? ` with a +${edge.toFixed(1)} pp edge` : ""}, but an execution quality guard prevented entry.
+              No stake was placed. See <em>Why EdgeCast Passed on This Trade</em> below.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (trade.status === "OPEN") {
     return (
       <Card className="border-sky-500/30 bg-sky-500/5">
@@ -542,16 +1003,26 @@ export default function PaperTradeDetailPage({ params }: { params: { id: string 
         </p>
       </div>
 
-      {/* Outcome */}
-      <OutcomeSection trade={trade} />
+      {/* What EdgeCast was predicting — shown before outcome for context */}
+      <ContractSection snap={snap} trade={tradeAny} />
 
-      {/* ── WHY WE LIKE THIS TRADE (the main feature) ── */}
-      <WhyWeLikeThisTrade
-        trade={tradeAny}
-        snap={snap}
-        cityStatus={cityStatus}
-        cityObservations={cityObservations}
-      />
+      {/* Outcome */}
+      <OutcomeSection trade={tradeAny as any} />
+
+      {/* ── WHY WE LIKE / WHY WE PASSED ── */}
+      {tradeAny.status === "V2_EXCLUDED" ? (
+        <WhyThisWasSkipped trade={tradeAny} />
+      ) : (
+        <WhyWeLikeThisTrade
+          trade={tradeAny}
+          snap={snap}
+          cityStatus={cityStatus}
+          cityObservations={cityObservations}
+        />
+      )}
+
+      {/* Probability calculation chain — step-by-step math (V2 only) */}
+      <ProbabilityChain trade={tradeAny} snap={snap} />
 
       {/* Probability comparison bar */}
       <ProbabilityBar trade={tradeAny} />
