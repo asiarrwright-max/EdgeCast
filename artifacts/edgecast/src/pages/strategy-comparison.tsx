@@ -170,11 +170,17 @@ const STRATEGY_META = {
 
 type StrategyKey = keyof typeof STRATEGY_META;
 
-function StatRow({ label, value, dim }: { label: string; value: string; dim?: boolean }) {
+function StatRow({
+  label, value, dim, highlight,
+}: {
+  label: string; value: string; dim?: boolean; highlight?: boolean;
+}) {
   return (
     <div className="flex items-center justify-between gap-2 py-1.5 border-b border-border/40 last:border-0">
-      <span className="text-xs text-muted-foreground truncate">{label}</span>
-      <span className={`text-xs font-mono font-medium ${dim ? "text-muted-foreground" : ""}`}>
+      <span className={`text-xs truncate ${highlight ? "text-foreground font-semibold" : "text-muted-foreground"}`}>
+        {label}
+      </span>
+      <span className={`text-xs font-mono font-medium ${dim ? "text-muted-foreground" : highlight ? "text-foreground" : ""}`}>
         {value}
       </span>
     </div>
@@ -216,7 +222,8 @@ function SectionBlock({ sec, title }: { sec: StrategySection; title: string }) {
         <StatRow label="Gross P/L"        value={hasSettled ? money(sec.gross_pl) : "—"} dim={!hasSettled} />
         <StatRow label="Est. fees (settled)" value={hasSettled && sec.estimated_fees > 0 ? `−$${sec.estimated_fees.toFixed(4)}` : "—"} dim />
         <StatRow label="Net P/L"          value={hasSettled ? money(sec.net_pl) : "—"} dim={!hasSettled} />
-        <StatRow label="ROI"              value={sec.roi_pct != null ? pct(sec.roi_pct) : "—"} dim={!hasSettled} />
+        <StatRow label="Gross ROI"        value={sec.gross_roi_pct != null ? pct(sec.gross_roi_pct) : "—"} dim={!hasSettled} />
+        <StatRow label="Net ROI"          value={sec.net_roi_pct != null ? pct(sec.net_roi_pct) : "—"} dim={!hasSettled} highlight={hasSettled} />
         {sec.is_official && (
           <StatRow label="Brier score" value={sec.brier_score != null ? num(sec.brier_score) : "—"} dim={!hasSettled} />
         )}

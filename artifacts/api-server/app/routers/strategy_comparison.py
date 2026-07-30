@@ -131,7 +131,12 @@ def _strategy_summary(
             "gross_pl":           round(gross_pl, 2),
             "estimated_fees":     round(settled_fees, 4),  # settled only
             "net_pl":             net_pl,                  # gross_pl − settled_fees
-            "roi_pct":            round(100 * gross_pl / settled_stake, 1)
+            # Both ROI variants use settled_stake as denominator.
+            # Gross ROI = gross_pl / settled_stake (before fees).
+            # Net ROI   = net_pl   / settled_stake (after fees); may exceed −100 %.
+            "gross_roi_pct":      round(100 * gross_pl / settled_stake, 1)
+                                  if settled_stake > 0 and settled else None,
+            "net_roi_pct":        round(100 * net_pl   / settled_stake, 1)
                                   if settled_stake > 0 and settled else None,
             "brier_score":        _brier(settled) if official and settled else None,
             # Open capital — informational; never mixed into settled P/L

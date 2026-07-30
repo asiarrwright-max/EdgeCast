@@ -24,7 +24,10 @@ export interface StrategySection {
   /** Exchange fees on settled trades only — deducted from gross_pl to form net_pl. */
   estimated_fees: number;
   net_pl: number;
-  roi_pct: number | null;
+  /** Gross P/L / settled stake (before fees). */
+  gross_roi_pct: number | null;
+  /** Net P/L / settled stake (after settled fees); may fall below −100 %. */
+  net_roi_pct: number | null;
   brier_score: number | null;
   /** Capital still deployed in open trades — informational, not mixed into settled P/L. */
   open_stake: number;
