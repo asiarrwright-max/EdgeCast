@@ -127,14 +127,28 @@ def _check_station_verified(city: str | None) -> tuple[bool, str | None]:
     """
     Return (ok, skip_reason).
 
-    ok = True means the settlement station is verified and coordinates are
-    known.  ok = False means we must skip the market for V2.1.
+    ok = True means the settlement station is verified and its settlement
+    data source is compatible with EdgeCast's NWS/GHCND-based model.
+    ok = False means we must skip the market for V2.1.
+
+    Two independent blocking conditions:
+      1. verified=False  — station mapping not confirmed; location may be wrong.
+      2. nws_settlement=False — Kalshi settles on a non-NWS source (e.g. The
+         Weather Company); GHCND observations will not match, making edge
+         estimates unreliable regardless of verified status.
     """
     if not city:
         return False, "City not identified"
     station = get_station(city)
     if station is None:
         return False, f"No settlement station registered for '{city}'"
+    if not getattr(station, "nws_settlement", True):
+        return False, (
+            f"Settlement station for '{city}' uses a non-NWS data source "
+            f"({station.station_name}). "
+            "EdgeCast's sigma/bias are built on NWS/GHCND observations; trading "
+            "this city would produce systematically wrong edge estimates."
+        )
     if not station.verified:
         return False, (
             f"Settlement station for '{city}' is UNVERIFIED "

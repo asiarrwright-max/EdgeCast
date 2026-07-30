@@ -232,6 +232,43 @@ def test_unverified_city_blocked():
     assert reason is not None and "UNVERIFIED" in reason.upper()
 
 
+def test_washington_dc_blocked_due_to_non_nws_settlement():
+    """DC must be blocked permanently — Kalshi settles KXTEMPDCH on The Weather Company, not NWS."""
+    ok, reason = _check_station_verified("Washington DC")
+    assert ok is False, "Washington DC must be blocked regardless of verified status"
+    assert reason is not None
+    # The reason must reference the settlement source mismatch, not just unverified status
+    assert "non-NWS" in reason or "NWS" in reason or "source" in reason.lower(), (
+        f"Block reason should mention settlement source incompatibility, got: {reason}"
+    )
+
+
+def test_washington_dc_blocked_even_if_verified_were_true():
+    """Even patching verified=True on DC must not let it through — nws_settlement=False is the hard block."""
+    from unittest.mock import patch
+    from app.services import settlement_stations as ss
+
+    dc = ss.SETTLEMENT_STATIONS["Washington DC"]
+    # Create a copy with verified=True but nws_settlement=False still in place
+    patched_dc = type(dc)(
+        city=dc.city,
+        ghcnd_station_id=dc.ghcnd_station_id,
+        station_name=dc.station_name,
+        lat=dc.lat,
+        lon=dc.lon,
+        timezone=dc.timezone,
+        verified=True,          # hypothetically verified
+        nws_settlement=False,   # still incompatible settlement source
+        source=dc.source,
+        notes=dc.notes,
+    )
+    patched_registry = {**ss.SETTLEMENT_STATIONS, "Washington DC": patched_dc}
+    with patch.object(ss, "SETTLEMENT_STATIONS", patched_registry):
+        ok, reason = _check_station_verified("Washington DC")
+    assert ok is False, "DC must still be blocked when verified=True but nws_settlement=False"
+    assert reason is not None
+
+
 def test_unknown_city_blocked():
     """City not in registry must be blocked."""
     ok, reason = _check_station_verified("Atlantis")

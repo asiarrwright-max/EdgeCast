@@ -57,6 +57,9 @@ class SettlementStation:
     lon: float              # station longitude
     timezone: str           # IANA timezone string
     verified: bool          # True = confirmed from Kalshi/CFTC contract PDF
+    nws_settlement: bool = True  # False = Kalshi settles on non-NWS data (e.g. The Weather
+                                 # Company); GHCND observations will not match settlement, so
+                                 # V2.1 must never trade this city regardless of verified status.
     source: str | None = None   # where the mapping was confirmed
     notes: str | None = None    # caveats, ambiguities, or pending checks
 
@@ -128,12 +131,17 @@ SETTLEMENT_STATIONS: dict[str, SettlementStation] = {
         lon=-77.0377,
         timezone="America/New_York",
         verified=False,
-        source="wethr.net market resolution docs (KDCA listed for DC)",
+        nws_settlement=False,
+        source="Kalshi KXTEMPDCH-26JUL2902 rules_primary (2026-07-30 API query)",
         notes=(
-            "UNVERIFIED.  KXTEMPDCH series settles on The Weather Company data "
-            "(not NWS Climatological Reports), so GHCND observations may not match "
-            "the settlement source for that series.  KXHIGH/KXLOW DC series may use "
-            "NWS — verify the relevant contract PDF before enabling V2.1 trading."
+            "INCOMPATIBLE SETTLEMENT SOURCE — DO NOT TRADE V2.1.  "
+            "Kalshi's KXTEMPDCH series explicitly settles on 'The Weather Company' data, "
+            "not the NWS Climatological Report used by every other city.  EdgeCast's "
+            "sigma/bias statistics are derived from GHCND/NWS observations, so the model's "
+            "edge estimates will be systematically wrong for DC markets.  "
+            "Setting nws_settlement=False permanently blocks V2.1 even if verified is later "
+            "set to True.  If Kalshi ever introduces a DC KXHIGH/KXLOW series using NWS, "
+            "add a separate registry entry for that series with nws_settlement=True."
         ),
     ),
 
