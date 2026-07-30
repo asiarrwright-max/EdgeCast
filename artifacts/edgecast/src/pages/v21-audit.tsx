@@ -13,6 +13,7 @@ import {
   type RetroTrade,
   type RetroSummary,
   type StationEntry,
+  type CityStatus,
 } from "@workspace/api-client-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -226,6 +227,21 @@ function RetroTable({ trades }: { trades: RetroTrade[] }) {
 // 2. Station Coverage Table
 // ---------------------------------------------------------------------------
 
+const CITY_STATUS_BADGE: Record<CityStatus, { label: string; cls: string }> = {
+  active:   { label: "Active",   cls: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" },
+  inactive: { label: "Inactive", cls: "bg-amber-500/10 text-amber-400 border-amber-500/30" },
+  blocked:  { label: "Blocked",  cls: "bg-red-500/10 text-red-400 border-red-500/30" },
+};
+
+function StatusBadge({ status }: { status: CityStatus }) {
+  const cfg = CITY_STATUS_BADGE[status] ?? CITY_STATUS_BADGE.inactive;
+  return (
+    <span className={`inline-block text-[10px] font-semibold px-2 py-0.5 rounded border ${cfg.cls}`}>
+      {cfg.label}
+    </span>
+  );
+}
+
 function StationRow({ s }: { s: StationEntry }) {
   return (
     <tr className="border-t border-border hover:bg-muted/20">
@@ -239,27 +255,26 @@ function StationRow({ s }: { s: StationEntry }) {
       </td>
       <td className="px-3 py-2.5 text-xs text-muted-foreground">{s.timezone}</td>
       <td className="px-3 py-2.5 text-center">
-        {s.verified ? (
-          <span className="inline-block text-[10px] font-semibold px-2 py-0.5 rounded border bg-emerald-500/10 text-emerald-400 border-emerald-500/30">
-            Verified
-          </span>
-        ) : (
-          <span className="inline-block text-[10px] font-semibold px-2 py-0.5 rounded border bg-amber-500/10 text-amber-400 border-amber-500/30">
-            Unverified
-          </span>
+        <StatusBadge status={s.cityStatus} />
+        {s.cityStatusReason && (
+          <p className="text-[9px] text-muted-foreground mt-0.5 max-w-[120px] mx-auto leading-tight hidden group-hover:block">
+            {s.cityStatusReason}
+          </p>
         )}
       </td>
       <td className="px-3 py-2.5 text-center">
-        {s.v21TradingEnabled ? (
-          <span className="text-emerald-400 text-xs font-medium">✓ Active</span>
+        {s.verified ? (
+          <span className="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-emerald-500/10 text-emerald-400 border-emerald-500/30">
+            ✓
+          </span>
         ) : (
-          <span className="text-muted-foreground text-xs">Excluded</span>
+          <span className="text-muted-foreground text-[10px]">—</span>
         )}
       </td>
-      <td className="px-3 py-2.5 text-right text-xs">{s.v21TradeCount}</td>
-      <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">{s.observationCount}</td>
-      <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-xs">
-        <span className="line-clamp-2">{s.notes ?? "—"}</span>
+      <td className="px-3 py-2.5 text-right text-xs">{s.v21TradeCount > 0 ? s.v21TradeCount : "—"}</td>
+      <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">{s.observationCount > 0 ? s.observationCount : "—"}</td>
+      <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[200px]">
+        <span className="line-clamp-2">{s.cityStatusReason ?? s.notes ?? "—"}</span>
       </td>
     </tr>
   );
@@ -267,33 +282,49 @@ function StationRow({ s }: { s: StationEntry }) {
 
 function StationCoverageSection() {
   const { data, isLoading } = useGetStationCoverage();
-  const [showUnverified, setShowUnverified] = useState(true);
+  const [showInactive, setShowInactive] = useState(false);
 
   if (isLoading) return <Loading />;
   if (!data) return <Empty />;
 
-  const shown = showUnverified
+  const shown = showInactive
     ? data.stations
-    : data.stations.filter((s) => s.verified);
+    : data.stations.filter((s) => s.cityStatus === "active" || s.cityStatus === "blocked");
+
+  const activeCount  = data.activeCount  ?? data.stations.filter(s => s.cityStatus === "active").length;
+  const inactiveCount = data.inactiveCount ?? data.stations.filter(s => s.cityStatus === "inactive").length;
+  const blockedCount = data.blockedCount ?? data.stations.filter(s => s.cityStatus === "blocked").length;
 
   return (
     <SectionCard
       title="Settlement Station Coverage"
-      subtitle={`${data.verifiedCount} verified · ${data.unverifiedCount} unverified · V2.1 trades only placed for verified cities`}
+      subtitle={`${activeCount} active · ${inactiveCount} inactive · ${blockedCount} permanently blocked`}
     >
-      <div className="px-4 py-3 border-b border-border flex items-center gap-3">
-        <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+      <div className="px-4 py-3 border-b border-border flex items-center gap-4 flex-wrap">
+        {/* Status legend */}
+        <div className="flex items-center gap-3 text-[10px]">
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" />
+            <span className="text-muted-foreground">Active — trading</span>
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-2 h-2 rounded-full bg-amber-500" />
+            <span className="text-muted-foreground">Inactive — no live markets</span>
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
+            <span className="text-muted-foreground">Blocked — non-NWS settlement</span>
+          </span>
+        </div>
+        <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer ml-auto">
           <input
             type="checkbox"
-            checked={showUnverified}
-            onChange={(e) => setShowUnverified(e.target.checked)}
+            checked={showInactive}
+            onChange={(e) => setShowInactive(e.target.checked)}
             className="rounded"
           />
-          Show unverified cities
+          Show inactive cities
         </label>
-        <p className="text-xs text-muted-foreground ml-auto">
-          To verify a city: download its Kalshi contract PDF and find "NWS Daily Climate Report for …"
-        </p>
       </div>
 
       <div className="overflow-x-auto">
@@ -305,8 +336,8 @@ function StationCoverageSection() {
               <th className="text-left px-3 py-2">GHCND ID</th>
               <th className="text-left px-3 py-2">Coordinates</th>
               <th className="text-left px-3 py-2">Timezone</th>
-              <th className="text-center px-3 py-2">Status</th>
-              <th className="text-center px-3 py-2">V2.1</th>
+              <th className="text-center px-3 py-2">City Status</th>
+              <th className="text-center px-3 py-2">Verified</th>
               <th className="text-right px-3 py-2">V2.1 Trades</th>
               <th className="text-right px-3 py-2">Obs.</th>
               <th className="text-left px-3 py-2">Notes</th>

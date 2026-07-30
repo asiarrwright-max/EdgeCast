@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetDashboard,
@@ -5,6 +6,7 @@ import {
   useGetV2LearningProgress,
   useGetPaperTradeMetrics,
   useGetMarkets,
+  useGetCityAvailability,
   getGetDashboardQueryKey,
   getGetMarketsQueryKey,
   getGetJobsQueryKey,
@@ -412,6 +414,8 @@ export default function DashboardPage() {
   const { data: learning, isLoading: learnLoading, error: learnError } = useGetV2LearningProgress();
   const { data: metrics, isLoading: metricsLoading } = useGetPaperTradeMetrics();
   const { data: allMarkets } = useGetMarkets();
+  const { data: cityAvail } = useGetCityAvailability();
+  const [showInactiveCities, setShowInactiveCities] = useState(false);
   const triggerMutation = useTriggerCollection();
 
   const handleTrigger = () => {
@@ -457,11 +461,17 @@ export default function DashboardPage() {
   ).length;
 
   const SORT_ORDER = ["learned", "partially_learned", "insufficient_sample", "collecting", "not_collecting", "data_quality_issue"];
-  const sortedCities = [...learning.cities].sort((a, b) => {
+  const activeCitySet = new Set(cityAvail?.activeCities ?? []);
+  const allSortedCities = [...learning.cities].sort((a, b) => {
     const ai = SORT_ORDER.indexOf(a.readinessStatus);
     const bi = SORT_ORDER.indexOf(b.readinessStatus);
     return ai !== bi ? ai - bi : b.usableObservations - a.usableObservations;
   });
+  // By default only show cities that currently have active Kalshi markets.
+  // Fall back to all cities if availability data hasn't loaded yet.
+  const sortedCities = (cityAvail && !showInactiveCities)
+    ? allSortedCities.filter(c => activeCitySet.has(c.city))
+    : allSortedCities;
 
   const stage = getModelStage(learning.summary);
 
@@ -658,6 +668,17 @@ export default function DashboardPage() {
                    <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
                      Location Status Snapshot
                    </p>
+                   {cityAvail && (
+                     <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground cursor-pointer">
+                       <input
+                         type="checkbox"
+                         checked={showInactiveCities}
+                         onChange={(e) => setShowInactiveCities(e.target.checked)}
+                         className="rounded"
+                       />
+                       Show inactive ({cityAvail.inactiveCount})
+                     </label>
+                   )}
                  </div>
                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2 sm:gap-3">
                    {sortedCities.map(c => {

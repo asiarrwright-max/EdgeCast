@@ -11,6 +11,7 @@ import {
   useGetPerformanceAnalytics,
   useGetV21Calibration,
   useGetV21Readiness,
+  useGetCityAvailability,
   type PerformancePeriod,
   type PerformanceStrategy,
   type StrategyVersionStats,
@@ -1121,8 +1122,13 @@ function ReadinessBar({ current, needed, label }: { current: number; needed: num
 
 function ReadinessPanel() {
   const { data, isLoading } = useGetV21Readiness();
+  const { data: avail } = useGetCityAvailability();
   if (isLoading) return <Loading />;
   if (!data) return <Empty />;
+
+  const activeCities   = avail?.activeCities   ?? data.verifiedCities;
+  const inactiveCities = avail?.inactiveCities  ?? data.unverifiedCities;
+  const blockedCities  = avail?.blockedCities   ?? [];
 
   const stage = data.readinessStage;
   const stageInfo = STAGE_INFO[stage] ?? STAGE_INFO["Collecting Data"];
@@ -1200,24 +1206,34 @@ function ReadinessPanel() {
         )}
       </div>
 
-      {/* Verified / unverified city lists */}
-      <div className="grid md:grid-cols-2 gap-3 px-4 pb-4">
+      {/* City status breakdown — Active / Inactive / Blocked */}
+      <div className="grid md:grid-cols-3 gap-3 px-4 pb-4">
         <div className="rounded border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
           <p className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wide mb-1">
-            Verified cities ({data.verifiedCityCount})
+            Active — trading ({activeCities.length})
           </p>
           <p className="text-xs text-foreground/70">
-            {data.verifiedCities.join(", ") || "None yet"}
+            {activeCities.join(", ") || "None yet"}
           </p>
         </div>
         <div className="rounded border border-amber-500/20 bg-amber-500/5 px-3 py-2">
           <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wide mb-1">
-            Excluded — unverified ({data.unverifiedCityCount})
+            Inactive — no live markets ({inactiveCities.length})
           </p>
           <p className="text-xs text-muted-foreground">
-            {data.unverifiedCities.slice(0, 8).join(", ")}
-            {data.unverifiedCities.length > 8 ? ` +${data.unverifiedCities.length - 8} more` : ""}
+            {inactiveCities.slice(0, 6).join(", ")}
+            {inactiveCities.length > 6 ? ` +${inactiveCities.length - 6} more` : ""}
           </p>
+          <p className="text-[9px] text-muted-foreground/60 mt-1">Auto-reactivates when Kalshi launches markets</p>
+        </div>
+        <div className="rounded border border-red-500/20 bg-red-500/5 px-3 py-2">
+          <p className="text-[10px] font-semibold text-red-400 uppercase tracking-wide mb-1">
+            Permanently blocked ({blockedCities.length})
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {blockedCities.join(", ") || "None"}
+          </p>
+          <p className="text-[9px] text-muted-foreground/60 mt-1">Non-NWS settlement source</p>
         </div>
       </div>
 

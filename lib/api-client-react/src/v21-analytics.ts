@@ -114,6 +114,8 @@ export interface ReadinessData {
   };
 }
 
+export type CityStatus = "active" | "inactive" | "blocked";
+
 export interface StationEntry {
   city: string;
   stationName: string;
@@ -122,8 +124,12 @@ export interface StationEntry {
   lon: number;
   timezone: string;
   verified: boolean;
+  nwsSettlement: boolean;
   source: string | null;
   notes: string | null;
+  cityStatus: CityStatus;
+  cityStatusReason: string | null;
+  lastMarketSeenAt: string | null;
   v21TradingEnabled: boolean;
   v21TradeCount: number;
   observationCount: number;
@@ -133,8 +139,32 @@ export interface StationCoverageData {
   stations: StationEntry[];
   verifiedCount: number;
   unverifiedCount: number;
+  activeCount: number;
+  inactiveCount: number;
+  blockedCount: number;
   totalCount: number;
   note: string;
+}
+
+export interface CityStatusEntry {
+  city: string;
+  status: CityStatus;
+  reason: string | null;
+  verified: boolean;
+  nwsSettlement: boolean;
+  lastMarketSeenAt: string | null;
+}
+
+export interface CityAvailabilityData {
+  cities: CityStatusEntry[];
+  activeCount: number;
+  inactiveCount: number;
+  blockedCount: number;
+  totalCount: number;
+  activeCities: string[];
+  inactiveCities: string[];
+  blockedCities: string[];
+  discoveryNote: string;
 }
 
 export interface OkcForecastSource {
@@ -252,6 +282,18 @@ export function useGetConsensusBacktest<TData = ConsensusBacktestData, TError = 
     queryKey: ["/api/analytics/v21/consensus-backtest"],
     queryFn: ({ signal }) =>
       customFetch<ConsensusBacktestData>("/api/analytics/v21/consensus-backtest", { signal, method: "GET" }),
+    ...options,
+  }) as UseQueryResult<TData, TError>;
+}
+
+export function useGetCityAvailability<TData = CityAvailabilityData, TError = unknown>(
+  options?: UseQueryOptions<CityAvailabilityData, TError, TData>
+): UseQueryResult<TData, TError> {
+  return useQuery({
+    queryKey: ["/api/analytics/v21/city-availability"],
+    queryFn: ({ signal }) =>
+      customFetch<CityAvailabilityData>("/api/analytics/v21/city-availability", { signal, method: "GET" }),
+    staleTime: 5 * 60 * 1000, // 5 min — collection job runs every 3h, no need to hammer
     ...options,
   }) as UseQueryResult<TData, TError>;
 }

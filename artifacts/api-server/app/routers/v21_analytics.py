@@ -24,6 +24,7 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models import ForecastErrorStats, PaperTrade, PredictionSnapshot
 from app.services.settlement_stations import SETTLEMENT_STATIONS
+from app.services.city_availability import compute_city_statuses, summarise
 from app.services.probability_engine_v2 import (
     SIGMA_FLOOR,
     SIGMA_CEILING,
@@ -595,8 +596,13 @@ async def get_station_coverage(
     )
     obs_counts: dict[str, int] = {row[0]: int(row[1]) for row in stats_q.all() if row[0]}
 
+    # City availability status (active / inactive / blocked)
+    city_statuses = await compute_city_statuses(session)
+    city_status_map: dict[str, dict] = {s["city"]: s for s in city_statuses}
+
     stations: list[dict] = []
     for city, s in SETTLEMENT_STATIONS.items():
+        avail = city_status_map.get(city, {})
         stations.append({
             "city": city,
             "stationName": s.station_name,
@@ -605,29 +611,36 @@ async def get_station_coverage(
             "lon": s.lon,
             "timezone": s.timezone,
             "verified": s.verified,
+            "nwsSettlement": getattr(s, "nws_settlement", True),
             "source": s.source,
             "notes": s.notes,
-            "v21TradingEnabled": s.verified,
+            "cityStatus": avail.get("status", "inactive"),
+            "cityStatusReason": avail.get("reason"),
+            "lastMarketSeenAt": avail.get("lastMarketSeenAt"),
+            "v21TradingEnabled": avail.get("status") == "active",
             "v21TradeCount": v21_counts.get(city, 0),
             "observationCount": obs_counts.get(city, 0),
         })
 
-    verified = [s for s in stations if s["verified"]]
-    unverified = [s for s in stations if not s["verified"]]
+    summary = summarise(city_statuses)
 
     return {
         "stations": stations,
-        "verifiedCount": len(verified),
-        "unverifiedCount": len(unverified),
+        "verifiedCount": len([s for s in stations if s["verified"]]),
+        "unverifiedCount": len([s for s in stations if not s["verified"]]),
+        "activeCount": summary["activeCount"],
+        "inactiveCount": summary["inactiveCount"],
+        "blockedCount": summary["blockedCount"],
         "totalCount": len(stations),
         "note": (
-            "V2.1 paper trading is only enabled for VERIFIED cities. "
-            "Unverified stations use inferred airport ICAO codes and have not been "
-            "confirmed from Kalshi contract PDFs. To verify a city, download its "
-            "Kalshi contract PDF from kalshi.com/markets and find the phrase "
-            "'NWS Daily Climate Report for <Station Name>'. "
-            "Los Angeles has HIGH AMBIGUITY — do not mark verified until contract PDF "
-            "confirms whether settlement uses LAX airport or USC Downtown."
+            "V2.1 paper trading is enabled for ACTIVE cities (verified station + "
+            "live Kalshi markets). INACTIVE cities have no current Kalshi markets "
+            "and will reactivate automatically on the next collection run. "
+            "BLOCKED cities (e.g. Washington DC) use a non-NWS settlement source "
+            "incompatible with EdgeCast's model and are permanently excluded. "
+            "To verify an unconfirmed city: query the Kalshi market API "
+            "(GET /trade-api/v2/markets/{ticker}) and read rules_secondary — "
+            "it names the NWS station explicitly."
         ),
     }
 
@@ -756,3 +769,44 @@ async def get_consensus_backtest(
         "consistent positive ROI before re-evaluating the guard."
     )
     return result
+
+
+# ---------------------------------------------------------------------------
+# 7. City availability — active / inactive / blocked
+# ---------------------------------------------------------------------------
+
+@router.get("/analytics/v21/city-availability")
+async def get_city_availability(
+    _user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Returns the availability status of every registered city.
+
+    status values:
+      active   — verified station + NWS settlement + live Kalshi markets.
+                 V2.1 will evaluate and trade this city.
+      inactive — no live Kalshi markets, or station unverified.
+                 Will reactivate automatically on the next collection run
+                 once Kalshi launches eligible weather markets.
+      blocked  — city's Kalshi contracts settle on a non-NWS data source
+                 (e.g. The Weather Company).  Permanently excluded from
+                 V2.1 regardless of verification status.
+
+    Auto-discovery: the collection job (runs every 3 h) fetches ALL active
+    Kalshi weather markets.  When Kalshi launches markets for a previously
+    inactive city, they are picked up automatically and the city's status
+    transitions to active on the next request to this endpoint.
+    """
+    city_statuses = await compute_city_statuses(session)
+    summary = summarise(city_statuses)
+    return {
+        "cities": city_statuses,
+        **summary,
+        "discoveryNote": (
+            "City status is derived automatically from the Kalshi market database. "
+            "The collection job (every 3 h) fetches all active Kalshi weather markets. "
+            "A previously inactive city will transition to 'active' on the next collection "
+            "run after Kalshi launches eligible markets for it."
+        ),
+    }
