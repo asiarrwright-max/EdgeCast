@@ -1,0 +1,66 @@
+V3 has passed the final audit and may continue running in parallel paper-trading mode.
+
+Keep:
+- v3.predictions_enabled = true
+- v3.paper_trading_enabled = true
+
+Do not make additional V3 model or threshold changes while it begins collecting forward results.
+
+Next, perform a separate read-only audit of the possible V2.1 bias-direction issue.
+
+Do not modify V2.1 yet.
+
+For V2.1, report:
+
+1. Exact error convention
+- Show the formula used to calculate mean_error
+- State whether it is actual − forecast or forecast − actual
+- Show the formula used to calculate adjusted mu
+
+2. Manual examples
+For at least five representative V2.1 predictions, show:
+- raw forecast
+- historical actuals or error statistics
+- mean_error
+- current V2.1 adjustment
+- resulting adjusted forecast
+- mathematically correct adjustment under the stated convention
+- whether the current formula moves the forecast toward or away from historical outcomes
+
+3. Scope
+Report:
+- how many V2.1 predictions used a nonzero correction
+- how many V2.1 paper trades were based on corrected forecasts
+- affected cities, seasons, and dates
+- settled versus unsettled counts
+- estimated effect on predicted probabilities and trade decisions
+
+4. Performance impact
+Run a retrospective comparison without rewriting stored records:
+- original V2.1 probabilities and decisions
+- counterfactual corrected-sign probabilities and decisions
+- Brier score
+- calibration
+- MAE/RMSE
+- executable paper-trade ROI after fees
+- number of changed trade decisions
+
+Clearly label this as retrospective and hypothetical.
+
+5. Version safety
+If the V2.1 formula is confirmed incorrect:
+- preserve V2.1 exactly as historical
+- do not recalculate or overwrite any V2.1 prediction, trade, settlement, or analytics row
+- propose a separate V2.2 strategy with the corrected formula
+- keep V2.2 isolated and paper-only
+- compare V2.1, V2.2, and V3 on shared future markets
+
+6. Non-executable same-day markets
+Confirm V3 analytics distinguish:
+- executable official paper trades
+- non-executable signals
+- observation-only predictions
+
+Only executable trades may count in official V3 ROI, win rate, or trade totals.
+
+Stop after presenting the V2.1 audit. Do not implement V2.2 until I approve it.
