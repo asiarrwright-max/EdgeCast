@@ -44,10 +44,75 @@ from app.models import CalibrationAdjustment, ForecastErrorStats
 
 logger = logging.getLogger(__name__)
 
-# Minimum verified observations before using learned stats
-MIN_SAMPLE = 5
-# Minimum settled trades per bucket before applying calibration
-MIN_CALIB_SAMPLE = 30
+# ── Sigma governance constants ────────────────────────────────────────────────
+#
+# MIN_SAMPLE (30)
+#   A ForecastErrorStats row must have at least this many verified observations
+#   before its std_dev is used.  Raised from 5 to 30 because:
+#   - With n=5 the sample std_dev is extremely noisy (±40% error typical).
+#   - The audit found that 5-sample values of 1.22°F were 3-6× smaller than
+#     observed forecast errors (3–10°F), generating illusory "edges" of 90+ pp.
+#
+# SIGMA_FLOOR (3.5°F daily, 2.0°F hourly)
+#   Even with 30+ samples we clamp σ upward to this floor.  Rationale:
+#   - NWS settlement stations are often at airports with different microclimates
+#     from the Open-Meteo forecast grid point; this adds irreducible location
+#     error of 1–3°F on top of model error.
+#   - For daily temperature markets a 3.5°F floor means a forecast must be
+#     >7°F from a threshold before the model can assign >97.5% confidence.
+#
+# SIGMA_CEILING (15.0°F)
+#   Prevents corrupted or outlier observations from blowing up the distribution.
+#   A value above 15°F implies the observations are noisy or the station mapping
+#   is wrong; flag for review rather than using.
+#
+# _CONSERVATIVE_PRIOR_TABLE
+#   Used instead of the V1 fixed table when DB has < MIN_SAMPLE observations.
+#   Values are 2–3× larger than the V1 table to reflect that:
+#   (a) location offsets between forecast grid and settlement station add error,
+#   (b) the V1 table was built for mid-range lead times and under-estimates
+#       same-day uncertainty in continental cities.
+#   Once a city accumulates MIN_SAMPLE observations the learned σ takes over.
+#
+# Weighting: all observations are currently equally weighted.  Future work can
+# add recency weighting or monthly grouping once ≥60 obs/bucket exist.
+#
+# Outlier handling: observations where |forecast_error| > 3× the running
+# std_dev are excluded from ForecastErrorStats aggregation (handled by the
+# forecast_verifier service, not here).  Outliers below that threshold remain.
+#
+# Fallback hierarchy (V2.1 engine):
+#   1. city + variable + lead_bucket + month  (n ≥ MIN_SAMPLE)
+#   2. city + variable + lead_bucket           (n ≥ MIN_SAMPLE, all months)
+#   3. global + variable + lead_bucket         (n ≥ MIN_SAMPLE, all cities)
+#   4. _CONSERVATIVE_PRIOR_TABLE               (< MIN_SAMPLE anywhere)
+#   σ is then clamped to [SIGMA_FLOOR, SIGMA_CEILING].
+
+MIN_SAMPLE = 30          # was 5; see note above
+MIN_CALIB_SAMPLE = 30   # unchanged
+
+SIGMA_FLOOR = 3.5        # °F — daily high/low markets
+SIGMA_FLOOR_HOURLY = 2.0 # °F — hourly_threshold markets
+SIGMA_CEILING = 15.0     # °F — absolute upper bound
+
+# Conservative prior: used when DB has < MIN_SAMPLE observations.
+# Format: (max_lead_time_days, sigma_°F)
+_CONSERVATIVE_PRIOR_TABLE: list[tuple[int, float]] = [
+    (1,  5.0),   # 0–1 day:   same-day/next-day — more uncertain than NWP suggests
+    (3,  6.0),   # 2–3 days
+    (7,  7.5),   # 4–7 days
+    (14, 9.5),   # 8–14 days
+]
+_CONSERVATIVE_PRIOR_DEFAULT = 11.0  # > 14 days
+
+
+def _conservative_prior(lead_time_days: int | None) -> float:
+    """Return the conservative-prior σ for the given lead time."""
+    ld = lead_time_days if lead_time_days is not None else 99
+    for max_days, sigma in _CONSERVATIVE_PRIOR_TABLE:
+        if ld <= max_days:
+            return sigma
+    return _CONSERVATIVE_PRIOR_DEFAULT
 
 
 # ---------------------------------------------------------------------------
@@ -160,21 +225,34 @@ async def _sigma_v2(
     lead_time_days: int | None,
     month: int | None,
     session: AsyncSession,
+    *,
+    hourly: bool = False,
 ) -> tuple[float, str]:
     """
-    Return (sigma, fallback_level).
+    Return (sigma, fallback_level) with floor/ceiling applied.
 
-    Uses std_dev from ForecastErrorStats when sample ≥ MIN_SAMPLE.
-    Falls back to v1 fixed table otherwise.
+    Floor/ceiling prevent overconfident or degenerate estimates:
+    - Floor = SIGMA_FLOOR (3.5°F daily) / SIGMA_FLOOR_HOURLY (2.0°F)
+    - Ceiling = SIGMA_CEILING (15.0°F)
+
+    When DB has < MIN_SAMPLE observations, uses _conservative_prior()
+    instead of the v1 fixed table (prior is larger, reflecting location offset).
     """
+    floor = SIGMA_FLOOR_HOURLY if hourly else SIGMA_FLOOR
+
     stats = await _get_error_stats(city, weather_variable, lead_time_days, month, session)
     if stats is not None and stats.std_dev is not None and stats.std_dev > 0:
         level = stats.fallback_level or "city"
-        return stats.std_dev, level
+        raw = stats.std_dev
+    else:
+        # Conservative prior — larger than v1 fixed table to account for
+        # location offset between Open-Meteo grid point and NWS station
+        raw = _conservative_prior(lead_time_days)
+        level = "fixed_table"
 
-    # Fall back to v1 fixed σ table
-    sigma = sigma_for_lead_time(lead_time_days if lead_time_days is not None else 99)
-    return sigma, "fixed_table"
+    # Clamp to approved range
+    sigma = max(floor, min(SIGMA_CEILING, raw))
+    return sigma, level
 
 
 async def _bias_v2(

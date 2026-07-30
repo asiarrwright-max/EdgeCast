@@ -70,40 +70,40 @@ WEATHER_KEYWORDS: list[str] = [
 # Takes precedence over substring scanning. None = no specific city (US-wide).
 # ---------------------------------------------------------------------------
 SERIES_TO_CITY: dict[str, tuple[str, float, float] | None] = {
-    "KXHIGHTDAL":   ("Dallas",          32.7767, -96.7970),
-    "KXLOWTDAL":    ("Dallas",          32.7767, -96.7970),
-    "KXRAINDALM":   ("Dallas",          32.7767, -96.7970),
-    "KXDALSNOWM":   ("Dallas",          32.7767, -96.7970),
-    "KXLOWTNYC":    ("New York City",   40.7128, -74.0060),
-    "KXNYCHOT":     ("New York City",   40.7128, -74.0060),
-    "HIGHNY":       ("New York City",   40.7128, -74.0060),
-    "HIGHNY0":      ("New York City",   40.7128, -74.0060),
-    "KXRAINNY":     ("New York City",   40.7128, -74.0060),
-    "RAINNY":       ("New York City",   40.7128, -74.0060),
-    "KXSNOWNY":     ("New York City",   40.7128, -74.0060),
-    "KXNYCSNOWM":   ("New York City",   40.7128, -74.0060),
-    "SNOWNYM":      ("New York City",   40.7128, -74.0060),
-    "KXHIGHMIA":    ("Miami",           25.7617, -80.1918),
-    "HIGHMIA":      ("Miami",           25.7617, -80.1918),
-    "KXHIGHOU":     ("Houston",         29.7604, -95.3698),
-    "KXHOUHIGH":    ("Houston",         29.7604, -95.3698),
-    "KXLOWTHOU":    ("Houston",         29.7604, -95.3698),
-    "KXHOBBYTEMP":  ("Houston",         29.7604, -95.3698),
-    "KXRAINHOU":    ("Houston",         29.7604, -95.3698),
-    "RAINHOU":      ("Houston",         29.7604, -95.3698),
-    "KXLOWTDEN":    ("Denver",          39.7392, -104.9903),
-    "KXHIGHDEN":    ("Denver",          39.7392, -104.9903),
-    "KXLOWTLAX":    ("Los Angeles",     34.0522, -118.2437),
-    "KXTEMPLAXH":   ("Los Angeles",     34.0522, -118.2437),
-    "KXLAXSNOWM":   ("Los Angeles",     34.0522, -118.2437),
-    "KXHIGHTMIN":   ("Minneapolis",     44.9778, -93.2650),
+    "KXHIGHTDAL":   ("Dallas",          32.8998, -97.0403),  # KDFW station
+    "KXLOWTDAL":    ("Dallas",          32.8998, -97.0403),  # KDFW station
+    "KXRAINDALM":   ("Dallas",          32.8998, -97.0403),  # KDFW station
+    "KXDALSNOWM":   ("Dallas",          32.8998, -97.0403),  # KDFW station
+    "KXLOWTNYC":    ("New York City",   40.7789, -73.9692),  # Central Park station
+    "KXNYCHOT":     ("New York City",   40.7789, -73.9692),  # Central Park station
+    "HIGHNY":       ("New York City",   40.7789, -73.9692),  # Central Park station
+    "HIGHNY0":      ("New York City",   40.7789, -73.9692),  # Central Park station
+    "KXRAINNY":     ("New York City",   40.7789, -73.9692),  # Central Park station
+    "RAINNY":       ("New York City",   40.7789, -73.9692),  # Central Park station
+    "KXSNOWNY":     ("New York City",   40.7789, -73.9692),  # Central Park station
+    "KXNYCSNOWM":   ("New York City",   40.7789, -73.9692),  # Central Park station
+    "SNOWNYM":      ("New York City",   40.7789, -73.9692),  # Central Park station
+    "KXHIGHMIA":    ("Miami",           25.7959, -80.2870),  # KMIA station
+    "HIGHMIA":      ("Miami",           25.7959, -80.2870),  # KMIA station
+    "KXHIGHOU":     ("Houston",         29.6454, -95.2789),  # KHOU (Hobby) station
+    "KXHOUHIGH":    ("Houston",         29.6454, -95.2789),  # KHOU (Hobby) station
+    "KXLOWTHOU":    ("Houston",         29.6454, -95.2789),  # KHOU (Hobby) station
+    "KXHOBBYTEMP":  ("Houston",         29.6454, -95.2789),  # KHOU (Hobby) station
+    "KXRAINHOU":    ("Houston",         29.6454, -95.2789),  # KHOU (Hobby) station
+    "RAINHOU":      ("Houston",         29.6454, -95.2789),  # KHOU (Hobby) station
+    "KXLOWTDEN":    ("Denver",          39.8561, -104.6737),  # KDEN station
+    "KXHIGHDEN":    ("Denver",          39.8561, -104.6737),  # KDEN station
+    "KXLOWTLAX":    ("Los Angeles",     33.9381, -118.3889),  # KLAX station (USC Downtown unverified)
+    "KXTEMPLAXH":   ("Los Angeles",     33.9381, -118.3889),  # KLAX station (USC Downtown unverified)
+    "KXLAXSNOWM":   ("Los Angeles",     33.9381, -118.3889),  # KLAX station (USC Downtown unverified)
+    "KXHIGHTMIN":   ("Minneapolis",     44.8848, -93.2223),  # KMSP station
     "KXPHILHIGH":   ("Philadelphia",    39.9526, -75.1652),
     "KXHIGHTTSATX": ("San Antonio",     29.4241, -98.4936),
-    "KXLOWTOKC":    ("Oklahoma City",   35.4676, -97.5164),
-    "KXTEMPDCH":    ("Washington DC",   38.9072, -77.0369),
-    "KXTEMPCHIH":   ("Chicago",         41.8781, -87.6298),
-    "KXRAINCHIM":   ("Chicago",         41.8781, -87.6298),
-    "SNOWCHIM":     ("Chicago",         41.8781, -87.6298),
+    "KXLOWTOKC":    ("Oklahoma City",   35.3931, -97.6007),  # KOKC station (verified 2026-07-30)
+    "KXTEMPDCH":    ("Washington DC",   38.8521, -77.0377),  # KDCA station
+    "KXTEMPCHIH":   ("Chicago",         41.7867, -87.7522),  # KMDW (Midway) station
+    "KXRAINCHIM":   ("Chicago",         41.7867, -87.7522),  # KMDW (Midway) station
+    "SNOWCHIM":     ("Chicago",         41.7867, -87.7522),  # KMDW (Midway) station
     "KXRAINSEA":    ("Seattle",         47.6062, -122.3321),
     "KXRAINSEAM":   ("Seattle",         47.6062, -122.3321),
     "KXRAINNO":     ("New Orleans",     29.9511, -90.0715),
@@ -125,31 +125,31 @@ CITY_COORDS: dict[str, tuple[str, float, float]] = {
     "SATX": ("San Antonio",   29.4241, -98.4936),
     "NOLA": ("New Orleans",   29.9511, -90.0715),
     "PHIL": ("Philadelphia",  39.9526, -75.1652),
-    "NYC":  ("New York City", 40.7128, -74.0060),
-    "CHI":  ("Chicago",       41.8781, -87.6298),
-    "LAX":  ("Los Angeles",   34.0522, -118.2437),
-    "MIA":  ("Miami",         25.7617, -80.1918),
-    "DFW":  ("Dallas",        32.7767, -96.7970),
-    "DAL":  ("Dallas",        32.7767, -96.7970),
+    "NYC":  ("New York City", 40.7789, -73.9692),
+    "CHI":  ("Chicago",         41.7867, -87.7522),
+    "LAX":  ("Los Angeles",     33.9381, -118.3889),
+    "MIA":  ("Miami",            25.7959, -80.2870),
+    "DFW":  ("Dallas",           32.8998, -97.0403),
+    "DAL":  ("Dallas",           32.8998, -97.0403),
     "PHX":  ("Phoenix",       33.4484, -112.0740),
     "SEA":  ("Seattle",       47.6062, -122.3321),
-    "DEN":  ("Denver",        39.7392, -104.9903),
+    "DEN":  ("Denver",          39.8561, -104.6737),
     "ATL":  ("Atlanta",       33.7490, -84.3880),
     "BOS":  ("Boston",        42.3601, -71.0589),
     "SFO":  ("San Francisco", 37.7749, -122.4194),
     "LAS":  ("Las Vegas",     36.1699, -115.1398),
-    "HOU":  ("Houston",       29.7604, -95.3698),
-    "MSP":  ("Minneapolis",   44.9778, -93.2650),
-    "MIN":  ("Minneapolis",   44.9778, -93.2650),
-    "ORD":  ("Chicago",       41.8781, -87.6298),
-    "OKC":  ("Oklahoma City", 35.4676, -97.5164),
+    "HOU":  ("Houston",          29.6454, -95.2789),
+    "MSP":  ("Minneapolis",      44.8848, -93.2223),
+    "MIN":  ("Minneapolis",      44.8848, -93.2223),
+    "ORD":  ("Chicago",          41.7867, -87.7522),
+    "OKC":  ("Oklahoma City",    35.3931, -97.6007),
     "MCI":  ("Kansas City",   39.0997, -94.5786),
     "STL":  ("St. Louis",     38.6270, -90.1994),
     "CLE":  ("Cleveland",     41.4993, -81.6944),
     "DET":  ("Detroit",       42.3314, -83.0458),
     "PHL":  ("Philadelphia",  39.9526, -75.1652),
     "PDX":  ("Portland",      45.5051, -122.6750),
-    "DC":   ("Washington DC", 38.9072, -77.0369),
+    "DC":   ("Washington DC",    38.8521, -77.0377),
     "SF":   ("San Francisco", 37.7749, -122.4194),
     "KC":   ("Kansas City",   39.0997, -94.5786),
     "NY":   ("New York City", 40.7128, -74.0060),

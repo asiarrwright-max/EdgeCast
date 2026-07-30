@@ -346,8 +346,13 @@ async def test_run_analysis_v2_sigma_from_db():
         session=mock_session,
     )
     assert result.analysis_status == "supported"
-    # Should use learned sigma and bias, not fixed table
-    assert result.sigma_used == 2.1
+    # Learned σ=2.1°F is below SIGMA_FLOOR (3.5°F), so it gets clamped up.
+    # The fallback_level should still be "city" (stats came from DB, not the fixed table).
+    from app.services.probability_engine_v2 import SIGMA_FLOOR
+    assert result.sigma_used == SIGMA_FLOOR, (
+        f"σ={result.sigma_used} should be clamped to SIGMA_FLOOR={SIGMA_FLOOR} "
+        "when the learned value is below the floor"
+    )
     assert result.fallback_level == "city"
     # Bias correction should be applied (mean_error=0.5 → mu adjusted by -0.5)
     assert result.bias_correction == pytest.approx(0.5, abs=0.01)
@@ -538,7 +543,10 @@ async def test_get_strategy_agreement_same_sides():
 # ── MIN_SAMPLE and MIN_CALIB_SAMPLE constants ─────────────────────────────────
 
 def test_min_sample_constant():
-    assert MIN_SAMPLE == 5
+    # Raised from 5 to 30 in v2.1 to prevent 5-sample σ values (e.g. 1.22°F)
+    # from generating false 90+pp edges. Tests that relied on MIN_SAMPLE==5
+    # should use the actual constant value, not a hardcoded literal.
+    assert MIN_SAMPLE == 30
 
 
 def test_min_calib_sample_constant():

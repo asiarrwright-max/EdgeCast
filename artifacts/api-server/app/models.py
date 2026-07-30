@@ -402,3 +402,19 @@ class PaperTrade(Base):
     bias_correction: Mapped[float | None] = mapped_column(Float)     # mean_error subtracted from μ (°F)
     fallback_level: Mapped[str | None] = mapped_column(String(20))   # 'city' | 'global' | 'fixed_table'
     calibration_adj: Mapped[float | None] = mapped_column(Float)     # calibration multiplier applied
+
+    # Phase v2.1: execution-quality fields (NULL for pre-v2.1 trades — backward compatible)
+    # Quote metadata — snapshot of the market at entry decision time
+    quote_bid: Mapped[float | None] = mapped_column(Float)           # best bid on our side at entry (0–1)
+    quote_ask: Mapped[float | None] = mapped_column(Float)           # best ask on our side at entry (0–1)
+    quote_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # when quote was fetched
+    est_available_qty: Mapped[float | None] = mapped_column(Float)   # open_interest or volume proxy
+
+    # Execution realism flags
+    is_executable: Mapped[bool | None] = mapped_column(Boolean)      # False if >50 qty at <$0.10/contract
+    # NULL = old trade, True = station verified at entry, False = unverified (should never reach here in V2.1)
+    station_verified: Mapped[bool | None] = mapped_column(Boolean)
+
+    # Station location used for this forecast (may differ from city-centre in V2.1+)
+    station_lat: Mapped[float | None] = mapped_column(Float)
+    station_lon: Mapped[float | None] = mapped_column(Float)

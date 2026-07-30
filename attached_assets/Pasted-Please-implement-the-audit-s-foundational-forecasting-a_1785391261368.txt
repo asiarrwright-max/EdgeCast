@@ -1,0 +1,131 @@
+Please implement the audit’s foundational forecasting and data-quality fixes, while preserving the current V2 results as a baseline.
+
+Do not erase, overwrite, or mix the existing V2 trade history with the corrected model’s future results. Create a clearly labeled new strategy version, such as V2.1, so we can compare pre-fix and post-fix performance fairly.
+
+Implement now
+
+1. Recalibrate forecast uncertainty using real forecast error
+
+Replace the current sigma/uncertainty assumptions that rely on model internal variance.
+
+Calculate forecast error using:
+
+* The Open-Meteo forecast that was actually available at the prediction timestamp
+* The verified final observation from the exact GHCND/Kalshi settlement station
+* Forecast lead time
+* City/station
+* Season or month when enough data exists
+
+Store the signed error and absolute error for every observation.
+
+Use those verified errors to calculate sigma and bias. Until a bucket has enough observations, use a conservative prior or pooled fallback rather than an unrealistically small sigma.
+
+Please document:
+
+* Minimum observations required before a learned value is used
+* Fallback hierarchy
+* Sigma floor and ceiling
+* How recent and older observations are weighted
+* How outliers are handled
+
+The model should not display “high confidence” or an enormous edge when uncertainty is not well supported by data.
+
+2. Use exact Kalshi settlement-station coordinates
+
+For every weather market:
+
+* Identify the official station and settlement source from the Kalshi contract rules
+* Save the station ID, station name, latitude, longitude, time zone, and verification status
+* Fetch Open-Meteo forecasts using the settlement station’s latitude and longitude, not the city center
+* Use the same station for historical observations and settlement verification
+
+Do not trade a market when the station mapping is unverified.
+
+Immediately verify Oklahoma City and Los Angeles against the official Kalshi contract documentation. Investigate the reported 9°F Oklahoma City discrepancy and document its exact cause.
+
+3. Add automated validation tests
+
+Add tests that confirm:
+
+* Forecast coordinates match the verified settlement station
+* The forecast and observation refer to the same local calendar date
+* Time-zone conversion is correct
+* Market threshold and bracket parsing is correct
+* YES/NO probabilities are complementary
+* Sigma cannot fall below the approved floor
+* A market cannot be traded when station verification is false
+* Settlement matches the official Kalshi result
+
+Include representative tests for Oklahoma City, Los Angeles, and several other active cities.
+
+4. Improve quote freshness and paper-execution realism
+
+Reduce the allowed stale-market-quote threshold from 24 hours to 4 hours.
+
+Do not place a paper trade when:
+
+* The quote is older than 4 hours
+* There is no executable ask for the selected side
+* The required order-book data is missing
+
+Store the following at entry:
+
+* Bid
+* Ask
+* Last price
+* Quote timestamp
+* Available quantity
+* Assumed fill price
+* Simulated quantity
+* Estimated fees and slippage
+* Whether the trade would have been executable
+
+Flag trades involving more than 50 contracts at an entry price below 10¢ as potentially non-executable. Do not include non-executable trades in the primary realistic-performance metrics.
+
+Analyze first, but do not activate yet
+
+Build the market-consensus guard as a configurable experiment, but leave it disabled by default.
+
+Test the proposed rule:
+
+Skip a trade when the market probability of the opposing side is 85% or greater.
+
+Report:
+
+* Losses it would have avoided
+* Wins it would have skipped
+* Total trades removed
+* ROI and Brier score with and without the rule
+* Results on all markets and shared markets
+* Whether the threshold was selected before or after reviewing these results
+
+Do not activate it merely because it would have avoided 12 losses. We need to know its full effect and avoid overfitting to this small sample.
+
+Preserve a clean comparison
+
+Keep all current V2 trades and metrics unchanged and labeled as V2 pre-fix.
+
+Start corrected predictions under V2.1 post-fix with:
+
+* Separate strategy label
+* Separate analytics
+* Shared-market comparison against V2
+* Identical market opportunities whenever possible
+* Clear indication of which sigma source and station mapping were used
+
+Do not retroactively rewrite old predictions using the corrected logic.
+
+Before finishing
+
+Provide a written implementation report that includes:
+
+* Root cause of the Oklahoma City error
+* Every station mapping verified
+* Old versus new sigma values by city and lead time
+* Examples showing how probabilities changed after the fixes
+* Tests added and their results
+* Any remaining data-quality risks
+* Confirmation that existing V2 history was preserved
+* Confirmation that the consensus guard remains disabled
+
+After implementing, run the corrected system in paper-trading mode only. Do not enable real-money trading.

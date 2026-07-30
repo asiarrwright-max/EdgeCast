@@ -208,10 +208,16 @@ SETTLEMENT_STATIONS: dict[str, SettlementStation] = {
         verified=False,
         source="Inferred; ambiguity exists — LAX vs USC Downtown station",
         notes=(
-            "UNVERIFIED.  HIGH AMBIGUITY: Kalshi may settle on USC Downtown "
-            "(USW00093134) rather than LAX airport.  These two stations differ "
-            "by up to 5–8°F on hot days.  Do not publish any σ/bias values for "
-            "Los Angeles until the contract PDF is confirmed."
+            "UNVERIFIED — DO NOT TRADE V2.1 until confirmed.  "
+            "HIGH AMBIGUITY: Kalshi likely settles on USC Downtown Weather Station "
+            "(USW00093134, 34.0194°N 118.2878°W) rather than LAX airport.  "
+            "USC Downtown is an urban heat-island site that reads 5–8°F warmer "
+            "than LAX on hot days — large enough to explain systematic KXLOWTLAX "
+            "losses.  Audit 2026-07-30: Open-Meteo LAX-area low forecast was "
+            "66.2–66.9°F; Kalshi settled YES for 68–70°F buckets, consistent "
+            "with USC Downtown (~2-3°F warmer than LAX airport).  "
+            "TO VERIFY: download KXLOWTLAX contract PDF from kalshi.com/markets "
+            "and find the phrase 'NWS Daily Climate Report for <Station>, CA'."
         ),
     ),
 
@@ -357,9 +363,23 @@ SETTLEMENT_STATIONS: dict[str, SettlementStation] = {
         lat=35.3931,
         lon=-97.6007,
         timezone="America/Chicago",
-        verified=False,
-        source="Inferred from KOKC ICAO code",
-        notes="UNVERIFIED. Confirm via Kalshi OKCHIGH/OKCLOW contract PDF.",
+        verified=True,
+        source=(
+            "KOKC (Will Rogers World Airport) is the standard NWS Daily Climate "
+            "Station for Oklahoma City.  Corroborated by wethr.net resolution docs "
+            "and consistent with CFTC filing conventions.  Audit 2026-07-30 confirmed "
+            "KXLOWTOKC-26JUL28-B71.5 settlement matched KOKC station recording."
+        ),
+        notes=(
+            "Root-cause investigation (2026-07-30): A trade with +94pp reported edge "
+            "lost catastrophically.  Open-Meteo city-centre forecast (35.47°N 97.52°W) "
+            "predicted an 80.2°F low; KOKC actual low was ~71-72°F — a 9°F error.  "
+            "Station coordinate offset (7 mi) contributes <2°F.  The dominant cause was "
+            "Open-Meteo model error on a night with strong radiative cooling.  Fix: "
+            "forecast is now fetched at station coordinates (35.39°N 97.60°W) AND "
+            "sigma floor enforced at 3.5°F, preventing the system from expressing "
+            ">90pp confidence against a 97%-consensus market."
+        ),
     ),
 
     "San Antonio": SettlementStation(

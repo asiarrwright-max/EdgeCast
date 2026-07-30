@@ -82,6 +82,15 @@ async def _apply_migrations(conn) -> None:
         "ALTER TABLE forecast_verifications ADD COLUMN IF NOT EXISTS ghcnd_station_id VARCHAR(30)",
         # Widen source_label to accommodate new label strings (≤ 60 chars)
         "ALTER TABLE forecast_verifications ALTER COLUMN source_label TYPE VARCHAR(60)",
+        # Phase v2.1: PaperTrade execution-quality and station fields (nullable — pre-v2.1 rows stay NULL)
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS quote_bid FLOAT",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS quote_ask FLOAT",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS quote_timestamp TIMESTAMPTZ",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS est_available_qty FLOAT",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS is_executable BOOLEAN",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS station_verified BOOLEAN",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS station_lat FLOAT",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS station_lon FLOAT",
     ]
     for stmt in migrations:
         try:
