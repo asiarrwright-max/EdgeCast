@@ -724,7 +724,7 @@ async def consensus_guard_backtest(
     for t in trades:
         mkt_yes = t.market_yes_probability
         direction = t.direction
-        pnl = t.pnl or 0.0
+        pnl = t.profit_loss or 0.0
         won = (t.outcome == "WIN") if t.outcome else (pnl > 0)
 
         # Determine whether the guard would block this trade

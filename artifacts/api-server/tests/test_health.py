@@ -144,7 +144,8 @@ class TestExtractCityEventTickerFallback:
         }
         city, lat, lon = extract_city(raw)
         assert city == "Houston"
-        assert lat == pytest.approx(29.7604, abs=0.01)
+        # V2.1 uses Hobby Airport station coordinates (29.6454°N) not city-centre (29.7604°N)
+        assert lat == pytest.approx(29.6454, abs=0.01)
 
     def test_resolves_los_angeles_from_event_ticker(self):
         from app.services.kalshi import extract_city
@@ -157,7 +158,8 @@ class TestExtractCityEventTickerFallback:
         }
         city, lat, lon = extract_city(raw)
         assert city == "Los Angeles"
-        assert lon == pytest.approx(-118.2437, abs=0.01)
+        # V2.1 uses LAX airport station coordinates (lon -118.3889) not city-centre (-118.2437)
+        assert lon == pytest.approx(-118.3889, abs=0.01)
 
     def test_event_ticker_not_used_when_series_ticker_present(self):
         """series_ticker takes priority; event_ticker fallback must not override it."""

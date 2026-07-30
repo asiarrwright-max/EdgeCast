@@ -11,7 +11,8 @@ class TestExtractCity:
         raw = {"ticker": "KXHIGHTDAL-26JUL28-T107", "series_ticker": "KXHIGHTDAL", "title": "", "subtitle": ""}
         city, lat, lon = extract_city(raw)
         assert city == "Dallas"
-        assert lat == pytest.approx(32.7767, abs=0.01)
+        # V2.1 uses KDFW station coordinates (32.8998°N) not city-centre (32.7767°N)
+        assert lat == pytest.approx(32.8998, abs=0.01)
 
     def test_extracts_nyc_from_kx_series(self):
         raw = {"ticker": "KXLOWTNYC-26JUL28-T72", "series_ticker": "KXLOWTNYC", "title": "", "subtitle": ""}

@@ -9,6 +9,8 @@
 import { useState, ReactNode } from "react";
 import {
   useGetPerformanceAnalytics,
+  useGetV21Calibration,
+  useGetV21Readiness,
   type PerformancePeriod,
   type PerformanceStrategy,
   type StrategyVersionStats,
@@ -17,6 +19,7 @@ import {
   type CumulativeRoiPoint,
   type RollingWinRatePoint,
   type BrierOverTimePoint,
+  type V21CalibrationBucket,
 } from "@workspace/api-client-react";
 import {
   LineChart,
@@ -29,6 +32,9 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
+  ScatterChart,
+  Scatter,
+  ZAxis,
 } from "recharts";
 
 // ---------------------------------------------------------------------------
@@ -801,6 +807,433 @@ function StrategyComparisonTable({
 }
 
 // ---------------------------------------------------------------------------
+// V2.1 Calibration Chart + Table
+// ---------------------------------------------------------------------------
+
+function CalibrationChartTooltip({ active, payload }: any) {
+  if (!active || !payload?.length) return null;
+  const d = payload[0]?.payload as V21CalibrationBucket & { x: number; y: number };
+  if (!d) return null;
+  return (
+    <div className="rounded border border-border bg-popover px-3 py-2 shadow-md text-xs space-y-0.5">
+      <p className="font-medium">{d.bucket}</p>
+      <p>Avg predicted: {d.avgPredictedProb != null ? (d.avgPredictedProb * 100).toFixed(1) + "%" : "—"}</p>
+      <p>Actual win rate: {d.actualWinRate != null ? (d.actualWinRate * 100).toFixed(1) + "%" : "—"}</p>
+      <p>Trades: {d.count}</p>
+      {d.lowSample && <p className="text-amber-400">⚠ Low sample (&lt;30)</p>}
+    </div>
+  );
+}
+
+function CalibrationSection() {
+  const { data, isLoading } = useGetV21Calibration();
+
+  if (isLoading) return <Loading />;
+  if (!data) return <Empty />;
+
+  // Build chart data from each non-empty V2.0 bucket
+  const chartV20 = data.v20
+    .filter((b) => b.count > 0 && b.avgPredictedProb != null && b.actualWinRate != null)
+    .map((b) => ({ ...b, x: (b.avgPredictedProb ?? 0) * 100, y: (b.actualWinRate ?? 0) * 100 }));
+
+  const chartV21 = data.v21
+    .filter((b) => b.count > 0 && b.avgPredictedProb != null && b.actualWinRate != null)
+    .map((b) => ({ ...b, x: (b.avgPredictedProb ?? 0) * 100, y: (b.actualWinRate ?? 0) * 100 }));
+
+  // Perfect calibration line: (50,50)→(100,100)
+  const perfectLine = [
+    { x: 50, y: 50 },
+    { x: 60, y: 60 },
+    { x: 70, y: 70 },
+    { x: 80, y: 80 },
+    { x: 90, y: 90 },
+    { x: 100, y: 100 },
+  ];
+
+  const hasAnyData = chartV20.length > 0 || chartV21.length > 0;
+
+  return (
+    <SectionCard
+      title="Probability Calibration"
+      subtitle="Does EdgeCast's confidence match actual outcomes? Points near the diagonal = well calibrated."
+    >
+      {hasAnyData ? (
+        <div className="px-4 pb-4 pt-2">
+          <ResponsiveContainer width="100%" height={260}>
+            <ScatterChart margin={{ top: 8, right: 16, left: 0, bottom: 16 }}>
+              <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+              <XAxis
+                type="number"
+                dataKey="x"
+                domain={[48, 102]}
+                label={{ value: "Avg Predicted Probability (%)", position: "insideBottom", offset: -10, fontSize: 11 }}
+                tick={{ fontSize: 11 }}
+                tickFormatter={(v) => `${v}%`}
+              />
+              <YAxis
+                type="number"
+                dataKey="y"
+                domain={[0, 105]}
+                label={{ value: "Actual Win Rate (%)", angle: -90, position: "insideLeft", fontSize: 11, offset: 10 }}
+                tick={{ fontSize: 11 }}
+                tickFormatter={(v) => `${v}%`}
+                width={48}
+              />
+              <ZAxis range={[40, 40]} />
+              <Tooltip content={<CalibrationChartTooltip />} />
+              {/* Perfect calibration reference line */}
+              <Scatter
+                name="Perfect calibration"
+                data={perfectLine}
+                line={{ stroke: "#6b7280", strokeDasharray: "4 2", strokeWidth: 1.5 }}
+                shape={() => null as any}
+                legendType="line"
+              />
+              {chartV20.length > 0 && (
+                <Scatter
+                  name="V2.0"
+                  data={chartV20}
+                  fill="#6366f1"
+                  opacity={0.85}
+                />
+              )}
+              {chartV21.length > 0 && (
+                <Scatter
+                  name="V2.1"
+                  data={chartV21}
+                  fill="#22c55e"
+                  opacity={0.85}
+                />
+              )}
+            </ScatterChart>
+          </ResponsiveContainer>
+          <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground justify-center">
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-0.5 bg-gray-400 inline-block" style={{ borderTop: "2px dashed" }} />
+              Perfect calibration
+            </span>
+            {chartV20.length > 0 && (
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-full bg-indigo-500 inline-block" />
+                V2.0
+              </span>
+            )}
+            {chartV21.length > 0 && (
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-full bg-green-500 inline-block" />
+                V2.1
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground text-center mt-1">
+            Below the diagonal = overconfident. Above = underconfident. Near diagonal = well calibrated.
+          </p>
+        </div>
+      ) : (
+        <Empty msg="No settled trades with probability data yet." />
+      )}
+
+      {/* Calibration table — V2.0 */}
+      {data.v20.some((b) => b.count > 0) && (
+        <>
+          <div className="border-t border-border px-4 py-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">V2.0 Calibration Buckets</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead>
+                <tr className="bg-muted/40 text-muted-foreground uppercase text-[10px]">
+                  <th className="text-left px-3 py-2">Confidence Range</th>
+                  <th className="text-right px-3 py-2">Trades</th>
+                  <th className="text-right px-3 py-2">Avg Predicted</th>
+                  <th className="text-right px-3 py-2">Actual Win Rate</th>
+                  <th className="text-right px-3 py-2">Calib. Diff</th>
+                  <th className="text-right px-3 py-2">Avg Brier</th>
+                  <th className="text-right px-3 py-2">Avg ROI</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.v20.map((b) => (
+                  <tr key={b.bucket} className="border-t border-border hover:bg-muted/20">
+                    <td className="px-3 py-2 font-medium">
+                      {b.bucket}
+                      {b.lowSample && (
+                        <span className="ml-1.5 text-[9px] font-semibold px-1.5 py-0.5 rounded border bg-amber-500/10 text-amber-400 border-amber-500/20">
+                          Low Sample
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right">{b.count}</td>
+                    <td className="px-3 py-2 text-right">
+                      {b.avgPredictedProb != null ? `${(b.avgPredictedProb * 100).toFixed(1)}%` : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {b.actualWinRate != null ? `${(b.actualWinRate * 100).toFixed(1)}%` : "—"}
+                    </td>
+                    <td className={`px-3 py-2 text-right font-medium ${
+                      b.calibrationDiff == null ? "" :
+                      Math.abs(b.calibrationDiff) < 0.05 ? "text-emerald-400" :
+                      b.calibrationDiff < 0 ? "text-red-400" : "text-blue-400"
+                    }`}>
+                      {b.calibrationDiff != null
+                        ? `${b.calibrationDiff >= 0 ? "+" : ""}${(b.calibrationDiff * 100).toFixed(1)}pp`
+                        : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {b.avgBrierScore != null ? b.avgBrierScore.toFixed(4) : "—"}
+                    </td>
+                    <td className={`px-3 py-2 text-right ${
+                      b.avgRoi == null ? "" : b.avgRoi >= 0 ? "text-emerald-400" : "text-red-400"
+                    }`}>
+                      {b.avgRoi != null ? `${b.avgRoi >= 0 ? "+" : ""}${b.avgRoi.toFixed(1)}%` : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {/* Calibration table — V2.1 */}
+      {data.v21.some((b) => b.count > 0) && (
+        <>
+          <div className="border-t border-border px-4 py-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">V2.1 Calibration Buckets</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead>
+                <tr className="bg-muted/40 text-muted-foreground uppercase text-[10px]">
+                  <th className="text-left px-3 py-2">Confidence Range</th>
+                  <th className="text-right px-3 py-2">Trades</th>
+                  <th className="text-right px-3 py-2">Avg Predicted</th>
+                  <th className="text-right px-3 py-2">Actual Win Rate</th>
+                  <th className="text-right px-3 py-2">Calib. Diff</th>
+                  <th className="text-right px-3 py-2">Avg Brier</th>
+                  <th className="text-right px-3 py-2">Avg ROI</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.v21.map((b) => (
+                  <tr key={b.bucket} className="border-t border-border hover:bg-muted/20">
+                    <td className="px-3 py-2 font-medium">
+                      {b.bucket}
+                      {b.lowSample && (
+                        <span className="ml-1.5 text-[9px] font-semibold px-1.5 py-0.5 rounded border bg-amber-500/10 text-amber-400 border-amber-500/20">
+                          Low Sample
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right">{b.count}</td>
+                    <td className="px-3 py-2 text-right">
+                      {b.avgPredictedProb != null ? `${(b.avgPredictedProb * 100).toFixed(1)}%` : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {b.actualWinRate != null ? `${(b.actualWinRate * 100).toFixed(1)}%` : "—"}
+                    </td>
+                    <td className={`px-3 py-2 text-right font-medium ${
+                      b.calibrationDiff == null ? "" :
+                      Math.abs(b.calibrationDiff) < 0.05 ? "text-emerald-400" :
+                      b.calibrationDiff < 0 ? "text-red-400" : "text-blue-400"
+                    }`}>
+                      {b.calibrationDiff != null
+                        ? `${b.calibrationDiff >= 0 ? "+" : ""}${(b.calibrationDiff * 100).toFixed(1)}pp`
+                        : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {b.avgBrierScore != null ? b.avgBrierScore.toFixed(4) : "—"}
+                    </td>
+                    <td className={`px-3 py-2 text-right ${
+                      b.avgRoi == null ? "" : b.avgRoi >= 0 ? "text-emerald-400" : "text-red-400"
+                    }`}>
+                      {b.avgRoi != null ? `${b.avgRoi >= 0 ? "+" : ""}${b.avgRoi.toFixed(1)}%` : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {!data.v20.some((b) => b.count > 0) && !data.v21.some((b) => b.count > 0) && (
+        <div className="px-4 py-4 border-t border-border">
+          <p className="text-xs text-muted-foreground text-center">
+            Calibration data will appear here once trades have settled.
+          </p>
+        </div>
+      )}
+
+      <div className="px-4 py-2 border-t border-border">
+        <p className="text-xs text-muted-foreground">{data.note}</p>
+      </div>
+    </SectionCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// V2.1 Readiness Panel
+// ---------------------------------------------------------------------------
+
+const STAGE_INFO: Record<string, { color: string; description: string }> = {
+  "Collecting Data": {
+    color: "bg-slate-500/10 text-slate-400 border-slate-500/30",
+    description:
+      "V2.1 has fewer than 30 settled trades. Results are not statistically meaningful yet. Continue collecting data.",
+  },
+  "Early Learning": {
+    color: "bg-blue-500/10 text-blue-400 border-blue-500/30",
+    description:
+      "Some data exists but sample sizes are still small. Win rate and ROI figures have wide confidence intervals.",
+  },
+  "Meaningful Sample": {
+    color: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+    description:
+      "V2.1 has enough trades to observe early patterns, but more data is needed before drawing firm conclusions.",
+  },
+  "Ready for Careful Evaluation": {
+    color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+    description:
+      "V2.1 has met minimum thresholds for careful evaluation. Results may still change as more data accumulates.",
+  },
+};
+
+function ReadinessBar({ current, needed, label }: { current: number; needed: number; label: string }) {
+  const pct = Math.min(100, Math.round((current / needed) * 100));
+  return (
+    <div>
+      <div className="flex justify-between text-xs mb-1">
+        <span className="text-muted-foreground">{label}</span>
+        <span className={current >= needed ? "text-emerald-400 font-medium" : "text-foreground/70"}>
+          {current} / {needed}
+        </span>
+      </div>
+      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all ${current >= needed ? "bg-emerald-500" : "bg-primary/60"}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ReadinessPanel() {
+  const { data, isLoading } = useGetV21Readiness();
+  if (isLoading) return <Loading />;
+  if (!data) return <Empty />;
+
+  const stage = data.readinessStage;
+  const stageInfo = STAGE_INFO[stage] ?? STAGE_INFO["Collecting Data"];
+  const pct = (v: number | null | undefined, d = 1) =>
+    v == null ? "—" : `${(v * 100).toFixed(d)}%`;
+  const roi = data.roi != null ? `${data.roi >= 0 ? "+" : ""}${data.roi.toFixed(1)}%` : "—";
+
+  return (
+    <SectionCard
+      title="V2.1 Model Readiness"
+      subtitle="How far V2.1 is from having a meaningful forward track record"
+    >
+      {/* Stage badge */}
+      <div className="px-4 py-3 border-b border-border">
+        <div className="flex items-start gap-3 flex-wrap">
+          <span className={`inline-block text-xs font-semibold px-2.5 py-1 rounded border ${stageInfo.color}`}>
+            {stage}
+          </span>
+          <p className="text-xs text-muted-foreground flex-1 min-w-0">{stageInfo.description}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4">
+        <div className="bg-muted/40 rounded-lg border border-border p-3">
+          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Total V2.1 Predictions</p>
+          <p className="mt-1 text-2xl font-bold">{data.totalPredictions}</p>
+          <p className="text-xs text-muted-foreground">{data.openTrades} open · {data.settledTrades} settled</p>
+        </div>
+        <div className="bg-muted/40 rounded-lg border border-border p-3">
+          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Verified Cities</p>
+          <p className="mt-1 text-2xl font-bold">{data.verifiedCityCount}</p>
+          <p className="text-xs text-muted-foreground">{data.unverifiedCityCount} excluded (unverified)</p>
+        </div>
+        <div className="bg-muted/40 rounded-lg border border-border p-3">
+          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Win Rate</p>
+          <p className={`mt-1 text-2xl font-bold ${
+            data.winRate == null ? "" : data.winRate >= 0.55 ? "text-emerald-400" : data.winRate < 0.4 ? "text-red-400" : ""
+          }`}>{pct(data.winRate)}</p>
+          <p className="text-xs text-muted-foreground">{data.wins}W · {data.losses}L</p>
+        </div>
+        <div className="bg-muted/40 rounded-lg border border-border p-3">
+          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">ROI</p>
+          <p className={`mt-1 text-2xl font-bold ${
+            data.roi == null ? "" : data.roi >= 0 ? "text-emerald-400" : "text-red-400"
+          }`}>{roi}</p>
+          <p className="text-xs text-muted-foreground">Brier: {data.brierScore != null ? data.brierScore.toFixed(4) : "—"}</p>
+        </div>
+      </div>
+
+      {/* Progress toward readiness */}
+      <div className="px-4 pb-4 space-y-3">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Progress toward "Ready for Careful Evaluation"</p>
+        <ReadinessBar
+          current={data.criteria.currentSettled}
+          needed={data.criteria.settledNeeded}
+          label="Settled trades"
+        />
+        <ReadinessBar
+          current={data.criteria.currentBuckets}
+          needed={data.criteria.bucketsNeeded}
+          label={`City/lead-time buckets with ≥${data.minSampleThreshold} observations`}
+        />
+
+        {/* Sigma usage */}
+        <div>
+          <p className="text-xs text-muted-foreground mb-1">Sigma source: {data.pctLearnedSigma}% learned · {data.pctFallbackSigma}% fallback (conservative prior)</p>
+          <div className="flex h-1.5 rounded-full overflow-hidden gap-px bg-muted">
+            <div className="bg-emerald-500" style={{ width: `${data.pctLearnedSigma}%` }} />
+            <div className="bg-amber-500" style={{ width: `${data.pctFallbackSigma}%` }} />
+          </div>
+        </div>
+
+        {data.avgSigma != null && (
+          <p className="text-xs text-muted-foreground">Current average σ: {data.avgSigma.toFixed(2)}°F</p>
+        )}
+      </div>
+
+      {/* Verified / unverified city lists */}
+      <div className="grid md:grid-cols-2 gap-3 px-4 pb-4">
+        <div className="rounded border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
+          <p className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wide mb-1">
+            Verified cities ({data.verifiedCityCount})
+          </p>
+          <p className="text-xs text-foreground/70">
+            {data.verifiedCities.join(", ") || "None yet"}
+          </p>
+        </div>
+        <div className="rounded border border-amber-500/20 bg-amber-500/5 px-3 py-2">
+          <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wide mb-1">
+            Excluded — unverified ({data.unverifiedCityCount})
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {data.unverifiedCities.slice(0, 8).join(", ")}
+            {data.unverifiedCities.length > 8 ? ` +${data.unverifiedCities.length - 8} more` : ""}
+          </p>
+        </div>
+      </div>
+
+      {data.unresolvedActiveStations.length > 0 && (
+        <div className="px-4 pb-4">
+          <div className="rounded border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-400">
+            ⚠ Unresolved station issues for cities with active open trades:{" "}
+            <span className="font-medium">{data.unresolvedActiveStations.join(", ")}</span>
+          </div>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -1003,6 +1436,12 @@ export default function PerformancePage() {
           <Empty msg="No strategy data." />
         )}
       </SectionCard>
+
+      {/* V2.1 Readiness Panel */}
+      <ReadinessPanel />
+
+      {/* Probability Calibration */}
+      <CalibrationSection />
     </div>
   );
 }

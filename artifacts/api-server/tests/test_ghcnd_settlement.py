@@ -22,10 +22,12 @@ class TestSettlementStations:
         assert "Chicago" in vc
         assert "Denver" in vc
 
-    def test_verified_count_is_three(self):
-        """Exactly 3 verified cities as of current data."""
+    def test_verified_count_is_four(self):
+        """Exactly 4 verified cities as of current data (NYC, Chicago, Denver, Oklahoma City)."""
         from app.services.settlement_stations import verified_cities
-        assert len(verified_cities()) == 3
+        vc = verified_cities()
+        assert len(vc) == 4
+        assert "Oklahoma City" in vc
 
     def test_all_cities_count_is_24(self):
         """All 24 Kalshi cities have entries."""
