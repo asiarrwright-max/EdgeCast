@@ -18,12 +18,20 @@ export interface StrategySection {
   wins: number;
   losses: number;
   win_rate_pct: number | null;
-  total_stake: number;
+  /** Stake from settled trades only — the ROI denominator. */
+  settled_stake: number;
   gross_pl: number;
+  /** Exchange fees on settled trades only — deducted from gross_pl to form net_pl. */
   estimated_fees: number;
   net_pl: number;
   roi_pct: number | null;
   brier_score: number | null;
+  /** Capital still deployed in open trades — informational, not mixed into settled P/L. */
+  open_stake: number;
+  /** Estimated exchange fees for open trades — informational only. */
+  open_fees: number;
+  /** total_stake = settled_stake + open_stake (retained for display). */
+  total_stake: number;
   avg_edge_pp: number | null;
   avg_sigma: number | null;
   is_official: boolean;

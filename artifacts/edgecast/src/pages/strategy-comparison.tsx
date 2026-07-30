@@ -182,6 +182,8 @@ function StatRow({ label, value, dim }: { label: string; value: string; dim?: bo
 }
 
 function SectionBlock({ sec, title }: { sec: StrategySection; title: string }) {
+  const hasSettled = sec.settled > 0;
+  const hasOpen    = sec.open > 0;
   return (
     <div className="space-y-0">
       <p className="text-xs text-muted-foreground font-semibold px-4 pt-3 pb-1 uppercase tracking-wider">
@@ -197,21 +199,42 @@ function SectionBlock({ sec, title }: { sec: StrategySection; title: string }) {
           </span>
         )}
       </p>
-      <div className="px-4 pb-3">
+      <div className="px-4 pb-1">
         <StatRow label="Predictions" value={int(sec.count)} />
         <StatRow label="Open"        value={int(sec.open)}  />
         <StatRow label="Settled"     value={int(sec.settled)} />
         <StatRow label="Wins / Losses" value={`${sec.wins} / ${sec.losses}`} />
-        <StatRow label="Win rate"    value={sec.win_rate_pct != null ? pct(sec.win_rate_pct) : "—"} dim={sec.settled === 0} />
-        <StatRow label="Gross P/L"   value={money(sec.gross_pl)} />
-        <StatRow label="Est. fees"   value={sec.estimated_fees > 0 ? `−$${sec.estimated_fees.toFixed(4)}` : "—"} dim />
-        <StatRow label="Net P/L"     value={money(sec.net_pl)} />
-        <StatRow label="ROI"         value={sec.roi_pct != null ? pct(sec.roi_pct) : "—"} dim={sec.settled === 0} />
+        <StatRow label="Win rate"    value={sec.win_rate_pct != null ? pct(sec.win_rate_pct) : "—"} dim={!hasSettled} />
+      </div>
+
+      {/* ── Settled P/L block ─────────────────────────────────────────────── */}
+      <p className="text-[10px] text-muted-foreground/60 font-medium px-4 pt-2 pb-0.5 uppercase tracking-wider">
+        Settled P/L
+      </p>
+      <div className="px-4 pb-1">
+        <StatRow label="Settled stake"    value={hasSettled ? `$${sec.settled_stake.toFixed(2)}` : "—"} dim={!hasSettled} />
+        <StatRow label="Gross P/L"        value={hasSettled ? money(sec.gross_pl) : "—"} dim={!hasSettled} />
+        <StatRow label="Est. fees (settled)" value={hasSettled && sec.estimated_fees > 0 ? `−$${sec.estimated_fees.toFixed(4)}` : "—"} dim />
+        <StatRow label="Net P/L"          value={hasSettled ? money(sec.net_pl) : "—"} dim={!hasSettled} />
+        <StatRow label="ROI"              value={sec.roi_pct != null ? pct(sec.roi_pct) : "—"} dim={!hasSettled} />
         {sec.is_official && (
-          <StatRow label="Brier score" value={sec.brier_score != null ? num(sec.brier_score) : "—"} dim={sec.settled === 0} />
+          <StatRow label="Brier score" value={sec.brier_score != null ? num(sec.brier_score) : "—"} dim={!hasSettled} />
         )}
-        <StatRow label="Avg edge"    value={sec.avg_edge_pp != null ? pp(sec.avg_edge_pp) : "—"} />
-        <StatRow label="Avg sigma"   value={sec.avg_sigma != null ? `${sec.avg_sigma.toFixed(3)}°F` : "—"} />
+      </div>
+
+      {/* ── Open capital block (informational) ────────────────────────────── */}
+      <p className="text-[10px] text-muted-foreground/60 font-medium px-4 pt-2 pb-0.5 uppercase tracking-wider">
+        Open capital
+      </p>
+      <div className="px-4 pb-3">
+        <StatRow label="Open stake"       value={hasOpen ? `$${sec.open_stake.toFixed(2)}` : "—"} dim={!hasOpen} />
+        <StatRow
+          label="Est. fees (open)"
+          value={hasOpen && sec.open_fees > 0 ? `~$${sec.open_fees.toFixed(4)}` : "—"}
+          dim
+        />
+        <StatRow label="Avg edge"  value={sec.avg_edge_pp != null ? pp(sec.avg_edge_pp) : "—"} />
+        <StatRow label="Avg sigma" value={sec.avg_sigma != null ? `${sec.avg_sigma.toFixed(3)}°F` : "—"} />
       </div>
     </div>
   );

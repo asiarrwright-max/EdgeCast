@@ -84,16 +84,35 @@ def _strategy_summary(
         open_    = [t for t in active  if getattr(t, "status", "") == "OPEN"]
         wins     = sum(1 for t in settled if getattr(t, "outcome", "") == "WIN")
         losses   = sum(1 for t in settled if getattr(t, "outcome", "") == "LOSS")
-        stake    = sum(getattr(t, "stake", 0) or 0 for t in active)
+
+        # ── Stake: split settled vs open so ROI uses the right denominator ──
+        # Bug fix: the old code summed over ALL active trades, mixing settled
+        # capital (already resolved) with open capital (still deployed).
+        # ROI = settled gross P/L / settled stake only.
+        settled_stake = sum(getattr(t, "stake", 0) or 0 for t in settled)
+        open_stake    = sum(getattr(t, "stake", 0) or 0 for t in open_)
+
         gross_pl = sum(getattr(t, "profit_loss", 0) or 0 for t in settled)
-        fees     = sum(
-            f for t in active
-            if (f := _fee_est(
-                getattr(t, "side_market_price", None),
-                getattr(t, "quantity", None),
-            )) is not None
-        )
-        net_pl = round(gross_pl - fees, 4)
+
+        # ── Fees: settled trades only ────────────────────────────────────────
+        # Bug fix: the old code accumulated fees over all active trades and
+        # subtracted them from settled gross P/L, which mixed open-trade
+        # estimates into a settled-only P/L figure.
+        # estimated_fees = settled fees → subtracted to get net_pl.
+        # open_fees      = open fees   → informational, not deducted here.
+        def _fee_sum(tlist: list) -> float:
+            return sum(
+                f for t in tlist
+                if (f := _fee_est(
+                    getattr(t, "side_market_price", None),
+                    getattr(t, "quantity", None),
+                )) is not None
+            )
+
+        settled_fees = _fee_sum(settled)
+        open_fees    = _fee_sum(open_)
+        net_pl       = round(gross_pl - settled_fees, 4)
+
         edges  = [getattr(t, "edge_pct_points", None) for t in active
                   if getattr(t, "edge_pct_points", None) is not None]
         sigmas = [getattr(t, "sigma_used", None) or
@@ -107,12 +126,19 @@ def _strategy_summary(
             "wins":               wins,
             "losses":             losses,
             "win_rate_pct":       round(100 * wins / len(settled), 1) if settled else None,
-            "total_stake":        round(stake, 2),
+            # Settled P/L block — all three figures are settled-only
+            "settled_stake":      round(settled_stake, 2),
             "gross_pl":           round(gross_pl, 2),
-            "estimated_fees":     round(fees, 4),
-            "net_pl":             net_pl,
-            "roi_pct":            round(100 * gross_pl / stake, 1) if stake > 0 and settled else None,
+            "estimated_fees":     round(settled_fees, 4),  # settled only
+            "net_pl":             net_pl,                  # gross_pl − settled_fees
+            "roi_pct":            round(100 * gross_pl / settled_stake, 1)
+                                  if settled_stake > 0 and settled else None,
             "brier_score":        _brier(settled) if official and settled else None,
+            # Open capital — informational; never mixed into settled P/L
+            "open_stake":         round(open_stake, 2),
+            "open_fees":          round(open_fees, 4),
+            # Legacy: settled + open (kept for display total)
+            "total_stake":        round(settled_stake + open_stake, 2),
             "avg_edge_pp":        round(sum(edges) / len(edges), 2) if edges else None,
             "avg_sigma":          round(sum(sigmas) / len(sigmas), 3) if sigmas else None,
             "is_official":        official,
