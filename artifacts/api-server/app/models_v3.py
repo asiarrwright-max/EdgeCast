@@ -398,9 +398,15 @@ class V3PredictionSnapshot(Base):
     confidence: Mapped[str | None] = mapped_column(String(20))
     claimed_edge: Mapped[float | None] = mapped_column(Float)
 
+    # Two-component architecture (Phase 3)
+    bias_applied: Mapped[bool | None] = mapped_column(Boolean)
+    # True = bias correction was applied to mu; False = sigma-only prediction
+    bias_suppressed_reason: Mapped[str | None] = mapped_column(String(200))
+    # Non-empty when bias_applied is False (why the gate rejected the bias)
+
     # Decision
     trade_decision: Mapped[str | None] = mapped_column(String(20))
-    # "YES" | "NO" | "SKIP"
+    # "YES" | "NO" | "SKIP" | "PENDING" (set after paper-trading step)
     decision_reason: Mapped[str | None] = mapped_column(Text)
     analysis_status: Mapped[str] = mapped_column(
         String(50), nullable=False, default="unsupported"

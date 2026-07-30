@@ -45,6 +45,9 @@ async def _settlement_loop() -> None:
             logger.info("Scheduler: running settlement check.")
             from app.services.settlement import run_settlement_job
             await run_settlement_job()
+            # V3 settlement runs in the same cycle, immediately after V1/V2/V2.1
+            from app.services.v3_settlement import run_v3_settlement_job
+            await run_v3_settlement_job()
         except asyncio.CancelledError:
             break
         except Exception as exc:

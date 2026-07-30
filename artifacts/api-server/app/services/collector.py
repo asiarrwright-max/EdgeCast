@@ -353,7 +353,40 @@ async def run_collection_job(job_id: int | None = None) -> None:
                 except Exception as exc:
                     logger.warning("Paper trading v2.1 step failed (non-fatal): %s", exc)
 
-                # ---- Step 5e: Finalise job ---------------------------------
+                # ---- Step 5f: V3 predictions (parallel paper trading) -------
+                pt_v3_stats: dict = {
+                    "status": "disabled", "created": 0, "errors": 0,
+                }
+                try:
+                    from app.services.v3_predictor import run_v3_predictions
+                    pt_v3_stats = await run_v3_predictions(session)
+                    logger.info(
+                        "V3 predictions: %d created, %d unverified, %d unsupported, %d errors",
+                        pt_v3_stats.get("created", 0),
+                        pt_v3_stats.get("skipped_unverified", 0),
+                        pt_v3_stats.get("skipped_unsupported", 0),
+                        pt_v3_stats.get("errors", 0),
+                    )
+                except Exception as exc:
+                    logger.warning("V3 predictions step failed (non-fatal): %s", exc)
+
+                # ---- Step 5g: V3 paper trading --------------------------------
+                pt_v3_pt_stats: dict = {
+                    "status": "disabled", "created": 0, "skipped": 0, "errors": 0,
+                }
+                try:
+                    from app.services.v3_paper_trading import run_paper_trading_v3
+                    pt_v3_pt_stats = await run_paper_trading_v3(session)
+                    logger.info(
+                        "V3 paper trading: %d created, %d skipped, %d errors",
+                        pt_v3_pt_stats.get("created", 0),
+                        pt_v3_pt_stats.get("skipped", 0),
+                        pt_v3_pt_stats.get("errors", 0),
+                    )
+                except Exception as exc:
+                    logger.warning("V3 paper trading step failed (non-fatal): %s", exc)
+
+                # ---- Step 5h: Finalise job ---------------------------------
                 duration = round(time.monotonic() - started_mono, 2)
                 job_q = await session.execute(select(JobRun).where(JobRun.id == job.id))
                 job_record = job_q.scalar_one_or_none()

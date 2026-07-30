@@ -1,6 +1,6 @@
 """
-V3 Analytics API — Phase 1 + Phase 2
-======================================
+V3 Analytics API — Phase 1 + Phase 2 + Phase 3
+================================================
 Phase 1 endpoints:
   GET  /analytics/v3/flags            — current V3 feature flag states
   GET  /analytics/v3/ingestion-audit  — per-city ingestion summary
@@ -11,8 +11,15 @@ Phase 2 endpoints (gated on v3.validation_enabled):
   GET  /analytics/v3/error-stats           — view computed V3ErrorStats rows
   GET  /analytics/v3/walk-forward-report   — run walk-forward validation and return report
 
-Phase 3 endpoints will be added to this router when Phase 3 is implemented.
-This file is additive — no existing router is modified.
+Phase 3 endpoints (live parallel predictions + paper trading):
+  GET  /analytics/v3/live-predictions      — recent V3 prediction snapshots
+  GET  /analytics/v3/live-paper-trades     — V3 paper trades with P/L summary
+  GET  /analytics/v3/live-comparison       — V3 vs V2.1 probabilities, same markets
+  POST /analytics/v3/run-v3-predictions    — manually trigger V3 prediction step
+  POST /analytics/v3/run-v3-paper-trading  — manually trigger V3 paper-trading step
+  POST /analytics/v3/run-v3-settlement     — manually trigger V3 settlement step
+  POST /analytics/v3/enable-predictions    — set v3.predictions_enabled=true
+  POST /analytics/v3/enable-paper-trading  — set v3.paper_trading_enabled=true
 """
 from __future__ import annotations
 
@@ -546,3 +553,314 @@ async def get_walk_forward_report(
         response["records"] = report.records
 
     return response
+
+
+# ===========================================================================
+# Phase 3 — Live predictions, paper trading & analytics
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# GET /analytics/v3/live-predictions
+# ---------------------------------------------------------------------------
+
+@router.get("/analytics/v3/live-predictions")
+async def get_live_predictions(
+    limit: int = 100,
+    _user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Return the most recent V3PredictionSnapshot rows (up to `limit`).
+    Includes core probability decomposition and bias-gate fields.
+    """
+    from app.models_v3 import V3PredictionSnapshot
+
+    result = await session.execute(
+        select(V3PredictionSnapshot)
+        .order_by(V3PredictionSnapshot.id.desc())
+        .limit(max(1, min(limit, 500)))
+    )
+    rows = result.scalars().all()
+
+    return {
+        "count": len(rows),
+        "predictions": [
+            {
+                "id":                    r.id,
+                "created_at":            r.created_at.isoformat() if r.created_at else None,
+                "market_ticker":         r.market_ticker,
+                "comparison_group_id":   r.comparison_group_id,
+                "forecast_date":         r.forecast_date,
+                "forecast_value":        r.forecast_value,
+                "settlement_variable":   r.settlement_variable,
+                "settlement_operator":   r.settlement_operator,
+                "settlement_threshold":  r.settlement_threshold,
+                "contract_type":         r.contract_type,
+                "ec_probability":        r.ec_probability,
+                "market_probability":    r.market_probability,
+                "claimed_edge":          r.claimed_edge,
+                "confidence":            r.confidence,
+                "historical_bias_adj":   r.historical_bias_adj,
+                "historical_sigma":      r.historical_sigma,
+                "final_bias":            r.final_bias,
+                "final_sigma":           r.final_sigma,
+                "fallback_level_used":   r.fallback_level_used,
+                "hist_sample_count":     r.hist_sample_count,
+                "effective_hist_n":      r.effective_hist_n,
+                "bias_applied":          r.bias_applied,
+                "bias_suppressed_reason": r.bias_suppressed_reason,
+                "trade_decision":        r.trade_decision,
+                "analysis_status":       r.analysis_status,
+            }
+            for r in rows
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /analytics/v3/live-paper-trades
+# ---------------------------------------------------------------------------
+
+@router.get("/analytics/v3/live-paper-trades")
+async def get_live_paper_trades(
+    limit: int = 100,
+    status: str | None = None,
+    _user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Return V3PaperTrade rows with P/L summary.
+    Optional `?status=OPEN|SETTLED|PENDING_SETTLEMENT` filter.
+    """
+    from sqlalchemy import and_
+    from app.models_v3 import V3PaperTrade
+
+    q = select(V3PaperTrade).order_by(V3PaperTrade.id.desc())
+    if status:
+        q = q.where(V3PaperTrade.status == status.upper())
+    q = q.limit(max(1, min(limit, 500)))
+
+    result = await session.execute(q)
+    trades = result.scalars().all()
+
+    # Summary P/L
+    total_stake   = sum(t.stake for t in trades if t.stake)
+    total_pl      = sum(t.profit_loss for t in trades if t.profit_loss is not None)
+    settled       = [t for t in trades if t.status == "SETTLED"]
+    wins          = sum(1 for t in settled if t.outcome == "WIN")
+    losses        = sum(1 for t in settled if t.outcome == "LOSS")
+    open_count    = sum(1 for t in trades if t.status == "OPEN")
+    pending_count = sum(1 for t in trades if t.status == "PENDING_SETTLEMENT")
+
+    return {
+        "count": len(trades),
+        "summary": {
+            "open":               open_count,
+            "pending_settlement": pending_count,
+            "settled":            len(settled),
+            "wins":               wins,
+            "losses":             losses,
+            "win_rate_pct":       round(100 * wins / len(settled), 1) if settled else None,
+            "total_stake":        round(total_stake, 2),
+            "total_pl":           round(total_pl, 2),
+            "roi_pct":            round(100 * total_pl / total_stake, 1) if total_stake else None,
+        },
+        "trades": [
+            {
+                "id":                   t.id,
+                "created_at":           t.created_at.isoformat() if t.created_at else None,
+                "market_ticker":        t.market_ticker,
+                "city":                 t.city,
+                "contract_type":        t.contract_type,
+                "comparison_group_id":  t.comparison_group_id,
+                "direction":            t.direction,
+                "ec_yes_probability":   t.ec_yes_probability,
+                "market_yes_probability": t.market_yes_probability,
+                "side_market_price":    t.side_market_price,
+                "edge_pct_points":      t.edge_pct_points,
+                "final_sigma":          t.final_sigma,
+                "fallback_level_used":  t.fallback_level_used,
+                "stake":                t.stake,
+                "quantity":             t.quantity,
+                "is_executable":        t.is_executable,
+                "status":               t.status,
+                "outcome":              t.outcome,
+                "profit_loss":          t.profit_loss,
+                "return_pct":           t.return_pct,
+                "settlement_timestamp": (
+                    t.settlement_timestamp.isoformat() if t.settlement_timestamp else None
+                ),
+            }
+            for t in trades
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /analytics/v3/live-comparison
+# ---------------------------------------------------------------------------
+
+@router.get("/analytics/v3/live-comparison")
+async def get_live_comparison(
+    limit: int = 100,
+    _user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Side-by-side V3 vs V2.1 probability comparison for markets where both
+    predictions exist, joined on comparison_group_id.
+
+    Useful for measuring probability divergence (V3 vs V2.1 on the same market).
+    """
+    from app.models import PredictionSnapshot
+    from app.models_v3 import V3PredictionSnapshot
+
+    # Get recent V3 snapshots with a comparison_group_id
+    v3_q = await session.execute(
+        select(V3PredictionSnapshot)
+        .where(V3PredictionSnapshot.comparison_group_id.isnot(None))
+        .order_by(V3PredictionSnapshot.id.desc())
+        .limit(max(1, min(limit, 500)))
+    )
+    v3_snaps = v3_q.scalars().all()
+
+    if not v3_snaps:
+        return {"count": 0, "comparisons": [],
+                "note": "No V3 predictions with comparison_group_id found."}
+
+    # Fetch matching V2.1 snapshots
+    comp_ids = [s.comparison_group_id for s in v3_snaps]
+    v21_q = await session.execute(
+        select(PredictionSnapshot).where(
+            PredictionSnapshot.comparison_group_id.in_(comp_ids)
+        )
+    )
+    v21_by_comp: dict[str, Any] = {
+        s.comparison_group_id: s for s in v21_q.scalars().all()
+    }
+
+    comparisons = []
+    for v3 in v3_snaps:
+        v21 = v21_by_comp.get(v3.comparison_group_id)
+        v3_prob = v3.ec_probability
+        v21_prob = v21.ec_probability if v21 else None
+
+        divergence = None
+        if v3_prob is not None and v21_prob is not None:
+            divergence = round(v3_prob - v21_prob, 4)
+
+        comparisons.append({
+            "market_ticker":          v3.market_ticker,
+            "comparison_group_id":    v3.comparison_group_id,
+            "forecast_date":          v3.forecast_date,
+            "settlement_threshold":   v3.settlement_threshold,
+            "contract_type":          v3.contract_type,
+            # V3 side
+            "v3_probability":         v3_prob,
+            "v3_sigma":               v3.final_sigma,
+            "v3_bias_applied":        v3.bias_applied,
+            "v3_fallback_level":      v3.fallback_level_used,
+            "v3_confidence":          v3.confidence,
+            "v3_claimed_edge":        v3.claimed_edge,
+            # V2.1 side
+            "v21_probability":        v21_prob,
+            "v21_created_at":         (
+                v21.created_at.isoformat() if v21 and v21.created_at else None
+            ),
+            # Delta
+            "probability_divergence": divergence,
+        })
+
+    return {
+        "count":       len(comparisons),
+        "comparisons": comparisons,
+        "note":        "probability_divergence = v3_probability - v21_probability",
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /analytics/v3/run-v3-predictions  (admin, manual trigger)
+# ---------------------------------------------------------------------------
+
+@router.post("/analytics/v3/run-v3-predictions")
+async def trigger_v3_predictions(
+    _user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Manually trigger V3 predictions for all active markets."""
+    from app.services.v3_predictor import run_v3_predictions
+    stats = await run_v3_predictions(session)
+    return {"triggered": True, "stats": stats}
+
+
+# ---------------------------------------------------------------------------
+# POST /analytics/v3/run-v3-paper-trading  (admin, manual trigger)
+# ---------------------------------------------------------------------------
+
+@router.post("/analytics/v3/run-v3-paper-trading")
+async def trigger_v3_paper_trading(
+    _user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Manually trigger V3 paper-trading evaluation."""
+    from app.services.v3_paper_trading import run_paper_trading_v3
+    stats = await run_paper_trading_v3(session)
+    return {"triggered": True, "stats": stats}
+
+
+# ---------------------------------------------------------------------------
+# POST /analytics/v3/run-v3-settlement  (admin, manual trigger)
+# ---------------------------------------------------------------------------
+
+@router.post("/analytics/v3/run-v3-settlement")
+async def trigger_v3_settlement(
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """Manually trigger V3 settlement check against Kalshi."""
+    from app.services.v3_settlement import run_v3_settlement_job
+    stats = await run_v3_settlement_job()
+    return {"triggered": True, "stats": stats}
+
+
+# ---------------------------------------------------------------------------
+# POST /analytics/v3/enable-predictions  (admin)
+# ---------------------------------------------------------------------------
+
+@router.post("/analytics/v3/enable-predictions")
+async def enable_v3_predictions(
+    _user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Set v3.predictions_enabled = true."""
+    return await _set_v3_flag(session, "v3.predictions_enabled", "true")
+
+
+# ---------------------------------------------------------------------------
+# POST /analytics/v3/enable-paper-trading  (admin)
+# ---------------------------------------------------------------------------
+
+@router.post("/analytics/v3/enable-paper-trading")
+async def enable_v3_paper_trading(
+    _user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Set v3.paper_trading_enabled = true."""
+    return await _set_v3_flag(session, "v3.paper_trading_enabled", "true")
+
+
+# ---------------------------------------------------------------------------
+# Helper: set a V3 flag
+# ---------------------------------------------------------------------------
+
+async def _set_v3_flag(session: AsyncSession, key: str, value: str) -> dict:
+    """Upsert a V3 feature flag in app_settings."""
+    result = await session.execute(
+        select(AppSetting).where(AppSetting.key == key)
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        session.add(AppSetting(key=key, value=value))
+    else:
+        row.value = value
+    await session.commit()
+    return {"key": key, "value": value, "updated": True}

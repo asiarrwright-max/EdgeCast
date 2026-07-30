@@ -103,6 +103,11 @@ async def _apply_migrations(conn) -> None:
         "ALTER TABLE v3_error_stats ADD COLUMN IF NOT EXISTS bias_t_stat FLOAT",
         "ALTER TABLE v3_error_stats ADD COLUMN IF NOT EXISTS bias_gate_passed BOOLEAN",
         "ALTER TABLE v3_error_stats ADD COLUMN IF NOT EXISTS bias_suppressed_reason VARCHAR(200)",
+        # V3 Phase 3 — two-component fields on v3_prediction_snapshots.
+        # bias_applied tracks whether the bias gate passed for this prediction.
+        # bias_suppressed_reason explains why bias was NOT applied (gate failed).
+        "ALTER TABLE v3_prediction_snapshots ADD COLUMN IF NOT EXISTS bias_applied BOOLEAN",
+        "ALTER TABLE v3_prediction_snapshots ADD COLUMN IF NOT EXISTS bias_suppressed_reason VARCHAR(200)",
     ]
     for stmt in migrations:
         try:
