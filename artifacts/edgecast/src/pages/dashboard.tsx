@@ -241,7 +241,7 @@ function HowEdgeCastLearns() {
             HOW EDGECAST LEARNS
           </CardTitle>
           <Link
-            href="/strategy-audit"
+            href="/strategy-audit?tab=v2-learning"
             className="text-[10px] font-mono text-primary hover:underline whitespace-nowrap flex items-center gap-1"
           >
             DEEP DIVE <ExternalLink className="h-3 w-3" />

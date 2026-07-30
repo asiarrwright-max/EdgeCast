@@ -1350,7 +1350,9 @@ const TABS = [
 ];
 
 export default function StrategyAuditPage() {
-  const [activeTab, setActiveTab] = useState("differences");
+  const search = new URLSearchParams(window.location.search);
+  const initialTab = TABS.some(t => t.id === search.get("tab")) ? search.get("tab")! : "differences";
+  const [activeTab, setActiveTab] = useState(initialTab);
 
   return (
     <div className="space-y-6">
