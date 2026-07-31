@@ -128,51 +128,51 @@ function RankRow({ entry, isLeader }: { entry: StrategyRankEntry; isLeader: bool
   const hasData = entry.n > 0;
 
   return (
-    <div className={`rounded-lg border px-4 py-3 ${
+    <div className={`rounded-lg border px-3 py-3 sm:px-4 ${
       isLeader ? "border-border bg-card" : "border-border/50 bg-muted/10"
     }`}>
-      <div className="flex items-start gap-3">
-        {/* Medal + strategy pill */}
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <span className="text-lg leading-none" aria-label={`Rank ${entry.rank}`}>{medal}</span>
-          <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${color}`}>
-            {entry.label}
-          </span>
-          {isLeader && entry.n >= 10 && (
-            <span className="text-xs text-muted-foreground italic">current leader</span>
-          )}
-        </div>
-
-        {/* Metric chips */}
-        {hasData && (
-          <div className="flex flex-wrap gap-2 justify-end text-[11px] font-mono">
-            {entry.net_roi_pct != null && (
-              <span className={`${entry.net_roi_pct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                ROI {entry.net_roi_pct >= 0 ? "+" : ""}{entry.net_roi_pct.toFixed(1)}%
-              </span>
-            )}
-            {entry.win_rate_pct != null && (
-              <span className="text-muted-foreground">
-                win {entry.win_rate_pct.toFixed(0)}%
-              </span>
-            )}
-            {entry.brier_score != null && (
-              <span className="text-muted-foreground">
-                Brier {entry.brier_score.toFixed(3)}
-              </span>
-            )}
-            {entry.city_consistency_pct != null && (
-              <span className="text-muted-foreground">
-                city {entry.city_consistency_pct.toFixed(0)}%
-              </span>
-            )}
-          </div>
+      {/* Row 1: medal · strategy pill · "current leader" label */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-lg leading-none shrink-0" aria-label={`Rank ${entry.rank}`}>
+          {medal}
+        </span>
+        <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold shrink-0 ${color}`}>
+          {entry.label}
+        </span>
+        {isLeader && entry.n >= 10 && (
+          <span className="text-xs text-muted-foreground italic">current leader</span>
         )}
       </div>
 
-      {/* Reasons */}
+      {/* Row 2: metric chips — own line so they never fight for space */}
+      {hasData && (
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-mono">
+          {entry.net_roi_pct != null && (
+            <span className={entry.net_roi_pct >= 0 ? "text-emerald-400" : "text-red-400"}>
+              Net ROI {entry.net_roi_pct >= 0 ? "+" : ""}{entry.net_roi_pct.toFixed(1)}%
+            </span>
+          )}
+          {entry.win_rate_pct != null && (
+            <span className="text-muted-foreground">
+              Win {entry.win_rate_pct.toFixed(0)}%
+            </span>
+          )}
+          {entry.brier_score != null && (
+            <span className="text-muted-foreground">
+              Brier {entry.brier_score.toFixed(3)}
+            </span>
+          )}
+          {entry.city_consistency_pct != null && (
+            <span className="text-muted-foreground">
+              Cities {entry.city_consistency_pct.toFixed(0)}%
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Row 3: reason tags */}
       {entry.reasons.length > 0 && (
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
+        <div className="mt-2 flex flex-wrap gap-1.5">
           {entry.reasons.map((r) => (
             <span
               key={r}
@@ -254,15 +254,15 @@ function PreliminaryLeaderPanel({ leader }: { leader: PreliminaryLeader }) {
               ))}
             </div>
 
-            {/* Sample-size context */}
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
+            {/* Sample-size context — stacks on mobile */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs text-muted-foreground">
               <span>
                 Based on{" "}
                 <span className="font-mono font-medium text-foreground">{n}</span>
                 {" "}strictly paired settled executable trades
               </span>
               {next_milestone && (
-                <span>
+                <span className="sm:text-right shrink-0">
                   Next review at{" "}
                   <span className="font-mono font-medium text-foreground">{next_milestone}</span>
                   {" "}({next_milestone_remaining} away)
