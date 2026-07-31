@@ -67,6 +67,261 @@ def _brier(trades: list, *, use_ec_yes: bool = True) -> float | None:
     return round(sum(scores) / len(scores), 4)
 
 
+def _preliminary_leader(
+    v21_trades: list,
+    v22_trades: list,
+    v3_trades:  list,
+) -> dict[str, Any]:
+    """
+    Rank the three strategies using *only* strictly-paired, executable, settled
+    trades with net P/L after fees.
+
+    "Strictly paired" = all three strategies share the same non-NULL
+    comparison_snapshot_id (same collection cycle, identical frozen inputs).
+    By that construction, every strategy has the same trade count N — so a
+    strategy with a lucky small sample can never leapfrog another on volume
+    grounds alone.
+
+    Composite score (min-max normalised across the three strategies):
+        35 % net ROI after fees  (higher = better)
+        25 % Brier score         (lower  = better)
+        25 % win rate            (higher = better)
+        15 % city consistency    (higher = better)
+    """
+    _TIERS = [
+        (500, "strong",       "Strong evidence"),
+        (250, "meaningful",   "Meaningful leader"),
+        (100, "emerging",     "Emerging leader"),
+        (50,  "preliminary",  "Preliminary leader"),
+        (10,  "very_early",   "Very early leader"),
+        (1,   "very_early",   "Very early leader"),
+        (0,   "insufficient", "Not enough data to rank"),
+    ]
+    _MILESTONES = [10, 50, 100, 250, 500]
+
+    _CAVEATS = [
+        "Too early to declare a winner.",
+        "Rankings may change as more trades settle.",
+        "Only strictly paired, executable, settled trades are included.",
+    ]
+
+    # ── Find strictly-paired settled-executable tickers ───────────────────
+    def _se_by_ticker(trades):
+        return {
+            t.market_ticker: t for t in trades
+            if t.status == "SETTLED" and t.is_executable is True
+        }
+
+    v21_se = _se_by_ticker(v21_trades)
+    v22_se = _se_by_ticker(v22_trades)
+    v3_se  = _se_by_ticker(v3_trades)
+
+    paired_tickers: list[str] = []
+    for ticker in set(v21_se) & set(v22_se) & set(v3_se):
+        t21 = v21_se[ticker]
+        t22 = v22_se[ticker]
+        t3  = v3_se[ticker]
+        sid = t21.comparison_snapshot_id
+        if sid and sid == t22.comparison_snapshot_id == t3.comparison_snapshot_id:
+            paired_tickers.append(ticker)
+
+    n = len(paired_tickers)
+
+    # Confidence tier
+    tier_key, tier_label = "insufficient", "Not enough data to rank"
+    for threshold, key, label in _TIERS:
+        if n >= threshold:
+            tier_key, tier_label = key, label
+            break
+
+    # Next milestone
+    next_milestone = next((m for m in _MILESTONES if m > n), None)
+    next_remaining = (next_milestone - n) if next_milestone else 0
+
+    if n == 0:
+        return {
+            "n_paired_settled_exec":    0,
+            "confidence_tier":          tier_key,
+            "confidence_label":         tier_label,
+            "next_milestone":           next_milestone,
+            "next_milestone_remaining": next_remaining,
+            "ranked":                   None,
+            "caveats":                  _CAVEATS,
+        }
+
+    # ── Per-strategy metrics ──────────────────────────────────────────────
+    def _strat_metrics(se_map: dict, label: str) -> dict[str, Any]:
+        trades = [se_map[t] for t in paired_tickers]
+        stake   = sum(getattr(t, "stake", 0) or 0 for t in trades)
+        gross   = sum(getattr(t, "profit_loss", 0) or 0 for t in trades)
+        wins    = sum(1 for t in trades if getattr(t, "outcome", "") == "WIN")
+        fees    = sum(
+            f for t in trades
+            if (f := _fee_est(
+                getattr(t, "side_market_price", None),
+                getattr(t, "quantity", None),
+            )) is not None
+        )
+        net_pl        = gross - fees
+        net_roi_pct   = round(100 * net_pl / stake, 2) if stake > 0 else None
+        win_rate_pct  = round(100 * wins / n, 1)
+
+        # City consistency: fraction of cities traded that have ≥ 1 win
+        cities_traded   = {getattr(t, "city", None) for t in trades if getattr(t, "city", None)}
+        cities_with_win = {
+            getattr(t, "city", None) for t in trades
+            if getattr(t, "city", None) and getattr(t, "outcome", "") == "WIN"
+        }
+        city_n = len(cities_traded)
+        city_consistency_pct = (
+            round(100 * len(cities_with_win) / city_n, 1) if city_n else None
+        )
+
+        return {
+            "label":                label,
+            "net_roi_pct":          net_roi_pct,
+            "win_rate_pct":         win_rate_pct,
+            "brier_score":          _brier(trades),
+            "city_consistency_pct": city_consistency_pct,
+            "city_n":               city_n,
+        }
+
+    strats = [
+        ("v21", _strat_metrics(v21_se, "V2.1")),
+        ("v22", _strat_metrics(v22_se, "V2.2")),
+        ("v3",  _strat_metrics(v3_se,  "V3")),
+    ]
+
+    # ── Min-max normalisation (across the 3 strategies) ───────────────────
+    def _minmax(vals: list, higher_better: bool = True) -> list:
+        """Normalise to [0, 1]. Returns 0.5 for all when all equal or all None."""
+        valid = [(i, v) for i, v in enumerate(vals) if v is not None]
+        if len(valid) < 2:
+            return [0.5 if v is not None else None for v in vals]
+        lo = min(v for _, v in valid)
+        hi = max(v for _, v in valid)
+        result: list = [None] * len(vals)
+        for i, v in enumerate(vals):
+            if v is None:
+                result[i] = None
+            elif hi == lo:
+                result[i] = 0.5
+            else:
+                norm = (v - lo) / (hi - lo)
+                result[i] = norm if higher_better else 1.0 - norm
+        return result
+
+    W_ROI, W_BRIER, W_WR, W_CITY = 0.35, 0.25, 0.25, 0.15
+
+    roi_n   = _minmax([m["net_roi_pct"]         for _, m in strats], higher_better=True)
+    brier_n = _minmax([m["brier_score"]          for _, m in strats], higher_better=False)
+    wr_n    = _minmax([m["win_rate_pct"]         for _, m in strats], higher_better=True)
+    city_n_ = _minmax([m["city_consistency_pct"] for _, m in strats], higher_better=True)
+
+    composite_scores: list[float | None] = []
+    for i in range(3):
+        components = [
+            (W_ROI,   roi_n[i]),
+            (W_BRIER, brier_n[i]),
+            (W_WR,    wr_n[i]),
+            (W_CITY,  city_n_[i]),
+        ]
+        available = [(w, s) for w, s in components if s is not None]
+        if not available:
+            composite_scores.append(None)
+        else:
+            total_w = sum(w for w, _ in available)
+            composite_scores.append(
+                round(sum(w * s for w, s in available) / total_w, 4)
+            )
+
+    # ── Reason generation ─────────────────────────────────────────────────
+    _METRIC_REASONS = {
+        "roi":   ("Better net ROI after fees",            "Lower net ROI after fees"),
+        "brier": ("Better probability accuracy (Brier)",  "Higher forecast error (Brier)"),
+        "wr":    ("Higher win rate",                      "Lower win rate"),
+        "city":  ("More consistent across cities",        "Less consistent across cities"),
+    }
+
+    def _reasons(i: int, score_rank: int) -> list[str]:
+        """
+        score_rank: 0 = leader, 1 = middle, 2 = trailing.
+        Picks 1-2 most salient reasons based on normalised metric positions.
+        """
+        reasons: list[str] = []
+        if n < 10:
+            reasons.append("Small sample — interpret with caution")
+
+        norms = {
+            "roi":   roi_n[i],
+            "brier": brier_n[i],
+            "wr":    wr_n[i],
+            "city":  city_n_[i],
+        }
+
+        if score_rank == 0:   # leader
+            top = sorted(
+                [(k, v) for k, v in norms.items() if v is not None and v > 0.5],
+                key=lambda kv: -kv[1],
+            )
+            for k, _ in top[:2]:
+                reasons.append(_METRIC_REASONS[k][0])
+            if not [r for r in reasons if "sample" not in r]:
+                reasons.append("Marginally ahead on composite score")
+
+        elif score_rank == 2:  # trailing
+            bottom = sorted(
+                [(k, v) for k, v in norms.items() if v is not None and v < 0.5],
+                key=lambda kv: kv[1],
+            )
+            for k, _ in bottom[:2]:
+                reasons.append(_METRIC_REASONS[k][1])
+            if not [r for r in reasons if "sample" not in r]:
+                reasons.append("Marginally behind on composite score")
+
+        else:                   # middle
+            reasons.append("Mid-range performance across metrics")
+
+        return reasons[:3]
+
+    # Sort descending by score; stable tie-break preserves v21 > v22 > v3
+    indexed = sorted(
+        enumerate(composite_scores),
+        key=lambda x: (x[1] is None, -(x[1] or 0)),
+    )
+
+    ranked: list[dict[str, Any]] = []
+    for score_rank, (i, score) in enumerate(indexed):
+        key, m = strats[i]
+        ranked.append({
+            "rank":                  score_rank + 1,
+            "strategy":              key,
+            "label":                 m["label"],
+            "composite_score":       score,
+            "net_roi_pct":           m["net_roi_pct"],
+            "win_rate_pct":          m["win_rate_pct"],
+            "brier_score":           m["brier_score"],
+            "city_consistency_pct":  m["city_consistency_pct"],
+            "n":                     n,
+            "reasons":               _reasons(i, score_rank),
+        })
+
+    # One-sentence headline reason from the leader's non-sample reasons
+    leader_reasons = [r for r in ranked[0]["reasons"] if "sample" not in r.lower()]
+    headline = leader_reasons[0] if leader_reasons else "Composite scores are very close."
+
+    return {
+        "n_paired_settled_exec":    n,
+        "confidence_tier":          tier_key,
+        "confidence_label":         tier_label,
+        "next_milestone":           next_milestone,
+        "next_milestone_remaining": next_remaining,
+        "headline_reason":          headline,
+        "ranked":                   ranked,
+        "caveats":                  _CAVEATS,
+    }
+
+
 def _strategy_summary(
     trades: list,
     *,
@@ -461,13 +716,16 @@ async def get_strategy_comparison(
         ),
     }
 
+    preliminary_leader = _preliminary_leader(v21_trades, v22_trades, v3_trades)
+
     return {
-        "flags":           flags_out,
-        "strategies":      strategies,
-        "shared_count":    len(shared_tickers),
-        "total_markets":   len(all_tickers),
-        "market_rows":     market_rows,
-        "pairing_stats":   pairing_stats,
-        "readiness_tracker": readiness_tracker,
-        "smoke_test":      smoke_test,
+        "flags":              flags_out,
+        "strategies":         strategies,
+        "shared_count":       len(shared_tickers),
+        "total_markets":      len(all_tickers),
+        "market_rows":        market_rows,
+        "pairing_stats":      pairing_stats,
+        "readiness_tracker":  readiness_tracker,
+        "smoke_test":         smoke_test,
+        "preliminary_leader": preliminary_leader,
     }

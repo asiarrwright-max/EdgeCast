@@ -17,6 +17,8 @@ import {
   type TradeSlot,
   type ReadinessTracker,
   type PairingStats,
+  type PreliminaryLeader,
+  type StrategyRankEntry,
 } from "@workspace/api-client-react";
 import { AlertTriangle, CheckCircle, Info, Link2, Link2Off } from "lucide-react";
 
@@ -96,6 +98,194 @@ function Badge({ children, variant = "default" }: {
     <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${cls}`}>
       {children}
     </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 0. Preliminary Leader panel
+// ---------------------------------------------------------------------------
+
+const RANK_MEDAL = ["🥇", "🥈", "🥉"] as const;
+
+const TIER_BADGE_VARIANT: Record<string, "ok" | "warn" | "blue" | "muted"> = {
+  strong:       "ok",
+  meaningful:   "ok",
+  emerging:     "blue",
+  preliminary:  "blue",
+  very_early:   "warn",
+  insufficient: "muted",
+};
+
+const STRATEGY_RANK_COLOR: Record<string, string> = {
+  v21: "text-violet-300 border-violet-500/30 bg-violet-500/10",
+  v22: "text-amber-300  border-amber-500/30  bg-amber-500/10",
+  v3:  "text-cyan-300   border-cyan-500/30   bg-cyan-500/10",
+};
+
+function RankRow({ entry, isLeader }: { entry: StrategyRankEntry; isLeader: boolean }) {
+  const medal   = RANK_MEDAL[entry.rank - 1] ?? `#${entry.rank}`;
+  const color   = STRATEGY_RANK_COLOR[entry.strategy] ?? "";
+  const hasData = entry.n > 0;
+
+  return (
+    <div className={`rounded-lg border px-4 py-3 ${
+      isLeader ? "border-border bg-card" : "border-border/50 bg-muted/10"
+    }`}>
+      <div className="flex items-start gap-3">
+        {/* Medal + strategy pill */}
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <span className="text-lg leading-none" aria-label={`Rank ${entry.rank}`}>{medal}</span>
+          <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${color}`}>
+            {entry.label}
+          </span>
+          {isLeader && entry.n >= 10 && (
+            <span className="text-xs text-muted-foreground italic">current leader</span>
+          )}
+        </div>
+
+        {/* Metric chips */}
+        {hasData && (
+          <div className="flex flex-wrap gap-2 justify-end text-[11px] font-mono">
+            {entry.net_roi_pct != null && (
+              <span className={`${entry.net_roi_pct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                ROI {entry.net_roi_pct >= 0 ? "+" : ""}{entry.net_roi_pct.toFixed(1)}%
+              </span>
+            )}
+            {entry.win_rate_pct != null && (
+              <span className="text-muted-foreground">
+                win {entry.win_rate_pct.toFixed(0)}%
+              </span>
+            )}
+            {entry.brier_score != null && (
+              <span className="text-muted-foreground">
+                Brier {entry.brier_score.toFixed(3)}
+              </span>
+            )}
+            {entry.city_consistency_pct != null && (
+              <span className="text-muted-foreground">
+                city {entry.city_consistency_pct.toFixed(0)}%
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Reasons */}
+      {entry.reasons.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {entry.reasons.map((r) => (
+            <span
+              key={r}
+              className="text-[10px] text-muted-foreground bg-muted/40 rounded px-1.5 py-0.5"
+            >
+              {r}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PreliminaryLeaderPanel({ leader }: { leader: PreliminaryLeader }) {
+  const { n_paired_settled_exec: n, confidence_tier, confidence_label,
+          next_milestone, next_milestone_remaining, headline_reason,
+          ranked, caveats } = leader;
+
+  const tierVariant = TIER_BADGE_VARIANT[confidence_tier] ?? "muted";
+  const hasData     = ranked != null && ranked.length > 0;
+
+  // Progress toward next milestone (capped to show current progress)
+  const progressTarget  = next_milestone ?? 500;
+  const progressPct     = Math.min(100, (n / progressTarget) * 100);
+
+  return (
+    <SectionCard
+      title="Preliminary Leader"
+      subtitle="Ranked by net ROI, probability accuracy, win rate, and city consistency — strictly paired settled trades only."
+      badge={<Badge variant={tierVariant}>{confidence_label}</Badge>}
+    >
+      <div className="p-4 space-y-4">
+
+        {/* ── No data state ─────────────────────────────────────────── */}
+        {!hasData && (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              No ranked strategies yet. Waiting for strictly paired, executable,
+              settled trades shared across all three strategies.
+            </p>
+
+            {/* Progress bar toward first milestone */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Strictly paired settled executable trades</span>
+                <span className="font-mono">
+                  {n} / {progressTarget}
+                </span>
+              </div>
+              <div className="w-full bg-muted rounded-full h-2">
+                <div
+                  className="bg-sky-500 rounded-full h-2 transition-all"
+                  style={{ width: `${Math.max(progressPct, n > 0 ? 2 : 0)}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                {next_milestone_remaining} more needed to begin ranking
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ── Ranked state ──────────────────────────────────────────── */}
+        {hasData && (
+          <>
+            {/* Headline */}
+            {headline_reason && (
+              <div className="rounded-md bg-muted/30 border border-border/50 px-3 py-2 text-xs text-muted-foreground">
+                <span className="text-foreground font-medium">Why the leader is ahead: </span>
+                {headline_reason}.
+              </div>
+            )}
+
+            {/* Rank rows */}
+            <div className="space-y-2">
+              {ranked!.map((entry) => (
+                <RankRow key={entry.strategy} entry={entry} isLeader={entry.rank === 1} />
+              ))}
+            </div>
+
+            {/* Sample-size context */}
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>
+                Based on{" "}
+                <span className="font-mono font-medium text-foreground">{n}</span>
+                {" "}strictly paired settled executable trades
+              </span>
+              {next_milestone && (
+                <span>
+                  Next review at{" "}
+                  <span className="font-mono font-medium text-foreground">{next_milestone}</span>
+                  {" "}({next_milestone_remaining} away)
+                </span>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* ── Caveats (always visible) ──────────────────────────────── */}
+        <div className="rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2 space-y-0.5">
+          {caveats.map((c) => (
+            <p key={c} className="text-[11px] text-amber-300/80">
+              {c}
+            </p>
+          ))}
+          <p className="text-[11px] text-muted-foreground/60 pt-0.5">
+            Ranking uses a composite score: 35% net ROI · 25% Brier score ·
+            25% win rate · 15% city consistency.
+          </p>
+        </div>
+      </div>
+    </SectionCard>
   );
 }
 
@@ -839,6 +1029,11 @@ export default function StrategyComparisonPage() {
 
       {/* Smoke-test banner */}
       <SmokeTestBanner data={data} />
+
+      {/* Preliminary leader */}
+      {data.preliminary_leader && (
+        <PreliminaryLeaderPanel leader={data.preliminary_leader} />
+      )}
 
       {/* Strategy summary cards */}
       <SectionCard

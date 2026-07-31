@@ -154,6 +154,53 @@ export interface ReadinessTracker {
 }
 
 // ---------------------------------------------------------------------------
+// Preliminary leader ranking
+// ---------------------------------------------------------------------------
+
+export type ConfidenceTier =
+  | "insufficient"
+  | "very_early"
+  | "preliminary"
+  | "emerging"
+  | "meaningful"
+  | "strong";
+
+export interface StrategyRankEntry {
+  rank: number;
+  /** "v21" | "v22" | "v3" */
+  strategy: string;
+  label: string;
+  /** Weighted composite score in [0, 1] (min-max normalised across 3 strategies). */
+  composite_score: number | null;
+  /** Net P/L / settled stake × 100, paired settled exec trades only. */
+  net_roi_pct: number | null;
+  win_rate_pct: number | null;
+  brier_score: number | null;
+  /** % of cities with at least one win, among cities traded. */
+  city_consistency_pct: number | null;
+  /** Number of strictly-paired settled exec trades (same for all three). */
+  n: number;
+  /** 1–3 plain-language reasons for this rank position. */
+  reasons: string[];
+}
+
+export interface PreliminaryLeader {
+  /** Count of strictly-paired settled executable trades (same for all 3 strategies). */
+  n_paired_settled_exec: number;
+  confidence_tier: ConfidenceTier;
+  /** Human-readable tier label, e.g. "Very early leader". */
+  confidence_label: string;
+  /** Next trade-count milestone, or null when all milestones are passed. */
+  next_milestone: number | null;
+  next_milestone_remaining: number;
+  /** One-sentence plain-language reason the #1 strategy leads. Null when no data. */
+  headline_reason: string | null;
+  /** null when n_paired_settled_exec == 0. */
+  ranked: StrategyRankEntry[] | null;
+  caveats: string[];
+}
+
+// ---------------------------------------------------------------------------
 // Full response
 // ---------------------------------------------------------------------------
 
@@ -170,6 +217,7 @@ export interface StrategyComparisonData {
   pairing_stats: PairingStats;
   readiness_tracker: ReadinessTracker;
   smoke_test: SmokeTestStatus;
+  preliminary_leader: PreliminaryLeader;
 }
 
 // ---------------------------------------------------------------------------
