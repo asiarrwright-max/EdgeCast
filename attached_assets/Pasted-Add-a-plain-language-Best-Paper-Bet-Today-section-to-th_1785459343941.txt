@@ -1,0 +1,68 @@
+Add a plain-language “Best Paper Bet Today” section to the Strategy Comparison page and, if appropriate, the main dashboard.
+
+This remains paper trading and must never place or recommend a real-money order automatically.
+
+Select no more than one best opportunity from current Kalshi weather markets.
+
+Eligibility requirements:
+
+- The market must be open
+- The quote must be fresh
+- The opportunity must be executable
+- A valid YES or NO ask price must exist
+- Station mapping must be verified
+- The market must not already be effectively resolved by observed same-day weather
+- It must not be marked TEST_EXCLUDED, NON_EXECUTABLE, observation-only, stale, duplicate, or unsupported
+- Net edge after estimated fees must meet the configured minimum threshold
+
+Do not force a selection. If no market qualifies, show:
+
+“No strong paper bet today. None of today’s executable markets currently meet EdgeCast’s quality and edge requirements.”
+
+Use Kalshi-style plain language.
+
+Example layout:
+
+Best paper bet today
+
+Market:
+Denver high temperature — 96°F or above
+
+EdgeCast paper position:
+Buy NO at 63¢
+
+What that means:
+EdgeCast estimates a 78% chance the temperature will stay below 96°F. A winning NO contract settles at $1.
+
+Estimated advantage:
+12 percentage points after estimated fees
+
+Why EdgeCast likes it:
+The current forecast is below the threshold, the market quote is fresh and executable, and the model’s uncertainty estimate supports a higher probability of NO than the market price implies.
+
+Also show:
+
+- Kalshi ticker
+- city and weather date
+- YES or NO direction
+- executable ask price
+- estimated payout per contract
+- EdgeCast probability for the selected side
+- market-implied probability for that side
+- gross edge
+- estimated fees
+- net edge
+- forecast temperature
+- threshold or range
+- strategy producing the signal
+- whether V2.1, V2.2, and V3 agree
+- quote timestamp
+- expected settlement timing
+- paper-trade status
+
+Strategy selection rules:
+
+- Prefer strictly paired opportunities evaluated from the same frozen quote and forecast inputs
+- Prefer agreement among multiple strategies
+- Do not automatically reject a strong V3-only or V2.2-only signal, but clearly label disagreement
+- Rank using

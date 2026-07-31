@@ -22,6 +22,8 @@ Design rules
 from __future__ import annotations
 
 import logging
+import re
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -38,6 +40,28 @@ router = APIRouter(tags=["Strategy Comparison"])
 
 # Readiness milestones: shared settled executable trades
 _READINESS_MILESTONES = [50, 100, 250, 500]
+
+# Best-bet-today constants
+# Estimated Kalshi fee: ~7pp of the $1 payout on the winning side.
+_KALSHI_FEE_PP: float = 7.0
+_MIN_NET_EDGE_PP: float = 3.0          # minimum net edge after fees to qualify
+_STALE_QUOTE_SECONDS: int = 4 * 3600  # 4-hour freshness window
+
+# Quality flags that disqualify a trade from "best bet" consideration.
+# Stored lower-case in the DB; we normalise both sides.
+_BAD_FLAGS: frozenset[str] = frozenset({
+    "stale",
+    "duplicate",
+    "test_excluded",
+    "non_executable",
+    "observation_only",
+    "dc_market",
+    "zero_volume",
+    "large_bid_ask_spread",
+    "same_day_resolved",
+    "lookahead_violation",
+    "v2_excluded",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -729,3 +753,322 @@ async def get_strategy_comparison(
         "smoke_test":         smoke_test,
         "preliminary_leader": preliminary_leader,
     }
+
+
+# ---------------------------------------------------------------------------
+# Best Bet Today
+# ---------------------------------------------------------------------------
+
+def _has_bad_flag(flags: list | None) -> bool:
+    """Return True if any quality flag disqualifies this trade from best-bet selection."""
+    if not flags:
+        return False
+    return bool({f.lower() for f in flags} & _BAD_FLAGS)
+
+
+def _is_quote_fresh(quote_ts: datetime | None, now: datetime) -> bool:
+    if quote_ts is None:
+        return True  # pre-v2.1 trades have no timestamp; treat as acceptable
+    # Make aware if naive (should not happen, but guard)
+    if quote_ts.tzinfo is None:
+        quote_ts = quote_ts.replace(tzinfo=timezone.utc)
+    return (now - quote_ts).total_seconds() < _STALE_QUOTE_SECONDS
+
+
+def _ticker_threshold(ticker: str) -> str | None:
+    """Extract the threshold from a Kalshi weather ticker, e.g. '…-B96' → '96°F'."""
+    m = re.search(r"[A-Z](\d{2,3})$", ticker)
+    return f"{m.group(1)}°F" if m else None
+
+
+def _plain_language(
+    trade: Any,
+    net_pp: float,
+    agreeing: list[str],
+    now: datetime,
+) -> tuple[str, str, str, str, str]:
+    """
+    Build the five plain-language fields for the best-bet panel.
+
+    Returns: (market_label, position_label, what_it_means, why_we_like_it, advantage_label)
+    """
+    city      = trade.city or "Unknown city"
+    variable  = (trade.weather_variable or "").lower()
+    direction = trade.direction
+    price     = trade.side_market_price or 0.0
+    ec_prob   = trade.ec_side_probability or 0.0
+    ticker    = trade.market_ticker
+    threshold = _ticker_threshold(ticker)
+
+    var_label = {
+        "high": "high temperature",
+        "low":  "low temperature",
+    }.get(variable, "temperature")
+
+    # Market label
+    if threshold:
+        suffix = "or above" if direction == "YES" else "or below"
+        if direction == "YES":
+            market_label = f"{city} {var_label} — {threshold} or above"
+        else:
+            market_label = f"{city} {var_label} — below {threshold}"
+    else:
+        market_label = f"{city} {var_label} market"
+
+    # Position label
+    cents = round(price * 100)
+    position_label = f"Buy {direction} at {cents}¢"
+
+    # What it means
+    side_word = "stay below" if direction == "NO" else "reach"
+    thresh_phrase = f" {threshold} or above" if threshold else ""
+    if direction == "NO" and threshold:
+        thresh_phrase = f" {threshold}"
+        side_word = "stay below"
+    prob_pct = round(ec_prob * 100)
+    what_it_means = (
+        f"EdgeCast estimates a {prob_pct}% chance the temperature will {side_word}"
+        f"{thresh_phrase}. A winning {direction} contract settles at $1."
+    )
+
+    # Why we like it
+    reasons: list[str] = []
+
+    if threshold:
+        if direction == "NO":
+            reasons.append("the current forecast is below the threshold")
+        else:
+            reasons.append("the current forecast exceeds the threshold")
+
+    quote_ts = getattr(trade, "quote_timestamp", None)
+    if quote_ts:
+        if quote_ts.tzinfo is None:
+            quote_ts = quote_ts.replace(tzinfo=timezone.utc)
+        age_h = (now - quote_ts).total_seconds() / 3600
+        if age_h < 1:
+            reasons.append("the market quote is fresh")
+        else:
+            reasons.append("the market quote is recent and within the 4-hour freshness window")
+    else:
+        reasons.append("the market quote is available")
+
+    reasons.append(
+        f"the model's uncertainty estimate supports a higher probability of "
+        f"{direction} than the market price implies"
+    )
+
+    n_agree = len(agreeing)
+    if n_agree == 3:
+        reasons.append("all three EdgeCast strategies agree on this position")
+    elif n_agree == 2:
+        reasons.append(f"{' and '.join(agreeing)} both agree on this position")
+
+    if len(reasons) > 1:
+        body = ", ".join(reasons[:-1]) + ", and " + reasons[-1]
+    else:
+        body = reasons[0]
+    why_we_like_it = body[0].upper() + body[1:] + "."
+
+    # Advantage label
+    advantage_label = f"{round(net_pp)} percentage points after estimated fees"
+
+    return market_label, position_label, what_it_means, why_we_like_it, advantage_label
+
+
+def _best_bet_today(
+    v21_trades: list,
+    v22_trades: list,
+    v3_trades:  list,
+) -> dict[str, Any]:
+    """
+    Select the single highest-quality open paper-bet across all strategies.
+
+    Eligibility (a trade must pass ALL):
+      • status == "OPEN"
+      • is_executable is True
+      • station_verified is True
+      • no disqualifying quality_flags
+      • quote is fresh (< 4 hours old, or no timestamp)
+      • net_edge_pp = edge_pct_points − _KALSHI_FEE_PP ≥ _MIN_NET_EDGE_PP
+
+    Scoring: net_edge_pp + 2pp per additional agreeing strategy (same direction).
+    Primary source preference: V2.1 > V2.2 > V3.
+    """
+    now = datetime.now(timezone.utc)
+
+    def _eligible(trades: list, strategy: str) -> dict[str, tuple[Any, str]]:
+        result: dict[str, tuple[Any, str]] = {}
+        for t in trades:
+            if t.status != "OPEN":
+                continue
+            if not t.is_executable:
+                continue
+            if not t.station_verified:
+                continue
+            if _has_bad_flag(t.quality_flags):
+                continue
+            quote_ts = getattr(t, "quote_timestamp", None)
+            if not _is_quote_fresh(quote_ts, now):
+                continue
+            gross = t.edge_pct_points
+            if gross is None:
+                continue
+            net = gross - _KALSHI_FEE_PP
+            if net < _MIN_NET_EDGE_PP:
+                continue
+            result[t.market_ticker] = (t, strategy)
+        return result
+
+    c21 = _eligible(v21_trades, "v2.1")
+    c22 = _eligible(v22_trades, "v2.2")
+    c3  = _eligible(v3_trades,  "v3")
+
+    all_tickers = set(c21) | set(c22) | set(c3)
+
+    if not all_tickers:
+        return {
+            "has_bet":      False,
+            "candidate":    None,
+            "no_bet_reason": (
+                "No strong paper bet today. None of today's executable markets "
+                "currently meet EdgeCast's quality and edge requirements."
+            ),
+            "as_of": now.isoformat(),
+        }
+
+    best_ticker: str | None = None
+    best_score: float = -9999.0
+
+    for ticker in all_tickers:
+        sources = [
+            s for s in [c21.get(ticker), c22.get(ticker), c3.get(ticker)]
+            if s is not None
+        ]
+        directions = {s[0].direction for s in sources}
+
+        # If mixed signals, require a majority (≥2 of 3 agree)
+        if len(directions) > 1:
+            # primary source sets the direction
+            primary = c21.get(ticker) or c22.get(ticker) or c3.get(ticker)
+            primary_dir = primary[0].direction  # type: ignore[index]
+            agreeing_count = sum(1 for s in sources if s[0].direction == primary_dir)
+            if agreeing_count < 2:
+                continue  # skip — no majority direction
+            agreement_bonus = 0.0  # no bonus for mixed signals
+        else:
+            agreement_bonus = (len(sources) - 1) * 2.0  # +2pp per extra agreeing strategy
+
+        primary = c21.get(ticker) or c22.get(ticker) or c3.get(ticker)
+        trade, _ = primary  # type: ignore[misc]
+        gross = trade.edge_pct_points or 0.0
+        net   = gross - _KALSHI_FEE_PP
+        score = net + agreement_bonus
+
+        if score > best_score:
+            best_score  = score
+            best_ticker = ticker
+
+    if best_ticker is None:
+        return {
+            "has_bet":      False,
+            "candidate":    None,
+            "no_bet_reason": (
+                "No strong paper bet today. None of today's executable markets "
+                "currently meet EdgeCast's quality and edge requirements."
+            ),
+            "as_of": now.isoformat(),
+        }
+
+    # Build the candidate payload
+    sources_map: dict[str, tuple[Any, str]] = {
+        s: v for s, v in [
+            ("v2.1", c21.get(best_ticker)),
+            ("v2.2", c22.get(best_ticker)),
+            ("v3",   c3.get(best_ticker)),
+        ] if v is not None
+    }
+
+    primary_strategy = "v2.1" if "v2.1" in sources_map else (
+        "v2.2" if "v2.2" in sources_map else "v3"
+    )
+    trade, _ = sources_map[primary_strategy]
+
+    gross_pp = trade.edge_pct_points or 0.0
+    net_pp   = gross_pp - _KALSHI_FEE_PP
+
+    agreeing = [
+        s for s, (t, _) in sources_map.items()
+        if t.direction == trade.direction
+    ]
+
+    market_label, position_label, what_it_means, why_we_like_it, advantage_label = \
+        _plain_language(trade, net_pp, agreeing, now)
+
+    price    = trade.side_market_price or 0.0
+    quote_ts = getattr(trade, "quote_timestamp", None)
+    if quote_ts and quote_ts.tzinfo is None:
+        quote_ts = quote_ts.replace(tzinfo=timezone.utc)
+
+    return {
+        "has_bet":      True,
+        "no_bet_reason": None,
+        "as_of":        now.isoformat(),
+        "candidate": {
+            "ticker":                  trade.market_ticker,
+            "city":                    trade.city,
+            "weather_date":            trade.target_settlement_date,
+            "weather_variable":        trade.weather_variable,
+            "contract_type":           trade.contract_type,
+            "direction":               trade.direction,
+            "ask_cents":               round(price * 100),
+            "ec_prob_pct":             round((trade.ec_side_probability or 0.0) * 100, 1),
+            "market_implied_prob_pct": round(price * 100, 1),
+            "gross_edge_pp":           round(gross_pp, 1),
+            "est_fee_pp":              _KALSHI_FEE_PP,
+            "net_edge_pp":             round(net_pp, 1),
+            "lead_time_days":          getattr(trade, "lead_time_days", None),
+            "quote_timestamp":         quote_ts.isoformat() if quote_ts else None,
+            "target_settlement_date":  trade.target_settlement_date,
+            "strategy_version":        primary_strategy,
+            "agreement":               agreeing,
+            "all_agree":               len(agreeing) == len(sources_map),
+            "status":                  trade.status,
+            "market_label":            market_label,
+            "position_label":          position_label,
+            "what_it_means":           what_it_means,
+            "why_we_like_it":          why_we_like_it,
+            "advantage_label":         advantage_label,
+        },
+    }
+
+
+@router.get("/analytics/strategy-comparison/best-bet-today")
+async def get_best_bet_today(
+    _user: Any = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Return the single strongest open paper-bet across all strategies.
+
+    Eligibility: OPEN · is_executable · station_verified · no bad flags ·
+    fresh quote · net_edge ≥ 3pp after estimated 7pp Kalshi fee.
+
+    Scoring: net_edge + 2pp per additional agreeing strategy (same direction).
+    Primary source preference: V2.1 > V2.2 > V3.
+    If no market qualifies, has_bet=False with a plain-language reason.
+    """
+    v21_rows = list((await db.execute(
+        select(PaperTrade)
+        .where(PaperTrade.strategy_version == "v2.1", PaperTrade.status == "OPEN")
+    )).scalars().all())
+
+    v22_rows = list((await db.execute(
+        select(PaperTrade)
+        .where(PaperTrade.strategy_version == "v2.2", PaperTrade.status == "OPEN")
+    )).scalars().all())
+
+    v3_rows = list((await db.execute(
+        select(V3PaperTrade).where(V3PaperTrade.status == "OPEN")
+    )).scalars().all())
+
+    return _best_bet_today(v21_rows, v22_rows, v3_rows)

@@ -11,6 +11,7 @@
 import { useState, ReactNode, useMemo } from "react";
 import {
   useGetMultiStrategyComparison as useGetStrategyComparison,
+  useGetBestBetToday,
   type StrategySummary,
   type StrategySection,
   type MarketComparisonRow,
@@ -19,8 +20,10 @@ import {
   type PairingStats,
   type PreliminaryLeader,
   type StrategyRankEntry,
+  type BestBetCandidate,
+  type BestBetToday,
 } from "@workspace/api-client-react";
-import { AlertTriangle, CheckCircle, Info, Link2, Link2Off } from "lucide-react";
+import { AlertTriangle, CheckCircle, Info, Link2, Link2Off, Zap } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Formatters
@@ -978,6 +981,296 @@ function SampleCalculations({ rows }: { rows: MarketComparisonRow[] }) {
 }
 
 // ---------------------------------------------------------------------------
+// Best Bet Today
+// ---------------------------------------------------------------------------
+
+const STRATEGY_PILL: Record<string, string> = {
+  "v2.1": "bg-blue-500/15 text-blue-300 border-blue-500/30",
+  "v2.2": "bg-violet-500/15 text-violet-300 border-violet-500/30",
+  "v3":   "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+};
+
+function BetDetailRow({ label, value, mono = true }: {
+  label: string;
+  value: React.ReactNode;
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5 min-w-0">
+      <span className="text-[10px] font-mono tracking-widest text-muted-foreground/60 uppercase">
+        {label}
+      </span>
+      <span className={`text-xs ${mono ? "font-mono" : ""} text-foreground break-all`}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function BestBetTodayPanel() {
+  const { data, isLoading } = useGetBestBetToday();
+
+  // Skeleton while loading
+  if (isLoading) {
+    return (
+      <SectionCard
+        title="Best Paper Bet Today"
+        badge={
+          <span className="ml-auto text-[10px] font-mono text-muted-foreground/60 border border-border/40 rounded px-1.5 py-0.5">
+            PAPER TRADING ONLY
+          </span>
+        }
+      >
+        <div className="p-4 text-sm text-muted-foreground animate-pulse">
+          Scanning open markets…
+        </div>
+      </SectionCard>
+    );
+  }
+
+  const bet = data as BestBetToday | undefined;
+
+  // No qualifying bet
+  if (!bet?.has_bet || !bet.candidate) {
+    return (
+      <SectionCard
+        title="Best Paper Bet Today"
+        badge={
+          <span className="ml-auto text-[10px] font-mono text-muted-foreground/60 border border-border/40 rounded px-1.5 py-0.5">
+            PAPER TRADING ONLY
+          </span>
+        }
+      >
+        <div className="p-4 flex gap-3 items-start text-sm text-muted-foreground">
+          <Info className="h-4 w-4 shrink-0 mt-0.5 text-muted-foreground/60" />
+          <p>{bet?.no_bet_reason ?? "No qualifying bet found."}</p>
+        </div>
+      </SectionCard>
+    );
+  }
+
+  const c = bet.candidate;
+  const dirColor = c.direction === "YES"
+    ? "text-emerald-400"
+    : "text-red-400";
+
+  // Format quote age
+  const quoteAge = (() => {
+    if (!c.quote_timestamp) return null;
+    const mins = Math.round(
+      (Date.now() - new Date(c.quote_timestamp).getTime()) / 60_000
+    );
+    if (mins < 60) return `${mins}m ago`;
+    return `${Math.floor(mins / 60)}h ${mins % 60}m ago`;
+  })();
+
+  // Agreement display
+  const allThree  = c.agreement.length === 3;
+  const twoOf     = c.agreement.length === 2;
+  const agreementLabel = allThree
+    ? "All three strategies agree ✓"
+    : twoOf
+      ? `${c.agreement.join(" + ")} agree · other strategy differs`
+      : `${c.strategy_version} only · other strategies differ`;
+  const agreementColor = allThree
+    ? "text-emerald-400"
+    : twoOf
+      ? "text-amber-400"
+      : "text-muted-foreground";
+
+  return (
+    <SectionCard
+      title="Best Paper Bet Today"
+      badge={
+        <span className="ml-auto text-[10px] font-mono text-muted-foreground/60 border border-border/40 rounded px-1.5 py-0.5">
+          PAPER TRADING ONLY
+        </span>
+      }
+    >
+      <div className="p-4 space-y-5">
+
+        {/* ── Hero block ───────────────────────────────────────────── */}
+        <div className="space-y-3">
+
+          {/* Market name */}
+          <div>
+            <p className="text-[10px] font-mono tracking-widest text-muted-foreground/60 uppercase mb-1">
+              Market
+            </p>
+            <p className="text-base font-semibold leading-snug">{c.market_label}</p>
+          </div>
+
+          {/* Position — big and prominent */}
+          <div>
+            <p className="text-[10px] font-mono tracking-widest text-muted-foreground/60 uppercase mb-1">
+              EdgeCast paper position
+            </p>
+            <p className={`text-2xl font-bold font-mono tracking-tight ${dirColor}`}>
+              {c.position_label}
+            </p>
+          </div>
+
+          {/* What that means */}
+          <div>
+            <p className="text-[10px] font-mono tracking-widest text-muted-foreground/60 uppercase mb-1">
+              What that means
+            </p>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {c.what_it_means}
+            </p>
+          </div>
+
+          {/* Estimated advantage — highlighted */}
+          <div className="inline-flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5">
+            <Zap className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+            <div>
+              <span className="text-[10px] font-mono tracking-widest text-emerald-400/70 uppercase">
+                Estimated advantage
+              </span>
+              <p className="text-sm font-semibold text-emerald-300">
+                {c.advantage_label}
+              </p>
+            </div>
+          </div>
+
+          {/* Why we like it */}
+          <div>
+            <p className="text-[10px] font-mono tracking-widest text-muted-foreground/60 uppercase mb-1">
+              Why EdgeCast likes it
+            </p>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {c.why_we_like_it}
+            </p>
+          </div>
+        </div>
+
+        {/* ── Detail grid ──────────────────────────────────────────── */}
+        <div className="rounded-md border border-border/50 bg-muted/10 p-3">
+          <p className="text-[10px] font-mono tracking-widest text-muted-foreground/50 uppercase mb-3">
+            Full detail
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
+
+            {/* Identity */}
+            <BetDetailRow label="Ticker" value={c.ticker} />
+            <BetDetailRow label="City"   value={c.city ?? "—"} mono={false} />
+            <BetDetailRow label="Weather date" value={c.weather_date ?? "—"} />
+
+            {/* Trade direction & price */}
+            <BetDetailRow
+              label="Direction"
+              value={
+                <span className={`font-bold ${dirColor}`}>{c.direction}</span>
+              }
+              mono={false}
+            />
+            <BetDetailRow
+              label="Ask price"
+              value={`${c.ask_cents}¢  (${c.market_implied_prob_pct.toFixed(1)}% implied)`}
+            />
+            <BetDetailRow
+              label="Payout per contract"
+              value="$1.00 if correct"
+            />
+
+            {/* Probabilities */}
+            <BetDetailRow
+              label="EdgeCast probability"
+              value={
+                <span className={dirColor}>{c.ec_prob_pct.toFixed(1)}%</span>
+              }
+              mono={false}
+            />
+            <BetDetailRow
+              label="Market-implied prob."
+              value={`${c.market_implied_prob_pct.toFixed(1)}%`}
+            />
+
+            {/* Edge breakdown */}
+            <BetDetailRow
+              label="Gross edge"
+              value={`+${c.gross_edge_pp.toFixed(1)}pp`}
+            />
+            <BetDetailRow
+              label="Est. Kalshi fee"
+              value={`−${c.est_fee_pp.toFixed(1)}pp`}
+            />
+            <BetDetailRow
+              label="Net edge"
+              value={
+                <span className="text-emerald-400 font-bold">
+                  +{c.net_edge_pp.toFixed(1)}pp
+                </span>
+              }
+              mono={false}
+            />
+
+            {/* Source */}
+            <BetDetailRow
+              label="Signal source"
+              value={
+                <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-bold ${STRATEGY_PILL[c.strategy_version] ?? ""}`}>
+                  {c.strategy_version.toUpperCase()}
+                </span>
+              }
+              mono={false}
+            />
+            <div className="col-span-2 sm:col-span-2">
+              <BetDetailRow
+                label="Strategy agreement"
+                value={
+                  <span className={`text-xs font-mono ${agreementColor}`}>
+                    {agreementLabel}
+                  </span>
+                }
+                mono={false}
+              />
+            </div>
+
+            {/* Timing */}
+            <BetDetailRow
+              label="Quote timestamp"
+              value={
+                quoteAge
+                  ? `${new Date(c.quote_timestamp!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · ${quoteAge}`
+                  : "—"
+              }
+            />
+            <BetDetailRow
+              label="Expected settlement"
+              value={c.target_settlement_date ?? "—"}
+            />
+            {c.lead_time_days != null && (
+              <BetDetailRow
+                label="Lead time"
+                value={`${c.lead_time_days}d`}
+              />
+            )}
+
+            {/* Status */}
+            <BetDetailRow
+              label="Paper-trade status"
+              value={
+                <span className="inline-flex items-center rounded border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-mono text-blue-300">
+                  {c.status}
+                </span>
+              }
+              mono={false}
+            />
+          </div>
+        </div>
+
+        {/* ── As-of timestamp ──────────────────────────────────────── */}
+        <p className="text-[10px] font-mono text-muted-foreground/40 text-right">
+          Computed at {new Date(bet.as_of).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+        </p>
+      </div>
+    </SectionCard>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -1029,6 +1322,9 @@ export default function StrategyComparisonPage() {
 
       {/* Smoke-test banner */}
       <SmokeTestBanner data={data} />
+
+      {/* Best bet today */}
+      <BestBetTodayPanel />
 
       {/* Preliminary leader */}
       {data.preliminary_leader && (

@@ -221,6 +221,50 @@ export interface StrategyComparisonData {
 }
 
 // ---------------------------------------------------------------------------
+// Best Bet Today
+// ---------------------------------------------------------------------------
+
+export interface BestBetCandidate {
+  ticker: string;
+  city: string | null;
+  weather_date: string | null;
+  weather_variable: string | null;
+  contract_type: string | null;
+  direction: "YES" | "NO";
+  /** side_market_price × 100, rounded to nearest cent */
+  ask_cents: number;
+  /** ec_side_probability × 100 */
+  ec_prob_pct: number;
+  /** side_market_price × 100 */
+  market_implied_prob_pct: number;
+  gross_edge_pp: number;
+  est_fee_pp: number;
+  net_edge_pp: number;
+  lead_time_days: number | null;
+  quote_timestamp: string | null;
+  target_settlement_date: string | null;
+  /** Strategy that produced the primary signal: "v2.1" | "v2.2" | "v3" */
+  strategy_version: string;
+  /** All strategies whose OPEN trade agrees on direction for this ticker */
+  agreement: string[];
+  all_agree: boolean;
+  status: string;
+  // Plain-language display fields
+  market_label: string;
+  position_label: string;
+  what_it_means: string;
+  why_we_like_it: string;
+  advantage_label: string;
+}
+
+export interface BestBetToday {
+  has_bet: boolean;
+  candidate: BestBetCandidate | null;
+  no_bet_reason: string | null;
+  as_of: string;
+}
+
+// ---------------------------------------------------------------------------
 // Hooks
 // ---------------------------------------------------------------------------
 
@@ -238,6 +282,25 @@ export function useGetMultiStrategyComparison<
         { signal, method: "GET" }
       ),
     staleTime: 60_000,
+    ...options,
+  }) as UseQueryResult<TData, TError>;
+}
+
+export function useGetBestBetToday<
+  TData = BestBetToday,
+  TError = unknown,
+>(
+  options?: UseQueryOptions<BestBetToday, TError, TData>
+): UseQueryResult<TData, TError> {
+  return useQuery({
+    queryKey: ["/api/analytics/strategy-comparison/best-bet-today"],
+    queryFn: ({ signal }) =>
+      customFetch<BestBetToday>(
+        "/api/analytics/strategy-comparison/best-bet-today",
+
+        { signal, method: "GET" }
+      ),
+    staleTime: 120_000,   // 2 minutes; re-fetches on re-focus
     ...options,
   }) as UseQueryResult<TData, TError>;
 }
