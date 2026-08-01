@@ -212,19 +212,44 @@ async def run_verification(
     }
 
 
+# Maps segment name → filter kwargs for get_paper_trade_metrics
+_SEGMENT_FILTERS: dict[str, dict] = {
+    "current_exec": {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True},
+    "legacy":       {"strategy_versions": ["v1.0", "v2.0"]},
+    "research":     {"strategy_versions": ["v2.1", "v2.2"], "is_executable": False},
+    # "all" → no extra filters (existing behaviour)
+}
+
+
 @router.get("/paper-trades/metrics")
 async def get_metrics(
     strategy_version: str | None = Query(default=None),
+    segment: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(get_current_user),
 ):
-    """Aggregated summary statistics. Pass strategy_version to scope to one version."""
-    result = await get_paper_trade_metrics(db, strategy_version=strategy_version)
+    """
+    Aggregated summary statistics.
 
-    # Append closing-today counts across ALL strategies (incl. V3) regardless of
-    # the strategy_version filter — these are operational pipeline stats, not
-    # per-strategy performance metrics.
-    today = datetime.utcnow().date().isoformat()  # e.g. "2026-07-31"
+    segment (optional): one of "current_exec" | "legacy" | "research" | "all"
+      current_exec  — V2.1 + V2.2 executable trades only (default recommended view)
+      legacy        — V1.0 + V2.0 historical baseline
+      research      — V2.1 + V2.2 non-executable research signals
+      all / omitted — unfiltered combined view (contaminates legacy with current)
+
+    strategy_version (optional): further narrow to a single version string.
+    """
+    seg_filters = _SEGMENT_FILTERS.get(segment or "", {})
+    result = await get_paper_trade_metrics(
+        db,
+        strategy_version=strategy_version,
+        strategy_versions=seg_filters.get("strategy_versions"),
+        is_executable=seg_filters.get("is_executable"),
+    )
+
+    # ── Closing-today counts (pipeline ops — always all strategies, all segments) ──
+    today = datetime.utcnow().date().isoformat()  # e.g. "2026-08-01"
+    from sqlalchemy import text as sql_text
 
     pt_pending = (await db.execute(
         select(func.count(PaperTrade.id))
@@ -252,11 +277,139 @@ async def get_metrics(
         )
     )).scalar_one() or 0
 
-    result["pendingSettlementCount"] = pt_pending + v3_pending
-    result["closingTodayCount"]      = pt_closing + v3_closing
-    result["closingTodayTotal"]      = pt_pending + v3_pending + pt_closing + v3_closing
+    # Unique Kalshi markets closing today (UNION deduplicates cross-strategy)
+    unique_sql = sql_text("""
+        SELECT COUNT(*) FROM (
+            SELECT market_ticker FROM paper_trades
+            WHERE status = 'OPEN' AND target_settlement_date LIKE :pfx
+            UNION
+            SELECT market_ticker FROM v3_paper_trades
+            WHERE status = 'OPEN' AND target_settlement_date LIKE :pfx
+        ) AS combined
+    """)
+    unique_markets = (await db.execute(unique_sql, {"pfx": f"{today}%"})).scalar_one() or 0
+
+    result["pendingSettlementCount"]   = pt_pending + v3_pending
+    result["closingTodayCount"]        = pt_closing + v3_closing
+    result["closingTodayTotal"]        = pt_pending + v3_pending + pt_closing + v3_closing
+    result["closingTodayUniqueMarkets"] = unique_markets
 
     return result
+
+
+@router.get("/paper-trades/segment-summary")
+async def get_segment_summary(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
+    """
+    Full per-version × executability breakdown across all strategies including V3.
+    Used by the Strategy Breakdown table on the Paper Trading page.
+    No data is modified; this is a read-only analytics view.
+    """
+    from sqlalchemy import text as sql_text
+
+    pt_sql = sql_text("""
+        SELECT
+            strategy_version,
+            is_executable,
+            COUNT(*) FILTER (WHERE status != 'V2_EXCLUDED')                      AS total,
+            COUNT(*) FILTER (WHERE status = 'OPEN')                               AS open_n,
+            COUNT(*) FILTER (WHERE status = 'PENDING_SETTLEMENT')                 AS pending_n,
+            COUNT(*) FILTER (WHERE status = 'SETTLED')                            AS settled_n,
+            COUNT(*) FILTER (WHERE status = 'SETTLED' AND outcome = 'WIN')        AS wins,
+            COUNT(*) FILTER (WHERE status = 'SETTLED' AND outcome = 'LOSS')       AS losses,
+            COUNT(*) FILTER (WHERE status = 'V2_EXCLUDED')                        AS excluded_n,
+            ROUND(COALESCE(SUM(stake)       FILTER (WHERE status = 'SETTLED'), 0)::numeric, 2) AS settled_stake,
+            ROUND(COALESCE(SUM(profit_loss) FILTER (WHERE status = 'SETTLED'), 0)::numeric, 2) AS settled_pl,
+            ROUND(AVG(edge_pct_points)      FILTER (WHERE status != 'V2_EXCLUDED')::numeric, 2) AS avg_edge,
+            ROUND(AVG(
+                CASE WHEN status = 'SETTLED'
+                          AND kalshi_result IS NOT NULL
+                          AND ec_yes_probability IS NOT NULL
+                    THEN POWER(ec_yes_probability
+                               - CASE WHEN kalshi_result = 'YES' THEN 1.0 ELSE 0.0 END, 2)
+                END
+            )::numeric, 4) AS brier
+        FROM paper_trades
+        GROUP BY strategy_version, is_executable
+        ORDER BY strategy_version, is_executable NULLS LAST
+    """)
+
+    v3_sql = sql_text("""
+        SELECT
+            is_executable,
+            COUNT(*) FILTER (WHERE status = 'OPEN')                               AS open_n,
+            COUNT(*) FILTER (WHERE status = 'PENDING_SETTLEMENT')                 AS pending_n,
+            COUNT(*) FILTER (WHERE status = 'SETTLED')                            AS settled_n,
+            COUNT(*) FILTER (WHERE status = 'SETTLED' AND outcome = 'WIN')        AS wins,
+            COUNT(*) FILTER (WHERE status = 'SETTLED' AND outcome = 'LOSS')       AS losses,
+            ROUND(COALESCE(SUM(stake)       FILTER (WHERE status = 'SETTLED'), 0)::numeric, 2) AS settled_stake,
+            ROUND(COALESCE(SUM(profit_loss) FILTER (WHERE status = 'SETTLED'), 0)::numeric, 2) AS settled_pl,
+            ROUND(AVG(edge_pct_points)::numeric, 2)                               AS avg_edge,
+            ROUND(AVG(
+                CASE WHEN status = 'SETTLED'
+                          AND kalshi_result IS NOT NULL
+                          AND ec_yes_probability IS NOT NULL
+                    THEN POWER(ec_yes_probability
+                               - CASE WHEN kalshi_result = 'YES' THEN 1.0 ELSE 0.0 END, 2)
+                END
+            )::numeric, 4) AS brier
+        FROM v3_paper_trades
+        GROUP BY is_executable
+        ORDER BY is_executable NULLS LAST
+    """)
+
+    def _group(version: str, is_exec) -> str:
+        if version in ("v1.0", "v2.0"):
+            return "legacy"
+        if version in ("v2.1", "v2.2"):
+            return "current_exec" if is_exec else "current_nonexec"
+        return "v3"
+
+    def _row(ver: str, is_exec, r: dict, excluded: int = 0) -> dict:
+        settled_n     = int(r.get("settled_n") or 0)
+        settled_stake = float(r.get("settled_stake") or 0)
+        settled_pl    = float(r.get("settled_pl") or 0)
+        wins          = int(r.get("wins") or 0)
+        return {
+            "version":     ver,
+            "group":       _group(ver, is_exec),
+            "isExecutable": is_exec,
+            "total":       int(r.get("total") or 0),
+            "open":        int(r.get("open_n") or 0),
+            "pending":     int(r.get("pending_n") or 0),
+            "settled":     settled_n,
+            "wins":        wins,
+            "losses":      int(r.get("losses") or 0),
+            "excluded":    excluded,
+            "winRate":     round(wins / settled_n, 4) if settled_n > 0 else None,
+            "settledStake": settled_stake,
+            "settledPl":   settled_pl,
+            "settledRoi":  round(settled_pl / settled_stake * 100, 2) if settled_stake > 0 else None,
+            "avgEdge":     float(r["avg_edge"]) if r.get("avg_edge") is not None else None,
+            "brierScore":  float(r["brier"])    if r.get("brier")    is not None else None,
+        }
+
+    pt_rows = (await db.execute(pt_sql)).mappings().all()
+    v3_rows = (await db.execute(v3_sql)).mappings().all()
+
+    rows = [_row(r["strategy_version"], r["is_executable"], dict(r),
+                 excluded=int(r.get("excluded_n") or 0)) for r in pt_rows]
+    for r in v3_rows:
+        d = dict(r)
+        settled_n = int(d.get("settled_n") or 0)
+        d["total"] = int(d.get("open_n") or 0) + int(d.get("pending_n") or 0) + settled_n
+        rows.append(_row("v3.0", d["is_executable"], d))
+
+    group_order = {"legacy": 0, "current_exec": 1, "current_nonexec": 2, "v3": 3}
+    rows.sort(key=lambda x: (
+        group_order.get(x["group"], 9),
+        x["version"],
+        x["isExecutable"] is None,
+        not bool(x["isExecutable"]),
+    ))
+    return {"rows": rows}
 
 
 @router.get("/paper-trades/analytics")

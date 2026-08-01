@@ -1,7 +1,7 @@
 /**
- * Strategy v2 — additional API hooks not yet in the generated client.
- * These complement the orval-generated hooks for the comparison and
- * agreement endpoints added in the v2 shadow-trading feature.
+ * Strategy v2+ — additional API hooks not yet in the generated client.
+ * These complement the orval-generated hooks for the comparison,
+ * agreement, and analytics endpoints.
  */
 import { useQuery, useMutation } from "@tanstack/react-query";
 import type {
@@ -53,6 +53,36 @@ export interface StrategyAgreement {
 export interface VerificationResult {
   verifications: { created: number; updated: number; skipped: number; errors: number };
   errorStats: { groups_computed: number };
+}
+
+// ---------------------------------------------------------------------------
+// Segment summary — full per-version × executability breakdown
+// ---------------------------------------------------------------------------
+
+export interface SegmentSummaryRow {
+  /** e.g. "v1.0", "v2.1", "v3.0" */
+  version: string;
+  /** "legacy" | "current_exec" | "current_nonexec" | "v3" */
+  group: "legacy" | "current_exec" | "current_nonexec" | "v3";
+  isExecutable: boolean | null;
+  total: number;
+  open: number;
+  pending: number;
+  settled: number;
+  wins: number;
+  losses: number;
+  /** V2_EXCLUDED records (not counted in any performance metric) */
+  excluded: number;
+  winRate: number | null;
+  settledStake: number;
+  settledPl: number;
+  settledRoi: number | null;
+  avgEdge: number | null;
+  brierScore: number | null;
+}
+
+export interface SegmentSummary {
+  rows: SegmentSummaryRow[];
 }
 
 // ---------------------------------------------------------------------------
@@ -141,4 +171,38 @@ export function useRunVerification<TError = unknown>(
     mutationFn: () => runVerification(),
     ...options,
   }) as UseMutationResult<VerificationResult, TError, void>;
+}
+
+// ---------------------------------------------------------------------------
+// Segment summary
+// ---------------------------------------------------------------------------
+
+export const getSegmentSummaryUrl = () => `/api/paper-trades/segment-summary`;
+
+export const getSegmentSummary = async (
+  options?: Parameters<typeof customFetch>[1]
+): Promise<SegmentSummary> => {
+  return customFetch<SegmentSummary>(getSegmentSummaryUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetSegmentSummaryQueryKey = (): QueryKey => [
+  `/api/paper-trades/segment-summary`,
+];
+
+export function useGetPaperTradeSegmentSummary<
+  TData = SegmentSummary,
+  TError = unknown
+>(
+  options?: UseQueryOptions<SegmentSummary, TError, TData>
+): UseQueryResult<TData, TError> {
+  const queryKey = options?.queryKey ?? getGetSegmentSummaryQueryKey();
+  return useQuery({
+    queryKey,
+    queryFn: ({ signal }) => getSegmentSummary({ signal }),
+    staleTime: 2 * 60 * 1000,
+    ...options,
+  }) as UseQueryResult<TData, TError>;
 }

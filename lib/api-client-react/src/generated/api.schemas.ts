@@ -549,6 +549,8 @@ export interface PaperTradeSummary {
   closingTodayCount?: number;
   /** pendingSettlementCount + closingTodayCount */
   closingTodayTotal?: number;
+  /** Unique Kalshi market tickers closing today (deduplicates cross-strategy exposure) */
+  closingTodayUniqueMarkets?: number;
 }
 
 export interface PaperTradeSettings {
@@ -591,6 +593,8 @@ export type ListPaperTrades200 = {
 
 export type GetPaperTradeMetricsParams = {
 strategy_version?: string;
+/** "current_exec" | "legacy" | "research" | "all" */
+segment?: string;
 };
 
 export type GetPaperTradeAnalyticsParams = {

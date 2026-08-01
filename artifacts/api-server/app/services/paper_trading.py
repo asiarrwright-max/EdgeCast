@@ -728,11 +728,24 @@ async def run_paper_trading(session: AsyncSession) -> dict[str, int]:
 async def get_paper_trade_metrics(
     session: AsyncSession,
     strategy_version: str | None = None,
+    strategy_versions: list[str] | None = None,
+    is_executable: bool | None = None,
 ) -> dict:
-    """Calculate summary metrics. Pass strategy_version to scope to a single version."""
-    q = select(PaperTrade)
+    """
+    Calculate summary metrics.
+
+    strategy_version  — exact match on a single version string
+    strategy_versions — restrict to a list of versions (e.g. ['v2.1','v2.2'])
+    is_executable     — filter on the is_executable flag; None = no filter
+                        (legacy V1/V2 rows have NULL, which only matches when None)
+    """
+    q = select(PaperTrade).where(PaperTrade.status != "V2_EXCLUDED")
     if strategy_version:
         q = q.where(PaperTrade.strategy_version == strategy_version)
+    if strategy_versions:
+        q = q.where(PaperTrade.strategy_version.in_(strategy_versions))
+    if is_executable is not None:
+        q = q.where(PaperTrade.is_executable == is_executable)
     trades_q = await session.execute(q)
     all_trades = trades_q.scalars().all()
 

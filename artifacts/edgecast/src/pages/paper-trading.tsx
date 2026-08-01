@@ -11,6 +11,8 @@ import {
   useGetStrategyComparison,
   useGetStrategyAgreement,
   useRunVerification,
+  useGetPaperTradeSegmentSummary,
+  type SegmentSummaryRow,
 } from "@workspace/api-client-react";
 
 // ── small helpers ─────────────────────────────────────────────────────────────
@@ -169,7 +171,7 @@ export default function PaperTradingPage() {
   const [spreadAdj, setSpreadAdj] = useState(0);
   const [adjMode, setAdjMode] = useState(false);
   const [calibStratVer, setCalibStratVer] = useState("");
-  const [metricsStratVer, setMetricsStratVer] = useState("");
+  const [segment, setSegment] = useState("current_exec");
 
   // Settings edit state
   const [editSettings, setEditSettings] = useState(false);
@@ -209,9 +211,8 @@ export default function PaperTradingPage() {
   if (calibStratVer) analyticsParams.strategy_version_calib = calibStratVer; // won't be used, separate
 
   const { data: listData } = useListPaperTrades(listParams);
-  const { data: metrics, refetch: refetchMetrics } = useGetPaperTradeMetrics(
-    metricsStratVer ? { strategy_version: metricsStratVer } : {}
-  );
+  const { data: metrics, refetch: refetchMetrics } = useGetPaperTradeMetrics({ segment });
+  const { data: segmentSummary } = useGetPaperTradeSegmentSummary();
   const { data: settings } = useGetPaperTradeSettings();
   const { data: analytics } = useGetPaperTradeAnalytics(analyticsParams);
   const { data: calibration } = useGetPaperTradeCalibration(
@@ -282,16 +283,30 @@ export default function PaperTradingPage() {
             Strategy validation — simulated positions, real market prices
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <select
-            value={metricsStratVer}
-            onChange={(e) => setMetricsStratVer(e.target.value)}
-            className="text-sm border border-gray-300 rounded px-2 py-1.5 text-gray-700"
-          >
-            <option value="">All versions</option>
-            <option value="v1.0">v1.0</option>
-            <option value="v2.0">v2.0</option>
-          </select>
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {/* Segment selector */}
+          <div className="flex rounded-lg overflow-hidden border border-gray-200 text-xs font-medium">
+            {(
+              [
+                { value: "current_exec", label: "Current Experiment" },
+                { value: "legacy",       label: "Legacy (V1+V2)"    },
+                { value: "research",     label: "Research Signals"  },
+                { value: "all",          label: "All (unfiltered)"  },
+              ] as const
+            ).map(({ value, label }) => (
+              <button
+                key={value}
+                onClick={() => setSegment(value)}
+                className={`px-3 py-1.5 border-r last:border-r-0 border-gray-200 transition-colors ${
+                  segment === value
+                    ? "bg-blue-600 text-white"
+                    : "bg-white text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <button
             onClick={handleSettleNow}
             disabled={settling}
@@ -322,13 +337,18 @@ export default function PaperTradingPage() {
         </div>
       )}
 
-      {/* Closing today banner — shown whenever trades are pending settlement or open and settling today */}
+      {/* Closing today banner */}
       {(metrics?.closingTodayTotal ?? 0) > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-3">
           <span className="text-lg leading-none mt-0.5" aria-hidden>⏳</span>
           <div className="space-y-0.5">
             <p className="text-sm font-semibold text-amber-800">
-              {metrics!.closingTodayTotal} trade{metrics!.closingTodayTotal !== 1 ? "s" : ""} closing today
+              {metrics!.closingTodayTotal} position{metrics!.closingTodayTotal !== 1 ? "s" : ""} closing today
+              {(metrics!.closingTodayUniqueMarkets ?? 0) > 0 && (
+                <span className="text-amber-600 font-normal ml-2">
+                  across {metrics!.closingTodayUniqueMarkets} unique market{metrics!.closingTodayUniqueMarkets !== 1 ? "s" : ""}
+                </span>
+              )}
             </p>
             <p className="text-xs text-amber-700">
               {metrics!.pendingSettlementCount! > 0 && (
@@ -338,14 +358,48 @@ export default function PaperTradingPage() {
               {metrics!.closingTodayCount! > 0 && (
                 <>{metrics!.closingTodayCount} open position{metrics!.closingTodayCount !== 1 ? "s" : ""} settling today</>
               )}
-              {" — "}counts include V2.1, V2.2, and V3
+              {(metrics!.closingTodayUniqueMarkets ?? 0) > 0 && (metrics!.closingTodayTotal ?? 0) > (metrics!.closingTodayUniqueMarkets ?? 0) && (
+                <> · {metrics!.closingTodayTotal! - metrics!.closingTodayUniqueMarkets!} extra positions from multi-strategy overlap</>
+              )}
+              {" — "}includes V2.1, V2.2, and V3
             </p>
           </div>
         </div>
       )}
 
       {/* Sample size progress */}
-      <SampleBar settled={settledCount} />
+      <div className="space-y-1">
+        <p className="text-xs text-gray-400">
+          Metrics below:{" "}
+          <span className="font-medium text-gray-600">
+            {segment === "current_exec" && "V2.1 + V2.2 executable trades — official performance benchmark"}
+            {segment === "legacy"       && "V1.0 + V2.0 historical baseline (pre-station/sigma corrections)"}
+            {segment === "research"     && "V2.1 + V2.2 non-executable research signals — not real bets"}
+            {segment === "all"          && "All versions combined — see Strategy Breakdown below for clean split"}
+          </span>
+        </p>
+        <SampleBar settled={settledCount} />
+      </div>
+
+      {/* Contamination warning — only shown for "all" */}
+      {segment === "all" && (
+        <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm">
+          <p className="font-semibold text-orange-800">⚠ Contaminated view</p>
+          <p className="text-xs text-orange-700 mt-1">
+            This view mixes 272 legacy V1/V2 trades (pre-station verification, pre-sigma correction,
+            correlated-position flags) with 30 current-experiment settled trades and 19 non-executable
+            research signals. The headline figures — 24.3% win rate, −$1,937.58 P/L — are dominated
+            by the legacy cohort and are not valid measures of current strategy performance.{" "}
+            <button
+              className="underline font-medium text-orange-800"
+              onClick={() => setSegment("current_exec")}
+            >
+              Switch to Current Experiment
+            </button>{" "}
+            for the official view.
+          </p>
+        </div>
+      )}
 
       {/* Metric cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
@@ -395,6 +449,112 @@ export default function PaperTradingPage() {
         <MetricCard label="Avg Edge" value={pp(metrics?.avgEntryEdge)} />
         <MetricCard label="Avg Entry Price" value={pct(metrics?.avgEntryPrice)} />
         <MetricCard label="Avg Win Edge" value={pp(metrics?.avgWinEdge)} sub={`Loss: ${pp(metrics?.avgLossEdge)}`} />
+      </div>
+
+      {/* Strategy Breakdown — full per-version × executability audit table */}
+      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-800">Strategy Breakdown</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              All versions × executability. Official headline metrics use settled executable rows only (✓).
+            </p>
+          </div>
+        </div>
+        {segmentSummary?.rows && segmentSummary.rows.length > 0 ? (
+          <>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-xs">
+                <thead>
+                  <tr className="bg-gray-50 text-xs text-gray-400 uppercase">
+                    <th className="text-left px-4 py-2">Version</th>
+                    <th className="text-left px-3 py-2">Group</th>
+                    <th className="text-center px-3 py-2">Exec?</th>
+                    <th className="text-right px-3 py-2">Open</th>
+                    <th className="text-right px-3 py-2">Settled</th>
+                    <th className="text-right px-3 py-2">Wins</th>
+                    <th className="text-right px-3 py-2">Win Rate</th>
+                    <th className="text-right px-3 py-2">Stake</th>
+                    <th className="text-right px-3 py-2">Net P/L</th>
+                    <th className="text-right px-3 py-2">ROI</th>
+                    <th className="text-right px-3 py-2">Avg Edge</th>
+                    <th className="text-right px-3 py-2">Brier</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(segmentSummary.rows as SegmentSummaryRow[]).map((row) => {
+                    const isOfficial    = row.group === "current_exec";
+                    const isLegacy      = row.group === "legacy";
+                    const isResearch    = row.group === "current_nonexec";
+                    return (
+                      <tr
+                        key={`${row.version}-${row.isExecutable}`}
+                        className={`border-t border-gray-100 ${
+                          isOfficial ? "bg-blue-50/60" :
+                          isLegacy   ? "bg-amber-50/40" :
+                          isResearch ? "bg-gray-50" : ""
+                        }`}
+                      >
+                        <td className="px-4 py-2 font-medium text-gray-800">
+                          {row.version}
+                          {isOfficial  && <span className="ml-1.5 text-blue-600 font-normal">✓ official</span>}
+                          {isLegacy    && <span className="ml-1.5 text-amber-600 font-normal">legacy</span>}
+                          {isResearch  && <span className="ml-1.5 text-gray-400 font-normal">signal</span>}
+                        </td>
+                        <td className="px-3 py-2 text-gray-400">{row.group.replace(/_/g, " ")}</td>
+                        <td className="text-center px-3 py-2">
+                          {row.isExecutable === true  ? <span className="text-green-600 font-bold">✓</span> :
+                           row.isExecutable === false ? <span className="text-red-400">✗</span> :
+                           <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="text-right px-3 py-2 text-gray-600">{row.open}</td>
+                        <td className="text-right px-3 py-2 text-gray-600">{row.settled}</td>
+                        <td className="text-right px-3 py-2 text-gray-600">{row.wins}</td>
+                        <td className={`text-right px-3 py-2 font-medium ${
+                          row.winRate == null    ? "text-gray-300" :
+                          row.winRate >= 0.55   ? "text-green-600" :
+                          row.winRate < 0.45    ? "text-red-600"   : "text-amber-600"
+                        }`}>
+                          {row.winRate != null ? pct(row.winRate) : "—"}
+                        </td>
+                        <td className="text-right px-3 py-2 text-gray-600">
+                          {row.settled > 0 ? money(row.settledStake) : "—"}
+                        </td>
+                        <td className={`text-right px-3 py-2 font-medium ${
+                          row.settled === 0   ? "text-gray-300" :
+                          row.settledPl > 0   ? "text-green-600" :
+                          row.settledPl < 0   ? "text-red-600"   : "text-gray-400"
+                        }`}>
+                          {row.settled > 0 ? money(row.settledPl) : "—"}
+                        </td>
+                        <td className={`text-right px-3 py-2 ${
+                          row.settledRoi == null ? "text-gray-300" :
+                          row.settledRoi > 0    ? "text-green-600" : "text-red-600"
+                        }`}>
+                          {row.settledRoi != null ? `${row.settledRoi.toFixed(1)}%` : "—"}
+                        </td>
+                        <td className="text-right px-3 py-2 text-gray-600">
+                          {row.avgEdge != null ? `${row.avgEdge.toFixed(1)}pp` : "—"}
+                        </td>
+                        <td className="text-right px-3 py-2 text-gray-600">
+                          {row.brierScore != null ? row.brierScore.toFixed(4) : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-4 py-2.5 border-t border-gray-100 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-400">
+              <span><span className="inline-block w-2.5 h-2.5 rounded bg-blue-100 mr-1" />✓ official — settled executable (V2.1 + V2.2) — current performance benchmark</span>
+              <span><span className="inline-block w-2.5 h-2.5 rounded bg-amber-100 mr-1" />legacy — pre-station/sigma corrections — not comparable to current experiment</span>
+              <span>Research signals: non-executable; recorded for calibration, not real positions</span>
+              <span>Fees: paper trades incur no real Kalshi charges — not recorded</span>
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-gray-500 px-4 py-3">Loading breakdown…</p>
+        )}
       </div>
 
       {/* V2 Strategy Comparison */}
