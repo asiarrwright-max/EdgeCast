@@ -543,6 +543,12 @@ export interface PaperTradeSummary {
   sampleSizeWarning: boolean;
   /** @nullable */
   preliminaryNote?: string | null;
+  /** PENDING_SETTLEMENT count across all strategies including V3 */
+  pendingSettlementCount?: number;
+  /** OPEN trades whose target_settlement_date falls today (UTC) across all strategies */
+  closingTodayCount?: number;
+  /** pendingSettlementCount + closingTodayCount */
+  closingTodayTotal?: number;
 }
 
 export interface PaperTradeSettings {

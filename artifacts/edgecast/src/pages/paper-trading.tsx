@@ -322,6 +322,28 @@ export default function PaperTradingPage() {
         </div>
       )}
 
+      {/* Closing today banner — shown whenever trades are pending settlement or open and settling today */}
+      {(metrics?.closingTodayTotal ?? 0) > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-3">
+          <span className="text-lg leading-none mt-0.5" aria-hidden>⏳</span>
+          <div className="space-y-0.5">
+            <p className="text-sm font-semibold text-amber-800">
+              {metrics!.closingTodayTotal} trade{metrics!.closingTodayTotal !== 1 ? "s" : ""} closing today
+            </p>
+            <p className="text-xs text-amber-700">
+              {metrics!.pendingSettlementCount! > 0 && (
+                <>{metrics!.pendingSettlementCount} awaiting Kalshi results</>
+              )}
+              {metrics!.pendingSettlementCount! > 0 && metrics!.closingTodayCount! > 0 && " · "}
+              {metrics!.closingTodayCount! > 0 && (
+                <>{metrics!.closingTodayCount} open position{metrics!.closingTodayCount !== 1 ? "s" : ""} settling today</>
+              )}
+              {" — "}counts include V2.1, V2.2, and V3
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Sample size progress */}
       <SampleBar settled={settledCount} />
 

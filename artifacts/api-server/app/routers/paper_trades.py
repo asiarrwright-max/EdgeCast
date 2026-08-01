@@ -25,12 +25,13 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import KalshiMarket, PaperTrade, PredictionSnapshot
+from app.models_v3 import V3PaperTrade
 from app.services.paper_trading import (
     FLAG_DESCRIPTIONS,
     edge_bucket,
@@ -218,7 +219,44 @@ async def get_metrics(
     _user: dict = Depends(get_current_user),
 ):
     """Aggregated summary statistics. Pass strategy_version to scope to one version."""
-    return await get_paper_trade_metrics(db, strategy_version=strategy_version)
+    result = await get_paper_trade_metrics(db, strategy_version=strategy_version)
+
+    # Append closing-today counts across ALL strategies (incl. V3) regardless of
+    # the strategy_version filter — these are operational pipeline stats, not
+    # per-strategy performance metrics.
+    today = datetime.utcnow().date().isoformat()  # e.g. "2026-07-31"
+
+    pt_pending = (await db.execute(
+        select(func.count(PaperTrade.id))
+        .where(PaperTrade.status == "PENDING_SETTLEMENT")
+    )).scalar_one() or 0
+
+    v3_pending = (await db.execute(
+        select(func.count(V3PaperTrade.id))
+        .where(V3PaperTrade.status == "PENDING_SETTLEMENT")
+    )).scalar_one() or 0
+
+    pt_closing = (await db.execute(
+        select(func.count(PaperTrade.id))
+        .where(
+            PaperTrade.status == "OPEN",
+            PaperTrade.target_settlement_date.like(f"{today}%"),
+        )
+    )).scalar_one() or 0
+
+    v3_closing = (await db.execute(
+        select(func.count(V3PaperTrade.id))
+        .where(
+            V3PaperTrade.status == "OPEN",
+            V3PaperTrade.target_settlement_date.like(f"{today}%"),
+        )
+    )).scalar_one() or 0
+
+    result["pendingSettlementCount"] = pt_pending + v3_pending
+    result["closingTodayCount"]      = pt_closing + v3_closing
+    result["closingTodayTotal"]      = pt_pending + v3_pending + pt_closing + v3_closing
+
+    return result
 
 
 @router.get("/paper-trades/analytics")
