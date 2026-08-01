@@ -34,6 +34,8 @@ from app.models import KalshiMarket, PaperTrade, PredictionSnapshot
 from app.models_v3 import V3PaperTrade
 from app.services.paper_trading import (
     FLAG_DESCRIPTIONS,
+    _empty_metrics,
+    compute_metrics_from_trades,
     edge_bucket,
     get_calibration_report,
     get_paper_trade_analytics,
@@ -213,20 +215,20 @@ async def run_verification(
 
 
 # Maps segment name → filter kwargs for get_paper_trade_metrics.
-# None value = handled entirely by special-case code in the endpoint.
-_SEGMENT_FILTERS: dict[str, dict | None] = {
-    # All current-experiment strategies (V2.1+V2.2 from paper_trades; V3 augmented)
-    "current_exp":    {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True},
-    # Corrected-bias comparison only (excludes V3)
-    "current_v2":     {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True},
-    # V3 Historical-Preload Challenger — queries v3_paper_trades directly
-    "v3_challenger":  None,
-    # Strictly paired head-to-head (comparison_snapshot_id must be non-null)
-    "paired":         {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True, "paired_only": True},
-    "legacy":         {"strategy_versions": ["v1.0", "v2.0"]},
-    "research":       {"strategy_versions": ["v2.1", "v2.2"], "is_executable": False},
+# Segments handled by special-case code in the endpoint are NOT listed here.
+_SEGMENT_FILTERS: dict[str, dict] = {
+    # Corrected-bias V2.1 vs V2.2 comparison (excludes V3)
+    "current_v2":  {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True},
+    # V2.1 vs V2.2 paired only (comparison_snapshot_id must match; excludes V3)
+    "paired_v2":   {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True, "paired_only": True},
+    "legacy":      {"strategy_versions": ["v1.0", "v2.0"]},
+    "research":    {"strategy_versions": ["v2.1", "v2.2"], "is_executable": False},
     # "all" / omitted → no extra filters
 }
+# Segments handled with custom logic (not in _SEGMENT_FILTERS):
+#   current_exp   — loads both paper_trades and v3_paper_trades, fully aggregated
+#   v3_challenger — queries v3_paper_trades only via SQL
+#   paired        — 3-way intersection on comparison_snapshot_id across all three strategies
 
 
 @router.get("/paper-trades/metrics")
@@ -256,56 +258,104 @@ async def get_metrics(
 
     seg = segment or ""
 
-    # ── V3 Challenger: separate table, build metrics directly ─────────────────
-    if seg == "v3_challenger":
-        v3_sql = sql_text("""
-            SELECT
-                COUNT(*) FILTER (WHERE status = 'OPEN'     AND is_executable = true) AS open_exec,
-                COUNT(*) FILTER (WHERE status = 'SETTLED'  AND is_executable = true) AS settled_exec,
-                COUNT(*) FILTER (WHERE status = 'SETTLED'  AND is_executable = true
-                                  AND outcome = 'WIN')                               AS wins,
-                COALESCE(SUM(stake)
-                    FILTER (WHERE status = 'OPEN'    AND is_executable = true), 0)   AS open_stake,
-                COALESCE(SUM(stake)
-                    FILTER (WHERE status = 'SETTLED' AND is_executable = true), 0)   AS settled_stake,
-                COALESCE(SUM(profit_loss)
-                    FILTER (WHERE status = 'SETTLED' AND is_executable = true), 0)   AS settled_pl,
-                AVG(edge_pct_points)
-                    FILTER (WHERE is_executable = true)                               AS avg_edge,
-                AVG(market_yes_probability)
-                    FILTER (WHERE is_executable = true)                               AS avg_price
-            FROM v3_paper_trades
-        """)
-        r = (await db.execute(v3_sql)).mappings().one()
-        open_n        = int(r["open_exec"]    or 0)
-        settled_n     = int(r["settled_exec"] or 0)
-        wins          = int(r["wins"]         or 0)
-        settled_stake = float(r["settled_stake"] or 0)
-        settled_pl    = float(r["settled_pl"]    or 0)
-        result: dict = {
-            "openCount":      open_n,
-            "settledCount":   settled_n,
-            "voidCount":      0,
-            "totalCount":     open_n + settled_n,
-            "wins":           wins,
-            "losses":         settled_n - wins,
-            "winRate":        round(wins / settled_n, 4) if settled_n > 0 else None,
-            "totalStaked":    round(float(r["open_stake"] or 0) + settled_stake, 4),
-            "netProfitLoss":  settled_pl,
-            "roi":            round(settled_pl / settled_stake * 100, 2) if settled_stake > 0 else None,
-            "avgEntryEdge":   float(r["avg_edge"])  if r["avg_edge"]  is not None else None,
-            "avgEntryPrice":  float(r["avg_price"]) if r["avg_price"] is not None else None,
-            "avgWinEdge":     None,
-            "avgLossEdge":    None,
-            "byDirection":    [], "byConfidence": [], "byCity": [], "byContractType": [],
-            "sampleSizeWarning": settled_n < 20,
-            "preliminaryNote": (
+    # ── Current Experiment: full 3-strategy aggregation ──────────────────────
+    if seg == "current_exp":
+        v2_trades = (await db.execute(
+            select(PaperTrade)
+            .where(PaperTrade.status != "V2_EXCLUDED",
+                   PaperTrade.strategy_version.in_(["v2.1", "v2.2"]),
+                   PaperTrade.is_executable == True)
+        )).scalars().all()
+        v3_exec_trades = (await db.execute(
+            select(V3PaperTrade).where(V3PaperTrade.is_executable == True)
+        )).scalars().all()
+
+        combined = list(v2_trades) + list(v3_exec_trades)
+        result: dict = compute_metrics_from_trades(combined)
+
+        # Per-strategy reconciliation (open, settled, wins, net P/L, ROI)
+        def _compact(m: dict) -> dict:
+            return {
+                "open":     m["openCount"],
+                "settled":  m["settledCount"],
+                "wins":     m["wins"],
+                "winRate":  m["winRate"],
+                "netPl":    m["netProfitLoss"],
+                "roi":      m["roi"],
+            }
+        result["reconciliation"] = {
+            "v21":      _compact(compute_metrics_from_trades(
+                            [t for t in v2_trades if t.strategy_version == "v2.1"])),
+            "v22":      _compact(compute_metrics_from_trades(
+                            [t for t in v2_trades if t.strategy_version == "v2.2"])),
+            "v3":       _compact(compute_metrics_from_trades(list(v3_exec_trades))),
+            "combined": _compact(result),
+        }
+        result["v3OpenExecCount"] = sum(1 for t in v3_exec_trades if t.status == "OPEN")
+
+    # ── V3 Challenger: queries v3_paper_trades only via Python objects ────────
+    elif seg == "v3_challenger":
+        v3_exec_trades = (await db.execute(
+            select(V3PaperTrade).where(V3PaperTrade.is_executable == True)
+        )).scalars().all()
+        result = compute_metrics_from_trades(list(v3_exec_trades))
+        if result["settledCount"] == 0:
+            result["preliminaryNote"] = (
                 "V3 has no settled executable trades yet — metrics reflect open positions only."
-                if settled_n == 0 else None
-            ),
+            )
+
+    # ── Strictly Paired Head-to-Head: 3-way intersection on comparison_snapshot_id ──
+    elif seg == "paired":
+        v21_rows = (await db.execute(
+            select(PaperTrade)
+            .where(PaperTrade.status != "V2_EXCLUDED",
+                   PaperTrade.strategy_version == "v2.1",
+                   PaperTrade.is_executable == True,
+                   PaperTrade.comparison_snapshot_id.isnot(None))
+        )).scalars().all()
+        v22_rows = (await db.execute(
+            select(PaperTrade)
+            .where(PaperTrade.status != "V2_EXCLUDED",
+                   PaperTrade.strategy_version == "v2.2",
+                   PaperTrade.is_executable == True,
+                   PaperTrade.comparison_snapshot_id.isnot(None))
+        )).scalars().all()
+        v3_rows = (await db.execute(
+            select(V3PaperTrade)
+            .where(V3PaperTrade.is_executable == True,
+                   V3PaperTrade.comparison_snapshot_id.isnot(None))
+        )).scalars().all()
+
+        v21_by_snap = {t.comparison_snapshot_id: t for t in v21_rows}
+        v22_by_snap = {t.comparison_snapshot_id: t for t in v22_rows}
+        v3_by_snap  = {t.comparison_snapshot_id: t for t in v3_rows}
+
+        all_snaps   = set(v21_by_snap) | set(v22_by_snap) | set(v3_by_snap)
+        three_way   = set(v21_by_snap) & set(v22_by_snap) & set(v3_by_snap)
+        v2_only     = (set(v21_by_snap) & set(v22_by_snap)) - three_way
+
+        three_way_trades: list = []
+        for snap_id in three_way:
+            three_way_trades.extend([
+                v21_by_snap[snap_id], v22_by_snap[snap_id], v3_by_snap[snap_id],
+            ])
+
+        result = compute_metrics_from_trades(three_way_trades) if three_way_trades else _empty_metrics()
+        result["pairedStats"] = {
+            "totalOpportunitiesWithAnySnapshot": len(all_snaps),
+            "threeWayOpportunities":             len(three_way),
+            "threeWaySettledPositions":          sum(1 for t in three_way_trades
+                                                     if t.status == "SETTLED"),
+            "excludedMissingV3":   len(v2_only),
+            "excludedMissingV21":  len((set(v22_by_snap) & set(v3_by_snap))  - three_way),
+            "excludedMissingV22":  len((set(v21_by_snap) & set(v3_by_snap))  - three_way),
+            "note": (
+                "No paired opportunities yet. comparison_snapshot_id is populated on "
+                "trades collected via the pipeline's batch collection mode."
+            ) if not all_snaps else None,
         }
 
-    # ── All other segments: query paper_trades via service ────────────────────
+    # ── All remaining segments: query paper_trades via service ────────────────
     else:
         seg_filters = _SEGMENT_FILTERS.get(seg) or {}
         result = await get_paper_trade_metrics(
@@ -315,21 +365,6 @@ async def get_metrics(
             is_executable=seg_filters.get("is_executable"),
             paired_only=bool(seg_filters.get("paired_only", False)),
         )
-
-        # Augment "current_exp" with V3 executable open counts
-        if seg == "current_exp":
-            v3_open_exec = (await db.execute(
-                select(func.count(V3PaperTrade.id))
-                .where(V3PaperTrade.status == "OPEN", V3PaperTrade.is_executable == True)
-            )).scalar_one() or 0
-            v3_open_stake = (await db.execute(
-                select(func.sum(V3PaperTrade.stake))
-                .where(V3PaperTrade.status == "OPEN", V3PaperTrade.is_executable == True)
-            )).scalar_one() or 0.0
-            result["openCount"]       = (result.get("openCount")  or 0) + v3_open_exec
-            result["totalCount"]      = (result.get("totalCount") or 0) + v3_open_exec
-            result["totalStaked"]     = round((result.get("totalStaked") or 0) + float(v3_open_stake), 4)
-            result["v3OpenExecCount"] = v3_open_exec
 
     # ── Closing-today counts (pipeline ops — always all strategies, all segments) ──
     today = datetime.utcnow().date().isoformat()  # e.g. "2026-08-01"

@@ -725,6 +725,92 @@ async def run_paper_trading(session: AsyncSession) -> dict[str, int]:
 
 # ── Metrics ───────────────────────────────────────────────────────────────────
 
+def compute_metrics_from_trades(trades: list) -> dict:
+    """
+    Compute summary metrics from any list of trade-like objects.
+
+    Compatible with PaperTrade, V3PaperTrade, or any object exposing:
+    status, outcome, stake, profit_loss, edge_pct_points, side_market_price,
+    direction, city, contract_type.
+
+    confidence_label is read via getattr — present on PaperTrade (V2.x),
+    absent on V3PaperTrade; missing values are grouped as "Unknown".
+
+    This is the canonical aggregation kernel: it makes no DB calls and is
+    safe to call on a combined list of V2 + V3 trade objects.
+    """
+    if not trades:
+        return _empty_metrics()
+
+    open_t    = [t for t in trades if t.status == "OPEN"]
+    settled_t = [t for t in trades if t.status == "SETTLED"]
+    void_t    = [t for t in trades if t.status == "VOID"]
+
+    wins   = [t for t in settled_t if t.outcome == "WIN"]
+    losses = [t for t in settled_t if t.outcome == "LOSS"]
+
+    win_rate             = len(wins) / len(settled_t) if settled_t else None
+    total_staked_settled = sum(t.stake or 0 for t in settled_t)
+    net_pl               = sum(t.profit_loss or 0 for t in settled_t)
+    roi                  = (net_pl / total_staked_settled * 100) if total_staked_settled > 0 else None
+
+    def avg(vals: list[float]) -> float | None:
+        return round(sum(vals) / len(vals), 2) if vals else None
+
+    all_edges  = [t.edge_pct_points   for t in trades if t.edge_pct_points  is not None]
+    win_edges  = [t.edge_pct_points   for t in wins   if t.edge_pct_points  is not None]
+    loss_edges = [t.edge_pct_points   for t in losses if t.edge_pct_points  is not None]
+    all_prices = [t.side_market_price for t in trades if t.side_market_price is not None]
+
+    def perf_by(key_fn, trades_list: list) -> list[dict]:
+        groups: dict[str, list] = {}
+        for t in trades_list:
+            k = key_fn(t) or "Unknown"
+            groups.setdefault(k, []).append(t)
+        result = []
+        for k, group in sorted(groups.items()):
+            g_settled = [t for t in group if t.status == "SETTLED"]
+            g_wins    = [t for t in g_settled if t.outcome == "WIN"]
+            g_pl      = sum(t.profit_loss or 0 for t in g_settled)
+            result.append({
+                "label":         k,
+                "total":         len(group),
+                "open":          sum(1 for t in group if t.status == "OPEN"),
+                "settled":       len(g_settled),
+                "wins":          len(g_wins),
+                "losses":        len(g_settled) - len(g_wins),
+                "winRate":       round(len(g_wins) / len(g_settled), 4) if g_settled else None,
+                "netProfitLoss": round(g_pl, 4),
+            })
+        return result
+
+    return {
+        "openCount":      len(open_t),
+        "settledCount":   len(settled_t),
+        "voidCount":      len(void_t),
+        "totalCount":     len(trades),
+        "wins":           len(wins),
+        "losses":         len(losses),
+        "winRate":        round(win_rate, 4) if win_rate is not None else None,
+        "totalStaked":    round(sum(t.stake or 0 for t in trades if t.status in ("OPEN", "SETTLED")), 4),
+        "netProfitLoss":  round(net_pl, 4),
+        "roi":            round(roi, 4) if roi is not None else None,
+        "avgEntryEdge":   avg(all_edges),
+        "avgEntryPrice":  avg(all_prices),
+        "avgWinEdge":     avg(win_edges),
+        "avgLossEdge":    avg(loss_edges),
+        "byDirection":    perf_by(lambda t: t.direction, trades),
+        "byConfidence":   perf_by(lambda t: getattr(t, "confidence_label", None), trades),
+        "byCity":         perf_by(lambda t: t.city, trades),
+        "byContractType": perf_by(lambda t: t.contract_type, trades),
+        "sampleSizeWarning": len(settled_t) < 20,
+        "preliminaryNote": (
+            "Results are preliminary. A minimum of several weeks of settled trades "
+            "is required before drawing statistically meaningful conclusions."
+        ) if len(settled_t) < 30 else None,
+    }
+
+
 async def get_paper_trade_metrics(
     session: AsyncSession,
     strategy_version: str | None = None,
@@ -754,76 +840,7 @@ async def get_paper_trade_metrics(
     trades_q = await session.execute(q)
     all_trades = trades_q.scalars().all()
 
-    if not all_trades:
-        return _empty_metrics()
-
-    open_t = [t for t in all_trades if t.status == "OPEN"]
-    settled_t = [t for t in all_trades if t.status == "SETTLED"]
-    void_t = [t for t in all_trades if t.status == "VOID"]
-
-    wins = [t for t in settled_t if t.outcome == "WIN"]
-    losses = [t for t in settled_t if t.outcome == "LOSS"]
-
-    win_rate = len(wins) / len(settled_t) if settled_t else None
-    total_staked_settled = sum(t.stake or 0 for t in settled_t)
-    net_pl = sum(t.profit_loss or 0 for t in settled_t)
-    roi = (net_pl / total_staked_settled * 100) if total_staked_settled > 0 else None
-
-    def avg(vals: list[float]) -> float | None:
-        return round(sum(vals) / len(vals), 2) if vals else None
-
-    all_edges = [t.edge_pct_points for t in all_trades if t.edge_pct_points is not None]
-    win_edges = [t.edge_pct_points for t in wins if t.edge_pct_points is not None]
-    loss_edges = [t.edge_pct_points for t in losses if t.edge_pct_points is not None]
-    all_prices = [t.side_market_price for t in all_trades if t.side_market_price is not None]
-
-    def perf_by(key_fn, trades_list: list) -> list[dict]:
-        groups: dict[str, list] = {}
-        for t in trades_list:
-            k = key_fn(t) or "Unknown"
-            groups.setdefault(k, []).append(t)
-        result = []
-        for k, group in sorted(groups.items()):
-            g_settled = [t for t in group if t.status == "SETTLED"]
-            g_wins = [t for t in g_settled if t.outcome == "WIN"]
-            g_pl = sum(t.profit_loss or 0 for t in g_settled)
-            result.append({
-                "label": k,
-                "total": len(group),
-                "open": sum(1 for t in group if t.status == "OPEN"),
-                "settled": len(g_settled),
-                "wins": len(g_wins),
-                "losses": len(g_settled) - len(g_wins),
-                "winRate": round(len(g_wins) / len(g_settled), 4) if g_settled else None,
-                "netProfitLoss": round(g_pl, 4),
-            })
-        return result
-
-    return {
-        "openCount": len(open_t),
-        "settledCount": len(settled_t),
-        "voidCount": len(void_t),
-        "totalCount": len(all_trades),
-        "wins": len(wins),
-        "losses": len(losses),
-        "winRate": round(win_rate, 4) if win_rate is not None else None,
-        "totalStaked": round(sum(t.stake or 0 for t in all_trades if t.status in ("OPEN", "SETTLED")), 4),
-        "netProfitLoss": round(net_pl, 4),
-        "roi": round(roi, 4) if roi is not None else None,
-        "avgEntryEdge": avg(all_edges),
-        "avgEntryPrice": avg(all_prices),
-        "avgWinEdge": avg(win_edges),
-        "avgLossEdge": avg(loss_edges),
-        "byDirection": perf_by(lambda t: t.direction, all_trades),
-        "byConfidence": perf_by(lambda t: t.confidence_label, all_trades),
-        "byCity": perf_by(lambda t: t.city, all_trades),
-        "byContractType": perf_by(lambda t: t.contract_type, all_trades),
-        "sampleSizeWarning": len(settled_t) < 20,
-        "preliminaryNote": (
-            "Results are preliminary. A minimum of several weeks of settled trades "
-            "is required before drawing statistically meaningful conclusions."
-        ) if len(settled_t) < 30 else None,
-    }
+    return compute_metrics_from_trades(list(all_trades))
 
 
 def _empty_metrics() -> dict:

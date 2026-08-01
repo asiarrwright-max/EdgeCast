@@ -294,7 +294,8 @@ export default function PaperTradingPage() {
             <option value="current_exp">Current Experiment — V2.1 + V2.2 + V3</option>
             <option value="current_v2">Corrected-Bias Comparison — V2.1 vs V2.2</option>
             <option value="v3_challenger">V3 Historical-Preload Challenger</option>
-            <option value="paired">Strictly Paired Head-to-Head</option>
+            <option value="paired">Strictly Paired Head-to-Head — V2.1 + V2.2 + V3</option>
+            <option value="paired_v2">Corrected-Bias Paired — V2.1 vs V2.2 Only</option>
             <option value="legacy">Legacy Baseline — V1.0 + V2.0</option>
             <option value="research">Research Signals — Non-Executable</option>
             <option value="all">All Versions Unfiltered ⚠</option>

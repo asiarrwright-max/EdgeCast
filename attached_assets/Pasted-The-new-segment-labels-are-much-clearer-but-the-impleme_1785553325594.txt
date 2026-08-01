@@ -1,0 +1,95 @@
+The new segment labels are much clearer, but the implementation description shows two remaining issues.
+
+1. Current Experiment must fully aggregate V3
+
+The current_exp segment is described as running the V2.1 + V2.2 executable metrics query and only augmenting openCount, totalCount, and totalStaked with V3.
+
+That is not sufficient for a segment labeled:
+
+“Current Experiment — V2.1 + V2.2 + V3”
+
+Please make the Current Experiment metrics fully aggregate executable V2.1, V2.2, and V3 records for every headline field:
+
+- open count
+- settled count
+- wins
+- losses
+- win rate
+- settled stake
+- gross P/L
+- settled fees
+- net P/L
+- gross ROI
+- net ROI
+- Brier score
+- average edge
+- average entry price
+- any other displayed headline metric
+
+Do not combine only V3 counts with V2.1/V2.2 performance.
+
+Because V3 uses v3_paper_trades, create a normalized aggregation layer or combine the two table results field by field using identical definitions.
+
+Confirm with a reconciliation table showing:
+
+- V2.1 contribution
+- V2.2 contribution
+- V3 contribution
+- final Current Experiment total
+
+The totals must equal the sum of the three strategy-level executable figures.
+
+2. Strictly Paired Head-to-Head must include all three strategies
+
+The current description says it queries V2.1 + V2.2 executable trades with non-null comparison_snapshot_id.
+
+That is only a V2.1/V2.2 paired comparison.
+
+For the three-strategy Strictly Paired Head-to-Head segment, require:
+
+- one V2.1 result
+- one V2.2 result
+- one V3 result
+- same comparison_snapshot_id or equivalent shared opportunity ID
+- same collection_batch_id
+- same frozen forecast and quote inputs
+- executable status under the comparison rules
+- settled outcome available
+
+Only include a market when all three versions have a valid matching record.
+
+Report separately:
+
+- strictly paired opportunities
+- strictly paired opportunities where all three traded
+- strictly paired settled executable trades
+- timing-mismatched records excluded
+- missing-version records excluded
+
+Do not label a V2.1/V2.2-only pair as an all-three head-to-head.
+
+You may retain a separate segment named:
+
+“Corrected-Bias Paired Comparison — V2.1 vs V2.2”
+
+3. Preliminary Leader and Best Paper Bet Today
+
+Confirm with actual query results—not only function signatures—that:
+
+- V3 settled executable performance can influence Preliminary Leader
+- V3 current executable signals can qualify for Best Paper Bet Today
+- non-executable V3 signals remain excluded
+- legacy V1/V2 records remain excluded
+
+4. Tests
+
+Add regression tests proving:
+
+- Current Experiment performance changes when a settled V3 trade is added
+- all Current Experiment totals reconcile across all three strategies
+- Strictly Paired Head-to-Head excludes rows missing any one strategy
+- timing-mismatched records are excluded
+- V3 can win Preliminary Leader when its qualifying metrics are best
+- V3 can supply Best Paper Bet Today when it has the best eligible signal
+
+Do not alter prediction, trade, or settlement logic. This is analytics aggregation and labeling only.
