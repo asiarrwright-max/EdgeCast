@@ -730,6 +730,7 @@ async def get_paper_trade_metrics(
     strategy_version: str | None = None,
     strategy_versions: list[str] | None = None,
     is_executable: bool | None = None,
+    paired_only: bool = False,
 ) -> dict:
     """
     Calculate summary metrics.
@@ -738,6 +739,8 @@ async def get_paper_trade_metrics(
     strategy_versions — restrict to a list of versions (e.g. ['v2.1','v2.2'])
     is_executable     — filter on the is_executable flag; None = no filter
                         (legacy V1/V2 rows have NULL, which only matches when None)
+    paired_only       — when True, restrict to trades with a non-NULL
+                        comparison_snapshot_id (strictly paired head-to-head)
     """
     q = select(PaperTrade).where(PaperTrade.status != "V2_EXCLUDED")
     if strategy_version:
@@ -746,6 +749,8 @@ async def get_paper_trade_metrics(
         q = q.where(PaperTrade.strategy_version.in_(strategy_versions))
     if is_executable is not None:
         q = q.where(PaperTrade.is_executable == is_executable)
+    if paired_only:
+        q = q.where(PaperTrade.comparison_snapshot_id.isnot(None))
     trades_q = await session.execute(q)
     all_trades = trades_q.scalars().all()
 

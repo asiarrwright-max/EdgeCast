@@ -171,7 +171,7 @@ export default function PaperTradingPage() {
   const [spreadAdj, setSpreadAdj] = useState(0);
   const [adjMode, setAdjMode] = useState(false);
   const [calibStratVer, setCalibStratVer] = useState("");
-  const [segment, setSegment] = useState("current_exec");
+  const [segment, setSegment] = useState("current_exp");
 
   // Settings edit state
   const [editSettings, setEditSettings] = useState(false);
@@ -285,28 +285,20 @@ export default function PaperTradingPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           {/* Segment selector */}
-          <div className="flex rounded-lg overflow-hidden border border-gray-200 text-xs font-medium">
-            {(
-              [
-                { value: "current_exec", label: "Current Experiment" },
-                { value: "legacy",       label: "Legacy (V1+V2)"    },
-                { value: "research",     label: "Research Signals"  },
-                { value: "all",          label: "All (unfiltered)"  },
-              ] as const
-            ).map(({ value, label }) => (
-              <button
-                key={value}
-                onClick={() => setSegment(value)}
-                className={`px-3 py-1.5 border-r last:border-r-0 border-gray-200 transition-colors ${
-                  segment === value
-                    ? "bg-blue-600 text-white"
-                    : "bg-white text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <select
+            value={segment}
+            onChange={(e) => setSegment(e.target.value)}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700"
+            style={{ maxWidth: "280px" }}
+          >
+            <option value="current_exp">Current Experiment — V2.1 + V2.2 + V3</option>
+            <option value="current_v2">Corrected-Bias Comparison — V2.1 vs V2.2</option>
+            <option value="v3_challenger">V3 Historical-Preload Challenger</option>
+            <option value="paired">Strictly Paired Head-to-Head</option>
+            <option value="legacy">Legacy Baseline — V1.0 + V2.0</option>
+            <option value="research">Research Signals — Non-Executable</option>
+            <option value="all">All Versions Unfiltered ⚠</option>
+          </select>
           <button
             onClick={handleSettleNow}
             disabled={settling}
@@ -372,10 +364,13 @@ export default function PaperTradingPage() {
         <p className="text-xs text-gray-400">
           Metrics below:{" "}
           <span className="font-medium text-gray-600">
-            {segment === "current_exec" && "V2.1 + V2.2 executable trades — official performance benchmark"}
-            {segment === "legacy"       && "V1.0 + V2.0 historical baseline (pre-station/sigma corrections)"}
-            {segment === "research"     && "V2.1 + V2.2 non-executable research signals — not real bets"}
-            {segment === "all"          && "All versions combined — see Strategy Breakdown below for clean split"}
+            {segment === "current_exp"   && "V2.1 + V2.2 + V3 executable — settled stats from V2.1+V2.2 (V3 has no settled trades yet)"}
+            {segment === "current_v2"    && "V2.1 + V2.2 executable only — corrected-bias comparison, excludes V3"}
+            {segment === "v3_challenger" && "V3 executable only — historical-preload challenger; open positions only"}
+            {segment === "paired"        && "Strictly paired V2.1+V2.2+V3 with shared comparison_snapshot_id — 0 settled so far"}
+            {segment === "legacy"        && "V1.0 + V2.0 historical baseline (pre-station/sigma corrections)"}
+            {segment === "research"      && "V2.1 + V2.2 non-executable research signals — not real bets"}
+            {segment === "all"           && "All versions combined — see Strategy Breakdown below for clean split"}
           </span>
         </p>
         <SampleBar settled={settledCount} />
@@ -392,7 +387,7 @@ export default function PaperTradingPage() {
             by the legacy cohort and are not valid measures of current strategy performance.{" "}
             <button
               className="underline font-medium text-orange-800"
-              onClick={() => setSegment("current_exec")}
+              onClick={() => setSegment("current_exp")}
             >
               Switch to Current Experiment
             </button>{" "}
@@ -483,25 +478,34 @@ export default function PaperTradingPage() {
                 </thead>
                 <tbody>
                   {(segmentSummary.rows as SegmentSummaryRow[]).map((row) => {
-                    const isOfficial    = row.group === "current_exec";
+                    const isOfficial    = row.group === "current_exec" || row.group === "v3";
+                    const isV3          = row.group === "v3";
                     const isLegacy      = row.group === "legacy";
                     const isResearch    = row.group === "current_nonexec";
+                    const groupLabel =
+                      row.group === "current_exec"    ? "current experiment" :
+                      row.group === "current_nonexec" ? "research signal"    :
+                      row.group === "v3"              ? "V3 challenger"       :
+                      row.group === "legacy"          ? "legacy baseline"    :
+                      row.group.replace(/_/g, " ");
                     return (
                       <tr
                         key={`${row.version}-${row.isExecutable}`}
                         className={`border-t border-gray-100 ${
-                          isOfficial ? "bg-blue-50/60" :
-                          isLegacy   ? "bg-amber-50/40" :
-                          isResearch ? "bg-gray-50" : ""
+                          isV3       ? "bg-cyan-50/40"   :
+                          isOfficial ? "bg-blue-50/60"   :
+                          isLegacy   ? "bg-amber-50/40"  :
+                          isResearch ? "bg-gray-50"      : ""
                         }`}
                       >
                         <td className="px-4 py-2 font-medium text-gray-800">
                           {row.version}
-                          {isOfficial  && <span className="ml-1.5 text-blue-600 font-normal">✓ official</span>}
-                          {isLegacy    && <span className="ml-1.5 text-amber-600 font-normal">legacy</span>}
-                          {isResearch  && <span className="ml-1.5 text-gray-400 font-normal">signal</span>}
+                          {isV3       && <span className="ml-1.5 text-cyan-600 font-normal">✓ official (V3)</span>}
+                          {!isV3 && isOfficial && <span className="ml-1.5 text-blue-600 font-normal">✓ official</span>}
+                          {isLegacy   && <span className="ml-1.5 text-amber-600 font-normal">legacy</span>}
+                          {isResearch && <span className="ml-1.5 text-gray-400 font-normal">signal</span>}
                         </td>
-                        <td className="px-3 py-2 text-gray-400">{row.group.replace(/_/g, " ")}</td>
+                        <td className="px-3 py-2 text-gray-400">{groupLabel}</td>
                         <td className="text-center px-3 py-2">
                           {row.isExecutable === true  ? <span className="text-green-600 font-bold">✓</span> :
                            row.isExecutable === false ? <span className="text-red-400">✗</span> :

@@ -212,12 +212,20 @@ async def run_verification(
     }
 
 
-# Maps segment name → filter kwargs for get_paper_trade_metrics
-_SEGMENT_FILTERS: dict[str, dict] = {
-    "current_exec": {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True},
-    "legacy":       {"strategy_versions": ["v1.0", "v2.0"]},
-    "research":     {"strategy_versions": ["v2.1", "v2.2"], "is_executable": False},
-    # "all" → no extra filters (existing behaviour)
+# Maps segment name → filter kwargs for get_paper_trade_metrics.
+# None value = handled entirely by special-case code in the endpoint.
+_SEGMENT_FILTERS: dict[str, dict | None] = {
+    # All current-experiment strategies (V2.1+V2.2 from paper_trades; V3 augmented)
+    "current_exp":    {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True},
+    # Corrected-bias comparison only (excludes V3)
+    "current_v2":     {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True},
+    # V3 Historical-Preload Challenger — queries v3_paper_trades directly
+    "v3_challenger":  None,
+    # Strictly paired head-to-head (comparison_snapshot_id must be non-null)
+    "paired":         {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True, "paired_only": True},
+    "legacy":         {"strategy_versions": ["v1.0", "v2.0"]},
+    "research":       {"strategy_versions": ["v2.1", "v2.2"], "is_executable": False},
+    # "all" / omitted → no extra filters
 }
 
 
@@ -231,21 +239,97 @@ async def get_metrics(
     """
     Aggregated summary statistics.
 
-    segment (optional): one of "current_exec" | "legacy" | "research" | "all"
-      current_exec  — V2.1 + V2.2 executable trades only (default recommended view)
-      legacy        — V1.0 + V2.0 historical baseline
-      research      — V2.1 + V2.2 non-executable research signals
-      all / omitted — unfiltered combined view (contaminates legacy with current)
+    segment — one of:
+      current_exp    — V2.1 + V2.2 + V3 executable (default recommended view).
+                       Settled stats come from V2.1+V2.2 only because V3 has no
+                       settled trades yet; V3 open counts are augmented separately.
+      current_v2     — V2.1 + V2.2 executable only (corrected-bias comparison).
+      v3_challenger  — V3 executable only (queries v3_paper_trades).
+      paired         — strictly paired V2.1+V2.2 (shared comparison_snapshot_id).
+      legacy         — V1.0 + V2.0 historical baseline.
+      research       — V2.1 + V2.2 non-executable research signals.
+      all / omitted  — unfiltered combined view (legacy + current contaminated).
 
-    strategy_version (optional): further narrow to a single version string.
+    strategy_version — further narrow to a single version string.
     """
-    seg_filters = _SEGMENT_FILTERS.get(segment or "", {})
-    result = await get_paper_trade_metrics(
-        db,
-        strategy_version=strategy_version,
-        strategy_versions=seg_filters.get("strategy_versions"),
-        is_executable=seg_filters.get("is_executable"),
-    )
+    from sqlalchemy import text as sql_text
+
+    seg = segment or ""
+
+    # ── V3 Challenger: separate table, build metrics directly ─────────────────
+    if seg == "v3_challenger":
+        v3_sql = sql_text("""
+            SELECT
+                COUNT(*) FILTER (WHERE status = 'OPEN'     AND is_executable = true) AS open_exec,
+                COUNT(*) FILTER (WHERE status = 'SETTLED'  AND is_executable = true) AS settled_exec,
+                COUNT(*) FILTER (WHERE status = 'SETTLED'  AND is_executable = true
+                                  AND outcome = 'WIN')                               AS wins,
+                COALESCE(SUM(stake)
+                    FILTER (WHERE status = 'OPEN'    AND is_executable = true), 0)   AS open_stake,
+                COALESCE(SUM(stake)
+                    FILTER (WHERE status = 'SETTLED' AND is_executable = true), 0)   AS settled_stake,
+                COALESCE(SUM(profit_loss)
+                    FILTER (WHERE status = 'SETTLED' AND is_executable = true), 0)   AS settled_pl,
+                AVG(edge_pct_points)
+                    FILTER (WHERE is_executable = true)                               AS avg_edge,
+                AVG(market_yes_probability)
+                    FILTER (WHERE is_executable = true)                               AS avg_price
+            FROM v3_paper_trades
+        """)
+        r = (await db.execute(v3_sql)).mappings().one()
+        open_n        = int(r["open_exec"]    or 0)
+        settled_n     = int(r["settled_exec"] or 0)
+        wins          = int(r["wins"]         or 0)
+        settled_stake = float(r["settled_stake"] or 0)
+        settled_pl    = float(r["settled_pl"]    or 0)
+        result: dict = {
+            "openCount":      open_n,
+            "settledCount":   settled_n,
+            "voidCount":      0,
+            "totalCount":     open_n + settled_n,
+            "wins":           wins,
+            "losses":         settled_n - wins,
+            "winRate":        round(wins / settled_n, 4) if settled_n > 0 else None,
+            "totalStaked":    round(float(r["open_stake"] or 0) + settled_stake, 4),
+            "netProfitLoss":  settled_pl,
+            "roi":            round(settled_pl / settled_stake * 100, 2) if settled_stake > 0 else None,
+            "avgEntryEdge":   float(r["avg_edge"])  if r["avg_edge"]  is not None else None,
+            "avgEntryPrice":  float(r["avg_price"]) if r["avg_price"] is not None else None,
+            "avgWinEdge":     None,
+            "avgLossEdge":    None,
+            "byDirection":    [], "byConfidence": [], "byCity": [], "byContractType": [],
+            "sampleSizeWarning": settled_n < 20,
+            "preliminaryNote": (
+                "V3 has no settled executable trades yet — metrics reflect open positions only."
+                if settled_n == 0 else None
+            ),
+        }
+
+    # ── All other segments: query paper_trades via service ────────────────────
+    else:
+        seg_filters = _SEGMENT_FILTERS.get(seg) or {}
+        result = await get_paper_trade_metrics(
+            db,
+            strategy_version=strategy_version,
+            strategy_versions=seg_filters.get("strategy_versions"),
+            is_executable=seg_filters.get("is_executable"),
+            paired_only=bool(seg_filters.get("paired_only", False)),
+        )
+
+        # Augment "current_exp" with V3 executable open counts
+        if seg == "current_exp":
+            v3_open_exec = (await db.execute(
+                select(func.count(V3PaperTrade.id))
+                .where(V3PaperTrade.status == "OPEN", V3PaperTrade.is_executable == True)
+            )).scalar_one() or 0
+            v3_open_stake = (await db.execute(
+                select(func.sum(V3PaperTrade.stake))
+                .where(V3PaperTrade.status == "OPEN", V3PaperTrade.is_executable == True)
+            )).scalar_one() or 0.0
+            result["openCount"]       = (result.get("openCount")  or 0) + v3_open_exec
+            result["totalCount"]      = (result.get("totalCount") or 0) + v3_open_exec
+            result["totalStaked"]     = round((result.get("totalStaked") or 0) + float(v3_open_stake), 4)
+            result["v3OpenExecCount"] = v3_open_exec
 
     # ── Closing-today counts (pipeline ops — always all strategies, all segments) ──
     today = datetime.utcnow().date().isoformat()  # e.g. "2026-08-01"
