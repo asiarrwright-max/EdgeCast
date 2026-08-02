@@ -784,6 +784,9 @@ def compute_metrics_from_trades(trades: list) -> dict:
             })
         return result
 
+    settled_stake = round(total_staked_settled, 4)
+    open_capital  = round(sum(t.stake or 0 for t in open_t), 4)
+
     return {
         "openCount":      len(open_t),
         "settledCount":   len(settled_t),
@@ -792,7 +795,9 @@ def compute_metrics_from_trades(trades: list) -> dict:
         "wins":           len(wins),
         "losses":         len(losses),
         "winRate":        round(win_rate, 4) if win_rate is not None else None,
-        "totalStaked":    round(sum(t.stake or 0 for t in trades if t.status in ("OPEN", "SETTLED")), 4),
+        "settledStake":   settled_stake,
+        "openCapital":    open_capital,
+        "totalStaked":    round(settled_stake + open_capital, 4),
         "netProfitLoss":  round(net_pl, 4),
         "roi":            round(roi, 4) if roi is not None else None,
         "avgEntryEdge":   avg(all_edges),
@@ -847,7 +852,8 @@ def _empty_metrics() -> dict:
     return {
         "openCount": 0, "settledCount": 0, "voidCount": 0, "totalCount": 0,
         "wins": 0, "losses": 0, "winRate": None,
-        "totalStaked": 0.0, "netProfitLoss": 0.0, "roi": None,
+        "settledStake": 0.0, "openCapital": 0.0, "totalStaked": 0.0,
+        "netProfitLoss": 0.0, "roi": None,
         "avgEntryEdge": None, "avgEntryPrice": None,
         "avgWinEdge": None, "avgLossEdge": None,
         "byDirection": [], "byConfidence": [], "byCity": [], "byContractType": [],
@@ -861,6 +867,8 @@ def _empty_metrics() -> dict:
 async def get_paper_trade_analytics(
     session: AsyncSession,
     strategy_version: str | None = None,
+    strategy_versions: list[str] | None = None,
+    is_executable: bool | None = None,
     include_flagged: bool = True,
     fee_pct: float = 0.0,
     slippage_pct: float = 0.0,
@@ -869,13 +877,27 @@ async def get_paper_trade_analytics(
     """
     Performance breakdowns for settled paper trades.
 
+    strategy_version   — legacy single-version filter (exact match)
+    strategy_versions  — restrict to a list of versions (takes precedence if set)
+    is_executable      — filter on is_executable flag; None = no filter
     Realistic-result adjustments:
       adj_pl = raw_pl - stake * (fee_pct + slippage_pct + spread_adj) / 100
     These are simplified model approximations; clearly labelled in the UI.
     """
-    q = select(PaperTrade)
-    if strategy_version:
+    # Always exclude V2_EXCLUDED and TEST_EXCLUDED from analytics
+    q = select(PaperTrade).where(
+        PaperTrade.status.notin_(["V2_EXCLUDED", "TEST_EXCLUDED"])
+    )
+    if strategy_versions is not None:
+        # Empty list ⇒ caller wants no results (e.g. v3_challenger — V3 lives in v3_paper_trades)
+        if not strategy_versions:
+            q = q.where(PaperTrade.strategy_version.in_([]))
+        else:
+            q = q.where(PaperTrade.strategy_version.in_(strategy_versions))
+    elif strategy_version:
         q = q.where(PaperTrade.strategy_version == strategy_version)
+    if is_executable is not None:
+        q = q.where(PaperTrade.is_executable == is_executable)
     result = await session.execute(q)
     all_trades = result.scalars().all()
 
@@ -989,11 +1011,15 @@ _CALIBRATION_BUCKETS = [
 async def get_calibration_report(
     session: AsyncSession,
     strategy_version: str | None = None,
+    strategy_versions: list[str] | None = None,
+    is_executable: bool | None = None,
 ) -> dict:
     """
     Compare EdgeCast YES-probability estimates against actual Kalshi settlement.
     Uses only SETTLED non-void trades with a known ec_yes_probability.
 
+    strategy_versions  — restrict to a list of versions (takes precedence if set)
+    is_executable      — filter on is_executable flag; None = no filter
     Brier score = (1/n) * Σ (ec_prob − actual_yes)²
     where actual_yes = 1 if market settled YES, 0 if NO.
     """
@@ -1005,8 +1031,15 @@ async def get_calibration_report(
             PaperTrade.ec_yes_probability.isnot(None),
         )
     )
-    if strategy_version:
+    if strategy_versions is not None:
+        if not strategy_versions:
+            q = q.where(PaperTrade.strategy_version.in_([]))
+        else:
+            q = q.where(PaperTrade.strategy_version.in_(strategy_versions))
+    elif strategy_version:
         q = q.where(PaperTrade.strategy_version == strategy_version)
+    if is_executable is not None:
+        q = q.where(PaperTrade.is_executable == is_executable)
     result = await session.execute(q)
     trades = result.scalars().all()
 

@@ -531,8 +531,26 @@ async def get_segment_summary(
     return {"rows": rows}
 
 
+# ── Segment → analytics filter mapping ───────────────────────────────────────
+# Maps segment name → kwargs forwarded to get_paper_trade_analytics /
+# get_calibration_report.  Omitted keys → no filter applied.
+# V3 lives in v3_paper_trades (separate table), so analytics for V3-only
+# segments return empty until V3 trades settle and are joined here.
+_ANALYTICS_SEGMENT_FILTERS: dict[str, dict] = {
+    "current_exp":   {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True},
+    "current_v2":    {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True},
+    "paired":        {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True},
+    "paired_v2":     {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True},
+    "v3_challenger": {"strategy_versions": [],                "is_executable": True},
+    "legacy":        {"strategy_versions": ["v1.0", "v2.0"], "is_executable": None},
+    "research":      {"strategy_versions": ["v2.1", "v2.2"], "is_executable": False},
+    # "all" is intentionally absent → no filter (full contaminated view)
+}
+
+
 @router.get("/paper-trades/analytics")
 async def get_analytics(
+    segment: str | None = Query(default=None),
     strategy_version: str | None = Query(default=None),
     include_flagged: bool = Query(default=True),
     fee_pct: float = Query(default=0.0, ge=0.0, le=100.0),
@@ -545,13 +563,22 @@ async def get_analytics(
     Performance breakdowns by direction, edge bucket, price bucket, city,
     contract type, and lead time, plus cumulative and daily P/L series.
 
+    segment — one of the same segments accepted by /paper-trades/metrics
+      (current_exp, current_v2, v3_challenger, paired, paired_v2, legacy,
+       research, all).  When supplied, overrides strategy_version and sets
+       appropriate is_executable filter automatically.  Omit or pass "all"
+       for the unfiltered view.
+
     Optional realistic-result adjustments (fee_pct, slippage_pct, spread_adj
     expressed as % of stake) produce adjProfitLoss / adjRoi alongside raw figures.
     These are simplified model approximations — not guaranteed real-world performance.
     """
+    seg_filters = _ANALYTICS_SEGMENT_FILTERS.get(segment or "", {})
     return await get_paper_trade_analytics(
         db,
-        strategy_version=strategy_version,
+        strategy_version=strategy_version if not seg_filters else None,
+        strategy_versions=seg_filters.get("strategy_versions"),
+        is_executable=seg_filters.get("is_executable"),
         include_flagged=include_flagged,
         fee_pct=fee_pct,
         slippage_pct=slippage_pct,
@@ -561,6 +588,7 @@ async def get_analytics(
 
 @router.get("/paper-trades/calibration")
 async def get_calibration(
+    segment: str | None = Query(default=None),
     strategy_version: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(get_current_user),
@@ -569,8 +597,16 @@ async def get_calibration(
     Probability calibration report comparing EdgeCast YES-probability estimates
     against actual Kalshi settlement outcomes, plus overall Brier score.
     Uses only settled (non-void) trades.
+
+    segment — same as /paper-trades/analytics; overrides strategy_version when set.
     """
-    return await get_calibration_report(db, strategy_version=strategy_version)
+    seg_filters = _ANALYTICS_SEGMENT_FILTERS.get(segment or "", {})
+    return await get_calibration_report(
+        db,
+        strategy_version=strategy_version if not seg_filters else None,
+        strategy_versions=seg_filters.get("strategy_versions"),
+        is_executable=seg_filters.get("is_executable"),
+    )
 
 
 @router.post("/paper-trades/settle-now")

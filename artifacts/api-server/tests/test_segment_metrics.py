@@ -29,7 +29,7 @@ from app.routers.strategy_comparison import _preliminary_leader, _best_bet_today
 # Helpers
 # ---------------------------------------------------------------------------
 
-NOW = datetime(2026, 8, 1, 14, 0, 0, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc)  # always fresh; hardcoded date would fail staleness check
 SNAP_A = str(uuid.uuid4())
 SNAP_B = str(uuid.uuid4())
 

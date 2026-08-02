@@ -164,13 +164,11 @@ export default function PaperTradingPage() {
   const [outcomeF, setOutcomeF] = useState("");
 
   // Analytics/calibration state
-  const [analyticsStratVer, setAnalyticsStratVer] = useState("");
   const [includeFlagged, setIncludeFlagged] = useState(true);
   const [feePct, setFeePct] = useState(0);
   const [slippagePct, setSlippagePct] = useState(0);
   const [spreadAdj, setSpreadAdj] = useState(0);
   const [adjMode, setAdjMode] = useState(false);
-  const [calibStratVer, setCalibStratVer] = useState("");
   const [segment, setSegment] = useState("current_exp");
 
   // Settings edit state
@@ -200,24 +198,21 @@ export default function PaperTradingPage() {
   if (isFlaggedF !== "") listParams.is_flagged = isFlaggedF === "true";
   if (outcomeF) listParams.outcome = outcomeF;
 
-  // Build analytics params
+  // Build analytics params — segment drives the filter, not a standalone version picker
   const analyticsParams: Record<string, any> = {
+    segment,
     include_flagged: includeFlagged,
     fee_pct: adjMode ? feePct : 0,
     slippage_pct: adjMode ? slippagePct : 0,
     spread_adj: adjMode ? spreadAdj : 0,
   };
-  if (analyticsStratVer) analyticsParams.strategy_version = analyticsStratVer;
-  if (calibStratVer) analyticsParams.strategy_version_calib = calibStratVer; // won't be used, separate
 
   const { data: listData } = useListPaperTrades(listParams);
   const { data: metrics, refetch: refetchMetrics } = useGetPaperTradeMetrics({ segment });
   const { data: segmentSummary } = useGetPaperTradeSegmentSummary();
   const { data: settings } = useGetPaperTradeSettings();
   const { data: analytics } = useGetPaperTradeAnalytics(analyticsParams);
-  const { data: calibration } = useGetPaperTradeCalibration(
-    calibStratVer ? { strategy_version: calibStratVer } : {}
-  );
+  const { data: calibration } = useGetPaperTradeCalibration({ segment });
   const { data: comparison } = useGetStrategyComparison();
   const { data: agreement } = useGetStrategyAgreement();
   const updateSettings = useUpdatePaperTradeSettings();
@@ -286,6 +281,7 @@ export default function PaperTradingPage() {
         <div className="flex items-center gap-2 flex-wrap justify-end">
           {/* Segment selector */}
           <select
+            data-segment-select
             value={segment}
             onChange={(e) => setSegment(e.target.value)}
             className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700"
@@ -428,10 +424,20 @@ export default function PaperTradingPage() {
               : undefined
           }
         />
-        <MetricCard label="Total Staked" value={money(metrics?.totalStaked)} />
+        <MetricCard
+          label="Settled Stake"
+          value={money(metrics?.settledStake ?? metrics?.totalStaked)}
+          sub="ROI denominator"
+        />
+        <MetricCard
+          label="Open Capital"
+          value={money(metrics?.openCapital ?? 0)}
+          sub={`Total exposure: ${money((metrics?.settledStake ?? 0) + (metrics?.openCapital ?? 0))}`}
+        />
         <MetricCard
           label="ROI"
           value={pct(metrics?.roi == null ? null : metrics.roi / 100, 2)}
+          sub="on settled stake only"
           highlight={
             metrics?.roi == null
               ? undefined
@@ -488,7 +494,7 @@ export default function PaperTradingPage() {
                       row.group === "current_nonexec" ? "research signal"    :
                       row.group === "v3"              ? "V3 challenger"       :
                       row.group === "legacy"          ? "legacy baseline"    :
-                      row.group.replace(/_/g, " ");
+                      (row.group as string).replace(/_/g, " ");
                     return (
                       <tr
                         key={`${row.version}-${row.isExecutable}`}
@@ -843,20 +849,48 @@ export default function PaperTradingPage() {
       {/* Analytics */}
       <Section title="Performance Analytics" defaultOpen>
         <div className="px-4 py-3 space-y-4">
+          {/* Segment context + contamination warning */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-gray-500">
+              Showing:{" "}
+              <span className="font-medium text-gray-700">
+                {segment === "current_exp"   && "Current Experiment — V2.1 + V2.2 executable (V3 contributes after first settlement)"}
+                {segment === "current_v2"    && "Corrected-Bias Comparison — V2.1 + V2.2 executable only"}
+                {segment === "v3_challenger" && "V3 Historical-Preload Challenger — no settled trades yet; breakdowns empty"}
+                {segment === "paired"        && "Strictly Paired — V2.1 + V2.2 executable (V3 adds to analytics after settlement)"}
+                {segment === "paired_v2"     && "Corrected-Bias Paired — V2.1 + V2.2 executable only"}
+                {segment === "legacy"        && "Legacy Baseline — V1.0 + V2.0 (pre-station/sigma corrections)"}
+                {segment === "research"      && "Research Signals — V2.1 + V2.2 non-executable only"}
+                {segment === "all"           && "All Versions Unfiltered ⚠"}
+              </span>
+              {" · "}
+              <button
+                className="underline text-blue-500 hover:text-blue-700"
+                onClick={() => document.querySelector<HTMLSelectElement>("[data-segment-select]")?.focus()}
+              >
+                change segment
+              </button>
+            </p>
+          </div>
+
+          {segment === "all" && (
+            <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm">
+              <p className="font-semibold text-orange-800">⚠ Contaminated analytics</p>
+              <p className="text-xs text-orange-700 mt-1">
+                This view mixes legacy V1/V2 trades, current-experiment executable trades, non-executable
+                research signals, and V3 open positions. All breakdowns below — direction, edge,
+                city, lead time, cumulative P/L — are dominated by the legacy cohort and are not valid
+                measures of current strategy performance.{" "}
+                <button className="underline font-medium text-orange-800" onClick={() => setSegment("current_exp")}>
+                  Switch to Current Experiment
+                </button>
+                {" "}for the clean view.
+              </p>
+            </div>
+          )}
+
           {/* Controls */}
           <div className="flex flex-wrap gap-3 items-end text-sm">
-            <label className="flex items-center gap-2 text-gray-600">
-              Strategy version:
-              <select
-                value={analyticsStratVer}
-                onChange={(e) => setAnalyticsStratVer(e.target.value)}
-                className="border border-gray-300 rounded px-2 py-1 text-sm"
-              >
-                <option value="">All</option>
-                <option value="v1.0">v1.0</option>
-                <option value="v2.0">v2.0</option>
-              </select>
-            </label>
             <label className="flex items-center gap-2 text-gray-600">
               <input
                 type="checkbox"
@@ -973,19 +1007,20 @@ export default function PaperTradingPage() {
       {/* Calibration */}
       <Section title="Probability Calibration">
         <div className="px-4 py-3 space-y-3">
-          <div className="flex items-center gap-3 text-sm">
-            <label className="flex items-center gap-2 text-gray-600">
-              Strategy version:
-              <select
-                value={calibStratVer}
-                onChange={(e) => setCalibStratVer(e.target.value)}
-                className="border border-gray-300 rounded px-2 py-1 text-sm"
-              >
-                <option value="">All</option>
-                <option value="v1.0">v1.0</option>
-                <option value="v2.0">v2.0</option>
-              </select>
-            </label>
+          <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+            <p className="text-xs text-gray-500">
+              Showing:{" "}
+              <span className="font-medium text-gray-700">
+                {segment === "current_exp"   && "Current Experiment — V2.1 + V2.2 executable"}
+                {segment === "current_v2"    && "Corrected-Bias — V2.1 + V2.2 executable"}
+                {segment === "v3_challenger" && "V3 Challenger — no settled trades yet"}
+                {segment === "paired"        && "Strictly Paired — V2.1 + V2.2 executable"}
+                {segment === "paired_v2"     && "Corrected-Bias Paired — V2.1 + V2.2 executable"}
+                {segment === "legacy"        && "Legacy — V1.0 + V2.0"}
+                {segment === "research"      && "Research Signals — non-executable"}
+                {segment === "all"           && "All Versions ⚠ (legacy contaminated)"}
+              </span>
+            </p>
             {calibration?.brierScore != null && (
               <span className="text-xs text-gray-500">
                 Brier score:{" "}
@@ -996,6 +1031,20 @@ export default function PaperTradingPage() {
               </span>
             )}
           </div>
+
+          {segment === "all" && (
+            <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-2 text-xs">
+              <span className="font-semibold text-orange-800">⚠ Contaminated calibration: </span>
+              <span className="text-orange-700">
+                Brier score and bucket counts include legacy V1/V2 trades whose probability
+                engine differs significantly from V2.1/V2.2. Results are not valid for current
+                strategy calibration assessment.{" "}
+              </span>
+              <button className="underline font-medium text-orange-800" onClick={() => setSegment("current_exp")}>
+                Switch to Current Experiment
+              </button>
+            </div>
+          )}
 
           {calibration ? (
             <div className="overflow-x-auto">

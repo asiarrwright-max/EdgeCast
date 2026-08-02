@@ -524,6 +524,11 @@ export interface PaperTradeSummary {
   losses: number;
   /** @nullable */
   winRate?: number | null;
+  /** Stake on settled trades only — the ROI denominator */
+  settledStake?: number;
+  /** Capital deployed in open (unsettled) positions */
+  openCapital?: number;
+  /** settledStake + openCapital — total paper exposure; not the ROI denominator */
   totalStaked: number;
   netProfitLoss: number;
   /** @nullable */
@@ -598,6 +603,8 @@ segment?: string;
 };
 
 export type GetPaperTradeAnalyticsParams = {
+/** Segment filter — same values as /paper-trades/metrics segment param */
+segment?: string;
 strategy_version?: string;
 include_flagged?: boolean;
 fee_pct?: number;
@@ -606,6 +613,8 @@ spread_adj?: number;
 };
 
 export type GetPaperTradeCalibrationParams = {
+/** Segment filter — same values as /paper-trades/metrics segment param */
+segment?: string;
 strategy_version?: string;
 };
 

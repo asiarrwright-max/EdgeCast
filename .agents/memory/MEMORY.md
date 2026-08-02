@@ -17,3 +17,4 @@
 - [v3-same-day-contract-staleness](v3-same-day-contract-staleness.md) — extreme edges (74–94pp) for same-day TLOW contracts are spurious; market reflects morning's observed temp while V3 holds prior GFS forecast; is_executable=False screens these out.
 - [v22-isolation-architecture](v22-isolation-architecture.md) — V2.2 is one changed mu line in probability_engine_v22.py; trades in paper_trades with strategy_version="v2.2"; flags default false; V3 analytics split into executable/non-executable/observation-only.
 - [asyncmock-add-side-effect](asyncmock-add-side-effect.md) — session.add is sync in SQLAlchemy; AsyncMock() makes it AsyncMock which never fires side_effect on bare call; must set session.add = MagicMock(side_effect=fn).
+- [test-quote-timestamp-freshness](test-quote-timestamp-freshness.md) — Hardcoded datetimes in test fixtures fail _is_quote_fresh (4h window) the next day; use datetime.now(timezone.utc) for quote_timestamp.
