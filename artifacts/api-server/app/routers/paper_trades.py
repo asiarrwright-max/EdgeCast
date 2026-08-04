@@ -67,6 +67,13 @@ FORWARD_TEST_SETTLED_TARGET = 50
 # strategy stability, and drawdown — never flip automatically.
 MANUAL_READINESS_APPROVAL: bool = False
 
+# Job types written by app/services/collector.py that scan markets and create
+# paper-trade candidates.  Only these runs define a "collection batch" window
+# for the "Why no official bet?" reason breakdown.
+#   "manual"    = operator-triggered via POST /api/jobs/trigger
+#   "scheduled" = background scheduler tick
+COLLECTION_JOB_TYPES: tuple[str, ...] = ("manual", "scheduled")
+
 # Eligibility reason codes → human-readable labels for the "Why no bet?" panel.
 ELIGIBILITY_REASON_LABELS: dict[str, str] = {
     "missing_or_stale_executable_quote": "Stale or missing quote",
@@ -858,9 +865,14 @@ async def get_forward_test_status(
     now_utc = datetime.now(tz=timezone.utc)
     _BATCH_STALE_HOURS = 25  # treat a job older than this as stale
 
+    # Filter to collection-only job types (defined at module level).
+    # See: COLLECTION_JOB_TYPES constant below the forward-test constants block.
+
     latest_job = (
         await db.execute(
             select(JobRun)
+            .where(JobRun.job_type.in_(COLLECTION_JOB_TYPES))
+            .where(JobRun.status == "success")
             .where(JobRun.completed_at.is_not(None))
             .order_by(JobRun.completed_at.desc())
             .limit(1)
