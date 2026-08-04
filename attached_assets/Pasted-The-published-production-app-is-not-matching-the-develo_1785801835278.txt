@@ -1,0 +1,61 @@
+The published production app is not matching the development app.
+
+On the published edge-cast.replit.app site:
+
+- Strategy Comparison shows 0 total markets
+- V2.1, V2.2, and V3 all show 0 predictions, trades, and settlements
+- The page says V2.2 and V3 predictions/paper trading are disabled
+- The Paper Trading page still defaults to “All versions” and shows the legacy-contaminated totals:
+  - 944 settled
+  - 23.6% win rate
+  - -60.6% ROI
+- The newer Current Experiment segment selector and current strategy data are not appearing correctly
+
+Please perform a production-versus-development reconciliation.
+
+Check and report:
+
+1. Which database URL the development app uses
+2. Which database URL the published production app uses
+3. Whether production has the required tables:
+   - prediction_snapshots
+   - paper_trades
+   - forecast_error_stats
+   - v3_prediction_snapshots
+   - v3_paper_trades
+   - v3_error_stats
+   - app_settings
+4. Production row counts for each table by strategy version
+5. Production values for:
+   - v2.2.predictions_enabled
+   - v2.2.paper_trading_enabled
+   - v3.predictions_enabled
+   - v3.paper_trading_enabled
+6. Whether the production scheduler/background jobs are actually running
+7. Whether the latest frontend and backend deployment versions are live in production
+8. Whether production API calls are failing, unauthorized, or returning empty data
+
+Do not copy old development test records into production blindly.
+
+Preserve production data, but make production run the same current paper-trading system as development:
+
+- V2.1 active
+- V2.2 active in paper mode
+- V3 active in paper mode
+- no real Kalshi orders
+- all strategies stored separately
+- Current Experiment as the default Paper Trading segment
+- legacy V1/V2 results separated
+- non-executable research signals excluded from official metrics
+
+After fixing it, run one controlled production collection cycle and report:
+
+- V2.1 predictions/trades created
+- V2.2 predictions/trades created
+- V3 predictions/trades created
+- comparison IDs linked
+- duplicate/orphan counts
+- real Kalshi orders = 0
+- production Strategy Comparison page shows non-zero current data
+
+Do not change model formulas, thresholds, settlement logic, or historical records. This is a deployment, database, flags, and scheduler reconciliation only.

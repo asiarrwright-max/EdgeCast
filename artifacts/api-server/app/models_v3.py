@@ -49,13 +49,17 @@ from app.database import Base
 # v3.predictions_enabled   — Phase 3: enables V3 prediction hook in scheduler
 # v3.paper_trading_enabled — Phase 3: enables V3 settlement hook in scheduler
 #
-# All four default to "false" and are seeded by ensure_v3_feature_flags().
+# v3.ingestion_enabled defaults to "false" (Phase 1 data pipeline — managed
+# separately via the audit UI).  All other V3 flags default to "true" so that
+# predictions, paper trading, and validation are active on every deployment.
+# The startup upgrade in database._enable_required_flags() also upgrades any
+# existing "false" rows left by earlier deployments.
 
 V3_FLAG_DEFAULTS: dict[str, str] = {
-    "v3.ingestion_enabled":     "false",
-    "v3.validation_enabled":    "false",
-    "v3.predictions_enabled":   "false",
-    "v3.paper_trading_enabled": "false",
+    "v3.ingestion_enabled":     "false",  # Phase 1 only — never auto-enabled
+    "v3.validation_enabled":    "true",
+    "v3.predictions_enabled":   "true",
+    "v3.paper_trading_enabled": "true",
 }
 
 CURRENT_PRELOAD_VERSION = "v3.0"

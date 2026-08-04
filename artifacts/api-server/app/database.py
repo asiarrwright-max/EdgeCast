@@ -189,7 +189,47 @@ async def init_db() -> None:
         await ensure_v3_feature_flags(session)
         await ensure_v22_feature_flags(session)
         await session.commit()
+    # Upgrade any feature flags that exist in the DB as "false" but should be
+    # active in the current paper-trading system.  This is idempotent and safe
+    # to run on every startup — it only writes rows whose values are not already
+    # "true".  v3.ingestion_enabled is intentionally excluded (Phase-1 data
+    # pipeline, managed separately via the audit UI).
+    async with AsyncSessionLocal() as session:
+        await _enable_required_flags(session)
+        await session.commit()
     logger.info("Database ready.")
+
+
+_REQUIRED_ACTIVE_FLAGS: tuple[str, ...] = (
+    "v2.2.predictions_enabled",
+    "v2.2.paper_trading_enabled",
+    "v3.validation_enabled",
+    "v3.predictions_enabled",
+    "v3.paper_trading_enabled",
+)
+
+
+async def _enable_required_flags(session: AsyncSession) -> None:
+    """
+    Ensure that paper-trading feature flags that must be active are set to
+    'true'.  This upgrades rows that were seeded as 'false' by an older
+    deployment.  v3.ingestion_enabled is deliberately omitted — it is managed
+    through the V3 audit UI and must not be auto-enabled.
+    """
+    from app.models import AppSetting  # local import to avoid circular deps at module level
+
+    for key in _REQUIRED_ACTIVE_FLAGS:
+        result = await session.execute(
+            select(AppSetting).where(AppSetting.key == key)
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            session.add(AppSetting(key=key, value="true"))
+            logger.info("Startup: inserted flag %s = 'true'", key)
+        elif (row.value or "").lower() != "true":
+            old_val = row.value
+            row.value = "true"
+            logger.info("Startup: upgraded flag %s → 'true' (was %r)", key, old_val)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

@@ -74,8 +74,8 @@ STRATEGY_VERSION = "v2.2"
 # ── Feature flag names ────────────────────────────────────────────────────────
 
 V22_FLAG_DEFAULTS: dict[str, str] = {
-    "v2.2.predictions_enabled":    "false",
-    "v2.2.paper_trading_enabled":  "false",
+    "v2.2.predictions_enabled":   "true",
+    "v2.2.paper_trading_enabled": "true",
 }
 
 # ── Default settings (identical to V2.1) ─────────────────────────────────────
