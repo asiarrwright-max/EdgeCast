@@ -47,3 +47,21 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Secrets and environment variables — never commit these
+.env
+.env.*
+*.env
+.env.local
+.env.*.local
+secrets.json
+secrets.yaml
+secrets.yml
+*.pem
+*.key
+*.pfx
+*.p12
+*.cer
+id_rsa
+id_ecdsa
+id_ed25519
