@@ -197,6 +197,13 @@ async def init_db() -> None:
     async with AsyncSessionLocal() as session:
         await _enable_required_flags(session)
         await session.commit()
+    # Mark any job_runs still stuck in "running" as failed.  These are orphans
+    # left by a previous process that was killed mid-job (e.g. a deployment).
+    # Without this cleanup the /jobs/collect endpoint returns the stale row
+    # instead of starting a fresh collection.
+    async with AsyncSessionLocal() as session:
+        await _cleanup_orphaned_jobs(session)
+        await session.commit()
     logger.info("Database ready.")
 
 
@@ -230,6 +237,23 @@ async def _enable_required_flags(session: AsyncSession) -> None:
             old_val = row.value
             row.value = "true"
             logger.info("Startup: upgraded flag %s → 'true' (was %r)", key, old_val)
+
+
+async def _cleanup_orphaned_jobs(session: AsyncSession) -> None:
+    """
+    Mark any job_runs still in 'running' state as 'failed'.  These are orphans
+    left by a process that was killed mid-job (e.g. a deployment restart).
+    Without this cleanup the /jobs/collect endpoint returns the stale row
+    and refuses to start a fresh collection.
+    """
+    from app.models import JobRun  # local import to avoid circular deps
+
+    result = await session.execute(select(JobRun).where(JobRun.status == "running"))
+    orphans = result.scalars().all()
+    for job in orphans:
+        job.status = "failed"
+        job.error_message = "Orphaned – process was restarted before this job completed."
+        logger.info("Startup: marked orphaned job %d as failed (started %s)", job.id, job.started_at)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
