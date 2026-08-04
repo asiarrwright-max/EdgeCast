@@ -22,4 +22,5 @@
 - [official-trade-eligibility](official-trade-eligibility.md) — Eight-guard eligibility engine stamps paper trades OFFICIAL or RESEARCH_ONLY; two-pass batch runner enforces correlated-exposure limit before writing rows.
 - [quote-freshness-threshold](quote-freshness-threshold.md) — OFFICIAL_STALE_QUOTE_SECONDS=300; boundary `>300` so 300s passes; test fixtures must use <300s and anchor `now` for boundary tests.
 - [guard3-market-close-timestamp](guard3-market-close-timestamp.md) — Guard 3 uses Kalshi market close_time (≤120 min → RESEARCH_ONLY); target_settlement_date_str is Guard 2 only.
-- [best-bet-selected-side](best-bet-selected-side.md) — NO trades: selectedSideMarketProbability = 1−market_yes_probability; helper _selected_side_values() is testable; regression tests in test_best_bet_logic.py.
+- [best-bet-selected-side](best-bet-selected-side.md) — selectedSideMarketProbability = selectedSideAsk = side_market_price (executable ask); never 1−yes_prob; helper _selected_side_values() is testable.
+- [union-all-order-by](union-all-order-by.md) — PostgreSQL rejects ORDER BY expressions on UNION ALL; wrap in subquery and order by a named alias column.
