@@ -1,0 +1,98 @@
+The corrected Current Experiment analytics now show approximately:
+
+- 543 total paper trades
+- 466 settled
+- about 20% win rate
+- approximately -65% ROI
+- Brier score around 0.31
+- average claimed edge around 32.5 percentage points
+
+This is a major mismatch: EdgeCast is claiming very large average edge while losing most trades.
+
+Do not change any model formula yet. Perform a read-only forensic audit of the current V2.1, V2.2, and V3 settled executable trades.
+
+Exclude:
+
+- legacy V1/V2
+- non-executable signals
+- V2_EXCLUDED
+- TEST_EXCLUDED
+- superseded snapshots
+
+For each strategy separately, report:
+
+1. Settled executable count
+2. Wins and losses
+3. Gross and net ROI
+4. Brier score
+5. Average claimed edge for winners versus losers
+6. Average entry price for winners versus losers
+7. YES versus NO performance
+8. Threshold versus range-contract performance
+9. High-temperature versus low-temperature performance
+10. Same-day versus next-day performance
+11. Performance by city
+12. Performance by entry-price bucket:
+   - 1–9¢
+   - 10–19¢
+   - 20–39¢
+   - 40–60¢
+   - over 60¢
+13. Performance by claimed-edge bucket:
+   - 10–19pp
+   - 20–29pp
+   - 30–49pp
+   - 50pp+
+14. Number of correlated trades on the same city/date/weather outcome
+15. Unique underlying city-date outcomes versus total contracts
+
+Then manually trace at least:
+
+- 10 largest claimed-edge losses
+- 10 randomly selected losses
+- 10 wins
+
+For every traced trade show:
+
+- strategy version
+- ticker and Kalshi market wording
+- city and official settlement station
+- target date
+- prediction timestamp
+- market quote timestamp
+- YES ask and NO ask
+- selected direction
+- entry price
+- raw forecast
+- adjusted forecast
+- sigma
+- bias
+- EdgeCast probability
+- claimed edge
+- executable flag
+- actual observed temperature
+- settlement result
+- calculated P/L
+
+Explicitly test for:
+
+- inverted YES/NO direction
+- incorrect threshold inclusivity, such as “above” versus “at least”
+- incorrect range boundaries
+- high/low temperature confusion
+- wrong target date or timezone
+- wrong settlement station
+- stale or non-executable quotes
+- already-observed same-day outcomes
+- incorrect P/L
+- correlated bracket amplification
+- extreme-edge trades concentrated in very cheap contracts
+
+Add a reconciliation section answering:
+
+A. Are the model probabilities wrong, or are the trade/settlement mechanics wrong?
+B. Which single factor explains the largest share of losses?
+C. How many losses remain after removing same-day, correlated, stale, and non-executable records?
+D. Is any strategy, city, direction, price bucket, or contract type showing credible positive performance?
+
+Do not modify predictions, trades, settlement records, thresholds, or historical data during this audit. Return the evidence first.
