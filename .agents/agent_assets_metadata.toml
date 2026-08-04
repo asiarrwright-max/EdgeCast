@@ -1,0 +1,9 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "K-boTKp1c71CnECsA17EC"
+uri = "file://.agents/outputs/edgecast-forensic-audit-2026-08-04.md"
+type = "text"
+title = "EdgeCast Forensic Audit — 2026-08-04"
+description = "Read-only audit of V2.0 (466 settled), V2.2 exec (11 settled), and V3 exec (5 settled). Covers 15 dimensional breakdowns, 30 traced trades, explicit bug tests, and 4-part reconciliation."
