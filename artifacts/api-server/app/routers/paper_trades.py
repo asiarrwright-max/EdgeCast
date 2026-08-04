@@ -19,7 +19,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import KalshiMarket, PaperTrade, PredictionSnapshot
+from app.models import JobRun, KalshiMarket, PaperTrade, PredictionSnapshot
 from app.models_v3 import V3PaperTrade
 from app.services.paper_trading import (
     FLAG_DESCRIPTIONS,
@@ -52,6 +52,80 @@ from app.services.paper_trading_v2 import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["paper-trades"])
+
+# ── Forward-test constants ────────────────────────────────────────────────────
+
+# Exact UTC timestamp of the hardened main commit 76e4e7d going live on the
+# API server.  Only trades created at or after this moment count toward
+# readiness metrics.  Display as "August 4, 2026" in the UI.
+FORWARD_TEST_START = datetime(2026, 8, 4, 22, 21, 44, tzinfo=timezone.utc)
+FORWARD_TEST_START_VERSION = "76e4e7d"
+FORWARD_TEST_PHASE = "Collecting clean paper-trade data"
+FORWARD_TEST_SETTLED_TARGET = 50
+
+# Set to True only after an explicit manual review of ROI, calibration,
+# strategy stability, and drawdown — never flip automatically.
+MANUAL_READINESS_APPROVAL: bool = False
+
+# Job types written by app/services/collector.py that scan markets and create
+# paper-trade candidates.  Only these runs define a "collection batch" window
+# for the "Why no official bet?" reason breakdown.
+#   "manual"    = operator-triggered via POST /api/jobs/trigger
+#   "scheduled" = background scheduler tick
+COLLECTION_JOB_TYPES: tuple[str, ...] = ("manual", "scheduled")
+
+# Eligibility reason codes → human-readable labels for the "Why no bet?" panel.
+ELIGIBILITY_REASON_LABELS: dict[str, str] = {
+    "missing_or_stale_executable_quote": "Stale or missing quote",
+    "cutoff_unverified_or_too_close":    "Too close to market close",
+    "same_day_not_approved":             "Same-day market",
+    "entry_price_below_official_floor":  "Entry price below 20¢",
+    "settlement_station_unverified":     "Station unverified",
+    "extreme_edge_requires_validation":  "Extreme claimed edge",
+    "correlated_outcome_limit":          "Correlated exposure limit",
+    "hourly_temperature_not_approved":   "Hourly contract not approved",
+}
+
+
+def _ft_readiness_label(settled: int) -> str:
+    """Map official settled trade count → forward-test readiness stage.
+
+    Automatic progression caps at 'Promising but unproven'.
+    'Ready for tiny manual testing' and 'Strong forward-test evidence' require
+    MANUAL_READINESS_APPROVAL = True — sample size alone is not sufficient.
+    """
+    if settled < 10:
+        return "Not enough data"
+    if settled < 50:
+        return "Early signal"
+    return "Promising but unproven"
+
+
+def _ft_next_milestone(settled: int) -> str:
+    """Human-readable next milestone based on settled count."""
+    if settled < 10:
+        return "10 settled official trades"
+    if settled < 50:
+        return "50 settled official trades (minimum review point)"
+    return "Manual review required for further advancement"
+
+
+def _ft_progress_pct(settled: int, target: int = FORWARD_TEST_SETTLED_TARGET) -> float:
+    """Progress toward target as a percentage, capped at 100.0."""
+    if target <= 0:
+        return 100.0
+    return round(min(settled / target * 100.0, 100.0), 2)
+
+
+def _ft_readiness_for_real_money(settled: int) -> str:
+    """Plain-language current-readiness string for the status card.
+
+    Only returns a non-'Not ready' value when MANUAL_READINESS_APPROVAL is True
+    AND sufficient settled trades exist.  Sample size alone never triggers this.
+    """
+    if MANUAL_READINESS_APPROVAL and settled >= 100:
+        return "Ready for tiny manual testing"
+    return "Not ready for real money"
 
 
 # ── Serialisation helper ──────────────────────────────────────────────────────
@@ -708,6 +782,169 @@ async def get_best_bet_today(
             "whyWeLikeThisTrade":    why,
             "decisionExplanation":   d.get("decision_explanation"),
         },
+    }
+
+
+@router.get("/paper-trades/forward-test-status")
+async def get_forward_test_status(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
+    """
+    Return the forward-test progress card data.
+
+    Only trades with eligibility_status = 'OFFICIAL' created on or after
+    FORWARD_TEST_START count toward readiness metrics.  RESEARCH_ONLY and
+    legacy (pre-start) trades are tracked separately and never mixed in.
+    No historical rows are altered by this endpoint.
+    """
+    start = FORWARD_TEST_START
+
+    # ── Helper: count rows matching all criteria ───────────────────────────────
+    async def _ct(model, *criteria):
+        q = select(func.count()).select_from(model)
+        for c in criteria:
+            q = q.where(c)
+        return (await db.execute(q)).scalar_one() or 0
+
+    # ── V2.2 post-hardening counts (paper_trades table) ───────────────────────
+    v22_off_settled = await _ct(
+        PaperTrade,
+        PaperTrade.created_at >= start,
+        PaperTrade.eligibility_status == "OFFICIAL",
+        PaperTrade.status == "SETTLED",
+        PaperTrade.strategy_version == "v2.2",
+    )
+    v22_off_open = await _ct(
+        PaperTrade,
+        PaperTrade.created_at >= start,
+        PaperTrade.eligibility_status == "OFFICIAL",
+        PaperTrade.status == "OPEN",
+        PaperTrade.strategy_version == "v2.2",
+    )
+    v22_research = await _ct(
+        PaperTrade,
+        PaperTrade.created_at >= start,
+        PaperTrade.eligibility_status == "RESEARCH_ONLY",
+        PaperTrade.strategy_version == "v2.2",
+    )
+
+    # ── V3 post-hardening counts (v3_paper_trades table) ─────────────────────
+    v3_off_settled = await _ct(
+        V3PaperTrade,
+        V3PaperTrade.created_at >= start,
+        V3PaperTrade.eligibility_status == "OFFICIAL",
+        V3PaperTrade.status == "SETTLED",
+    )
+    v3_off_open = await _ct(
+        V3PaperTrade,
+        V3PaperTrade.created_at >= start,
+        V3PaperTrade.eligibility_status == "OFFICIAL",
+        V3PaperTrade.status == "OPEN",
+    )
+    v3_research = await _ct(
+        V3PaperTrade,
+        V3PaperTrade.created_at >= start,
+        V3PaperTrade.eligibility_status == "RESEARCH_ONLY",
+    )
+
+    # ── Combined totals ───────────────────────────────────────────────────────
+    total_off_settled = v22_off_settled + v3_off_settled
+    total_off_open    = v22_off_open    + v3_off_open
+    total_research    = v22_research    + v3_research
+
+    # ── Legacy trades (both tables, created before forward-test start) ─────────
+    legacy_pt = await _ct(PaperTrade,    PaperTrade.created_at    < start)
+    legacy_v3 = await _ct(V3PaperTrade,  V3PaperTrade.created_at  < start)
+    legacy_excluded = legacy_pt + legacy_v3
+
+    # ── "Why no official bet?" — batch-aware reason breakdown ────────────────
+    # Prefer the most recent completed collection job as the window so we
+    # show what happened *right now*, not cumulative all-time counts.
+    # Fall back to the past 24 hours if no recent job is found.
+    now_utc = datetime.now(tz=timezone.utc)
+    _BATCH_STALE_HOURS = 25  # treat a job older than this as stale
+
+    # Filter to collection-only job types (defined at module level).
+    # See: COLLECTION_JOB_TYPES constant below the forward-test constants block.
+
+    latest_job = (
+        await db.execute(
+            select(JobRun)
+            .where(JobRun.job_type.in_(COLLECTION_JOB_TYPES))
+            .where(JobRun.status == "success")
+            .where(JobRun.completed_at.is_not(None))
+            .order_by(JobRun.completed_at.desc())
+            .limit(1)
+        )
+    ).scalars().first()
+
+    if (
+        latest_job is not None
+        and (now_utc - latest_job.started_at).total_seconds() < _BATCH_STALE_HOURS * 3600
+    ):
+        reason_window_start = latest_job.started_at
+        reason_window_label = "Latest collection batch"
+    else:
+        reason_window_start = now_utc - timedelta(hours=24)
+        reason_window_label = "Past 24 hours"
+
+    async def _reason_counts(model, window_start: datetime) -> dict[str, int]:
+        rows = (
+            await db.execute(
+                select(model.eligibility_reason, func.count().label("n"))
+                .where(model.created_at >= window_start)
+                .where(model.eligibility_status == "RESEARCH_ONLY")
+                .group_by(model.eligibility_reason)
+            )
+        ).all()
+        return {row[0]: row[1] for row in rows if row[0]}
+
+    rc_pt = await _reason_counts(PaperTrade, reason_window_start)
+    rc_v3 = await _reason_counts(V3PaperTrade, reason_window_start)
+    windowed_reasons: dict[str, int] = {}
+    for code, n in list(rc_pt.items()) + list(rc_v3.items()):
+        windowed_reasons[code] = windowed_reasons.get(code, 0) + n
+
+    why_no_bet = {
+        code: {"label": label, "count": windowed_reasons.get(code, 0)}
+        for code, label in ELIGIBILITY_REASON_LABELS.items()
+    }
+
+    return {
+        "phase":                   FORWARD_TEST_PHASE,
+        "forwardTestStartDate":    FORWARD_TEST_START.strftime("%Y-%m-%d"),
+        "startingCodeVersion":     FORWARD_TEST_START_VERSION,
+        "officialSettledCount":    total_off_settled,
+        "officialOpenCount":       total_off_open,
+        "researchOnlyCount":       total_research,        # cumulative since start
+        "legacyExcludedCount":     legacy_excluded,
+        "progressPct":             _ft_progress_pct(total_off_settled),
+        "progressTarget":          FORWARD_TEST_SETTLED_TARGET,
+        "readinessLabel":          _ft_readiness_label(total_off_settled),
+        "nextMilestone":           _ft_next_milestone(total_off_settled),
+        "currentReadiness":        _ft_readiness_for_real_money(total_off_settled),
+        "manualReadinessApproval": MANUAL_READINESS_APPROVAL,
+        "whyNoOfficialBet":        why_no_bet,
+        "reasonBreakdownWindow":   reason_window_label,
+        "byStrategy": {
+            "v22": {
+                "officialSettled": v22_off_settled,
+                "officialOpen":    v22_off_open,
+                "researchOnly":    v22_research,
+            },
+            "v3": {
+                "officialSettled": v3_off_settled,
+                "officialOpen":    v3_off_open,
+                "researchOnly":    v3_research,
+            },
+        },
+        "explanation": (
+            "EdgeCast is currently collecting clean forward-test results. "
+            "Only OFFICIAL trades created after the hardened rules were deployed "
+            "count toward readiness. Older trades remain available as research "
+            "history but are excluded from the new score."
+        ),
     }
 
 

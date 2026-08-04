@@ -1,0 +1,109 @@
+Build a new “Forward Test Status” section at the top of the EdgeCast homepage/dashboard.
+
+Work only on `replit-work`. Do not merge to `main` or publish yet.
+
+Goal:
+Make it immediately clear where EdgeCast is in the validation process and how close it is to being ready for tiny manual real-money testing.
+
+Add a primary dashboard card titled:
+
+Forward Test Status
+
+Show these fields:
+
+- Phase: Collecting clean paper-trade data
+- Forward-test start date: August 4, 2026
+- Starting code version: 76e4e7d
+- Official settled trades: current count / 50
+- Open official trades: current count
+- Research-only signals: current count since forward-test start
+- Legacy trades excluded: current count before forward-test start
+- Current readiness: Not ready for real money
+- Next milestone: 10 settled official trades
+
+Add a progress bar based on:
+official settled trades / 50
+
+Under the progress bar, show:
+
+- Minimum review point: 50 settled official trades
+- Stronger confidence point: 100–200 settled official trades
+
+Add a short explanation:
+
+“EdgeCast is currently collecting clean forward-test results. Only OFFICIAL trades created after the hardened rules were deployed count toward readiness. Older trades remain available as research history but are excluded from the new score.”
+
+Add three clearly separated sections or tabs:
+
+1. Official Forward Test
+- Only post-hardening trades with eligibility_status = OFFICIAL
+- This is the only group used for the new win rate, ROI, calibration, and readiness status
+
+2. Research Only
+- eligibility_status = RESEARCH_ONLY
+- Show the eligibility reason in plain language
+
+3. Legacy Research
+- Trades created before the forward-test start
+- Never include these in the new readiness metrics
+
+Add a “Why no official bet right now?” box.
+
+When no OFFICIAL trade is available, show counts by reason, such as:
+
+- stale or missing quote
+- too close to market close
+- same-day market
+- entry price below 20¢
+- station unverified
+- extreme claimed edge
+- correlated exposure limit
+- hourly contract not approved
+
+Add a simple readiness label, not a misleading arbitrary percentage.
+
+Use these stages:
+
+- Not enough data
+- Early signal
+- Promising but unproven
+- Ready for tiny manual testing
+- Strong forward-test evidence
+
+For now, the default should be:
+Not enough data
+
+Readiness logic should remain conservative and rule-based. Do not mark the system ready for real money based only on positive ROI with a small sample.
+
+Important data rules:
+
+- Use only post-hardening OFFICIAL trades for forward-test metrics
+- Keep V2.2 and V3 results separate
+- Do not alter historical rows
+- Do not change prediction logic
+- Do not change eligibility rules
+- Do not change settlement logic
+- Do not enable real-money trading
+- Do not redesign unrelated pages
+
+Add or update tests for:
+- correct forward-test start filtering
+- legacy trades excluded from new metrics
+- RESEARCH_ONLY trades excluded from official metrics
+- progress calculation
+- zero-trade state
+- milestone text
+- readiness label defaults to Not enough data
+
+Run the full test suite:
+pytest tests/ -q
+
+Do not push if tests fail.
+
+When complete:
+- commit and push only to `replit-work`
+- report files changed
+- report any new API endpoint or query added
+- report test results
+- provide latest commit SHA
+- include screenshots of the new dashboard in mobile and desktop widths

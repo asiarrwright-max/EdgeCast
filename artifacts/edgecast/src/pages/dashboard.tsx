@@ -11,6 +11,7 @@ import {
   getGetMarketsQueryKey,
   getGetJobsQueryKey,
 } from "@workspace/api-client-react";
+import { ForwardTestStatus } from "@/components/ForwardTestStatus";
 import { format, parseISO, differenceInHours } from "date-fns";
 import {
   Activity, CloudRain, Database, RefreshCw, AlertTriangle,
@@ -523,6 +524,9 @@ export default function DashboardPage() {
           <span className="leading-relaxed">{dashboard.collectionSummary}</span>
         </div>
       )}
+
+      {/* ── Forward Test Status ── */}
+      <ForwardTestStatus />
 
       {/* ── Main Grid ── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">

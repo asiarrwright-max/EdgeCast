@@ -1,6 +1,7 @@
 export * from "./generated/api";
 export * from "./generated/api.schemas";
 export * from "./audit";
+export * from "./forward-test";
 export * from "./paper-trading-v2";
 export * from "./performance";
 export * from "./v21-analytics";
