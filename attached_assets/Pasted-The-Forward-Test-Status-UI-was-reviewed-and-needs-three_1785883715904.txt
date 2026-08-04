@@ -1,0 +1,48 @@
+The Forward Test Status UI was reviewed and needs three corrections before merging.
+
+Continue only on `replit-work`. Do not merge or publish yet.
+
+1. Use an exact forward-test start timestamp
+- Replace the midnight cutoff `2026-08-04T00:00:00Z`.
+- Use `2026-08-04T22:21:44Z` as the current clean-test cutoff, corresponding to hardened main commit `76e4e7d`.
+- Keep this as a full timezone-aware timestamp internally.
+- Continue displaying August 4, 2026 in the UI.
+- Add a regression test proving a trade created earlier on August 4 is legacy and does not count.
+- Add a test proving a trade created after the exact cutoff can count.
+
+2. Do not declare real-money readiness from sample size alone
+- Settled trade count may advance:
+  - Not enough data
+  - Early signal
+  - Promising but unproven
+- Do not automatically return “Ready for tiny manual testing” or “Strong forward-test evidence” solely because 100 or 200 trades settled.
+- Cap automatic readiness at “Promising but unproven.”
+- Add an explicit backend boolean such as `manualReadinessApproval = false`.
+- “Ready for tiny manual testing” may only appear after a future explicit review of ROI, calibration, strategy stability, and drawdown.
+- Current readiness must remain “Not ready for real money.”
+- Update tests for 100 and 200 settled trades.
+
+3. Correct the “Why no official bet right now?” timeframe
+Preferred:
+- Count eligibility reasons only from the latest completed collection batch.
+- If a reliable latest batch ID is unavailable, use the most recent 24 hours.
+- Return a field that clearly identifies the timeframe, such as:
+  `reasonBreakdownWindow: "Latest collection batch"`
+  or
+  `reasonBreakdownWindow: "Past 24 hours"`
+- Do not label cumulative all-time-since-start counts as “right now.”
+- Keep the cumulative research-only total separately.
+
+Run:
+pytest tests/ -q
+
+Do not push if tests fail.
+Commit and push only to `replit-work`.
+
+Report:
+- exact cutoff timestamp used
+- readiness logic
+- reason-breakdown timeframe
+- test results
+- latest commit SHA
+- updated mobile and desktop screenshots
