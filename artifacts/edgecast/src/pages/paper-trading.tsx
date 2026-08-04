@@ -8,8 +8,6 @@ import {
   useGetPaperTradeAnalytics,
   useGetPaperTradeCalibration,
   useSettleNow,
-  useGetStrategyComparison,
-  useGetStrategyAgreement,
   useRunVerification,
   useGetPaperTradeSegmentSummary,
   type SegmentSummaryRow,
@@ -179,8 +177,7 @@ export default function PaperTradingPage() {
   const [settling, setSettling] = useState(false);
   const [settleResult, setSettleResult] = useState<any>(null);
 
-  // V2 comparison state
-  const [showComparison, setShowComparison] = useState(false);
+  // Verification state
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<any>(null);
 
@@ -213,8 +210,6 @@ export default function PaperTradingPage() {
   const { data: settings } = useGetPaperTradeSettings();
   const { data: analytics } = useGetPaperTradeAnalytics(analyticsParams);
   const { data: calibration } = useGetPaperTradeCalibration({ segment });
-  const { data: comparison } = useGetStrategyComparison();
-  const { data: agreement } = useGetStrategyAgreement();
   const updateSettings = useUpdatePaperTradeSettings();
   const settleNowMutation = useSettleNow();
   const runVerificationMutation = useRunVerification();
@@ -288,12 +283,11 @@ export default function PaperTradingPage() {
             style={{ maxWidth: "280px" }}
           >
             <option value="current_exp">Current Experiment — V2.1 + V2.2 + V3</option>
-            <option value="current_v2">Corrected-Bias Comparison — V2.1 vs V2.2</option>
-            <option value="v3_challenger">V3 Historical-Preload Challenger</option>
-            <option value="paired">Strictly Paired Head-to-Head — V2.1 + V2.2 + V3</option>
-            <option value="paired_v2">Corrected-Bias Paired — V2.1 vs V2.2 Only</option>
-            <option value="legacy">Legacy Baseline — V1.0 + V2.0</option>
-            <option value="research">Research Signals — Non-Executable</option>
+            <option value="v21_only">V2.1 only</option>
+            <option value="v22_only">V2.2 only</option>
+            <option value="v3_challenger">V3 only</option>
+            <option value="paired">Strictly Paired Head-to-Head</option>
+            <option value="legacy">Legacy V1/V2</option>
             <option value="all">All Versions Unfiltered ⚠</option>
           </select>
           <button
@@ -361,13 +355,13 @@ export default function PaperTradingPage() {
         <p className="text-xs text-gray-400">
           Metrics below:{" "}
           <span className="font-medium text-gray-600">
-            {segment === "current_exp"   && "V2.1 + V2.2 + V3 executable — settled stats from V2.1+V2.2 (V3 has no settled trades yet)"}
-            {segment === "current_v2"    && "V2.1 + V2.2 executable only — corrected-bias comparison, excludes V3"}
-            {segment === "v3_challenger" && "V3 executable only — historical-preload challenger; open positions only"}
-            {segment === "paired"        && "Strictly paired V2.1+V2.2+V3 with shared comparison_snapshot_id — 0 settled so far"}
-            {segment === "legacy"        && "V1.0 + V2.0 historical baseline (pre-station/sigma corrections)"}
-            {segment === "research"      && "V2.1 + V2.2 non-executable research signals — not real bets"}
-            {segment === "all"           && "All versions combined — see Strategy Breakdown below for clean split"}
+            {segment === "current_exp"   && "Current Experiment — V2.1 + V2.2 + V3 executable"}
+            {segment === "v21_only"      && "V2.1 executable only"}
+            {segment === "v22_only"      && "V2.2 executable only"}
+            {segment === "v3_challenger" && "V3 executable only — open positions (settling in progress)"}
+            {segment === "paired"        && "Strictly Paired Head-to-Head — V2.1 + V2.2 + V3 on shared opportunities"}
+            {segment === "legacy"        && "Legacy V1/V2 baseline — pre-station/sigma corrections, not comparable to current"}
+            {segment === "all"           && "All Versions Unfiltered ⚠ — legacy + current contaminated"}
           </span>
         </p>
         <SampleBar settled={settledCount} />
@@ -375,20 +369,17 @@ export default function PaperTradingPage() {
 
       {/* Contamination warning — only shown for "all" */}
       {segment === "all" && (
-        <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm">
-          <p className="font-semibold text-orange-800">⚠ Contaminated view</p>
-          <p className="text-xs text-orange-700 mt-1">
-            This view mixes 272 legacy V1/V2 trades (pre-station verification, pre-sigma correction,
-            correlated-position flags) with 30 current-experiment settled trades and 19 non-executable
-            research signals. The headline figures — 24.3% win rate, −$1,937.58 P/L — are dominated
-            by the legacy cohort and are not valid measures of current strategy performance.{" "}
+        <div className="rounded-lg border border-orange-300 bg-orange-50 px-4 py-4 text-sm">
+          <p className="font-semibold text-orange-800">⚠ Contaminated view — not for experiment evaluation</p>
+          <p className="text-sm text-orange-700 mt-1">
+            These results combine legacy strategies, current strategies, and repeated exposure to the
+            same Kalshi markets. They should not be used to evaluate the current EdgeCast experiment.{" "}
             <button
               className="underline font-medium text-orange-800"
               onClick={() => setSegment("current_exp")}
             >
               Switch to Current Experiment
-            </button>{" "}
-            for the official view.
+            </button>
           </p>
         </div>
       )}
@@ -568,32 +559,109 @@ export default function PaperTradingPage() {
         )}
       </div>
 
-      {/* V2 Strategy Comparison */}
-      <Section title="Strategy v1 vs v2 Comparison">
+      {/* Strategy Comparison: V2.1 vs V2.2 vs V3 */}
+      <Section title="Strategy Comparison — V2.1 vs V2.2 vs V3">
         <div className="px-4 py-3 space-y-4">
-          <div className="flex items-center gap-3 text-sm">
-            <p className="text-xs text-gray-500 flex-1">
-              v2 uses learned σ (from historical forecast errors), bias correction, and conservative
-              calibration adjustments. Initially falls back to v1 fixed σ until enough verified data
-              accumulates.
+          {segment !== "current_exp" && (
+            <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+              ⚠ Select <button className="underline font-medium" onClick={() => setSegment("current_exp")}>Current Experiment</button> to see the full three-strategy side-by-side comparison.
             </p>
-            <button
-              onClick={handleRunVerification}
-              disabled={verifying}
-              className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-            >
-              {verifying ? "Running…" : "Run Verification"}
-            </button>
+          )}
+
+          {segment === "current_exp" && (metrics as any)?.reconciliation ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-xs text-gray-500 uppercase">
+                    <th className="text-left px-4 py-2">Metric</th>
+                    <th className="text-right px-4 py-2 text-blue-700">V2.1</th>
+                    <th className="text-right px-4 py-2 text-indigo-700">V2.2</th>
+                    <th className="text-right px-4 py-2 text-cyan-700">V3</th>
+                    <th className="text-right px-4 py-2 text-gray-600">Combined</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(["Open", "Settled", "Wins"] as const).map((label) => {
+                    const key = label.toLowerCase() as "open" | "settled" | "wins";
+                    return (
+                      <tr key={label} className="border-t border-gray-100">
+                        <td className="px-4 py-2 text-gray-700">{label}</td>
+                        {(["v21", "v22", "v3", "combined"] as const).map((v) => (
+                          <td key={v} className="text-right px-4 py-2 text-gray-600">
+                            {(metrics as any).reconciliation[v]?.[key] ?? "—"}
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                  })}
+                  <tr className="border-t border-gray-100">
+                    <td className="px-4 py-2 text-gray-700">Win Rate</td>
+                    {(["v21", "v22", "v3", "combined"] as const).map((v) => {
+                      const val = (metrics as any).reconciliation[v]?.winRate;
+                      return (
+                        <td key={v} className={`text-right px-4 py-2 font-medium ${
+                          val == null ? "text-gray-400" :
+                          val >= 0.55 ? "text-green-600" :
+                          val < 0.45  ? "text-red-600"   : "text-amber-600"
+                        }`}>
+                          {pct(val)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                  <tr className="border-t border-gray-100">
+                    <td className="px-4 py-2 text-gray-700">Net P/L</td>
+                    {(["v21", "v22", "v3", "combined"] as const).map((v) => (
+                      <td key={v} className="text-right px-4 py-2 text-gray-600">
+                        {money((metrics as any).reconciliation[v]?.netPl)}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr className="border-t border-gray-100">
+                    <td className="px-4 py-2 text-gray-700">ROI</td>
+                    {(["v21", "v22", "v3", "combined"] as const).map((v) => {
+                      const roi = (metrics as any).reconciliation[v]?.roi;
+                      return (
+                        <td key={v} className={`text-right px-4 py-2 ${
+                          roi == null ? "text-gray-400" :
+                          roi > 0 ? "text-green-600" : "text-red-600"
+                        }`}>
+                          {roi == null ? "—" : pct(roi / 100, 2)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          ) : segment === "current_exp" ? (
+            <p className="text-sm text-gray-500">Loading comparison…</p>
+          ) : null}
+
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <p className="text-xs text-gray-400 flex-1">
+              V3 settled metrics appear once V3 positions begin to settle. V2.1 and V2.2 share
+              the same Kalshi markets — use "Strictly Paired Head-to-Head" to compare them on
+              identical opportunities only. ROI is computed on settled stake.
+            </p>
+            <div className="flex flex-col items-end gap-1">
+              <button
+                onClick={handleRunVerification}
+                disabled={verifying}
+                className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded hover:bg-indigo-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+              >
+                {verifying ? "Running…" : "Run Verification"}
+              </button>
+              <p className="text-xs text-gray-400">Rebuilds V2 σ / bias error stats</p>
+            </div>
           </div>
 
           {verifyResult && (
-            <div
-              className={`rounded border px-3 py-2 text-xs ${
-                verifyResult.error
-                  ? "border-red-300 bg-red-50 text-red-800"
-                  : "border-indigo-200 bg-indigo-50 text-indigo-800"
-              }`}
-            >
+            <div className={`rounded border px-3 py-2 text-xs ${
+              verifyResult.error
+                ? "border-red-300 bg-red-50 text-red-800"
+                : "border-indigo-200 bg-indigo-50 text-indigo-800"
+            }`}>
               {verifyResult.error ? (
                 <>Verification failed: {verifyResult.error}</>
               ) : (
@@ -606,149 +674,6 @@ export default function PaperTradingPage() {
               )}
             </div>
           )}
-
-          {/* Agreement summary */}
-          {agreement && (
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-              {[
-                { label: "Both trade", value: agreement.bothTrade },
-                { label: "Only v1", value: agreement.onlyV1 },
-                { label: "Only v2", value: agreement.onlyV2 },
-                { label: "Same side", value: agreement.sameSides },
-                { label: "Diff side", value: agreement.differentSides },
-                { label: "Prob div >10pp", value: agreement.probDivergenceGt10pp },
-              ].map(({ label, value }) => (
-                <div key={label} className="bg-gray-50 rounded border border-gray-200 px-3 py-2 text-center">
-                  <p className="text-xs text-gray-500">{label}</p>
-                  <p className="text-lg font-semibold text-gray-800">{value}</p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Side-by-side metrics */}
-          {comparison && (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50 text-xs text-gray-500 uppercase">
-                    <th className="text-left px-4 py-2">Metric</th>
-                    <th className="text-right px-4 py-2">v1.0</th>
-                    <th className="text-right px-4 py-2">v2.0</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    { label: "Total trades", v1: (comparison.v1 as any).totalCount, v2: (comparison.v2 as any).totalCount },
-                    { label: "Open", v1: (comparison.v1 as any).openCount, v2: (comparison.v2 as any).openCount },
-                    { label: "Settled", v1: (comparison.v1 as any).settledCount, v2: (comparison.v2 as any).settledCount },
-                    { label: "Wins", v1: (comparison.v1 as any).wins, v2: (comparison.v2 as any).wins },
-                  ].map(({ label, v1, v2 }) => (
-                    <tr key={label} className="border-t border-gray-100">
-                      <td className="px-4 py-2 text-gray-700">{label}</td>
-                      <td className="text-right px-4 py-2 text-gray-600">{v1 ?? "—"}</td>
-                      <td className="text-right px-4 py-2 text-gray-600">{v2 ?? "—"}</td>
-                    </tr>
-                  ))}
-                  {[
-                    {
-                      label: "Win rate",
-                      v1: pct((comparison.v1 as any).winRate),
-                      v2: pct((comparison.v2 as any).winRate),
-                      v1Raw: (comparison.v1 as any).winRate,
-                      v2Raw: (comparison.v2 as any).winRate,
-                    },
-                  ].map(({ label, v1, v2, v1Raw, v2Raw }) => (
-                    <tr key={label} className="border-t border-gray-100">
-                      <td className="px-4 py-2 text-gray-700">{label}</td>
-                      <td className={`text-right px-4 py-2 font-medium ${v1Raw == null ? "text-gray-400" : v1Raw >= 0.55 ? "text-green-600" : v1Raw < 0.45 ? "text-red-600" : "text-amber-600"}`}>{v1}</td>
-                      <td className={`text-right px-4 py-2 font-medium ${v2Raw == null ? "text-gray-400" : v2Raw >= 0.55 ? "text-green-600" : v2Raw < 0.45 ? "text-red-600" : "text-amber-600"}`}>{v2}</td>
-                    </tr>
-                  ))}
-                  {[
-                    { label: "Net P/L", v1: money((comparison.v1 as any).netProfitLoss), v2: money((comparison.v2 as any).netProfitLoss) },
-                    {
-                      label: "ROI",
-                      v1: pct((comparison.v1 as any).roi == null ? null : (comparison.v1 as any).roi / 100, 2),
-                      v2: pct((comparison.v2 as any).roi == null ? null : (comparison.v2 as any).roi / 100, 2),
-                    },
-                    {
-                      label: "Brier score",
-                      v1: fmt((comparison.v1 as any).calibration?.brierScore),
-                      v2: fmt((comparison.v2 as any).calibration?.brierScore),
-                    },
-                  ].map(({ label, v1, v2 }) => (
-                    <tr key={label} className="border-t border-gray-100">
-                      <td className="px-4 py-2 text-gray-700">{label}</td>
-                      <td className="text-right px-4 py-2 text-gray-600">{v1}</td>
-                      <td className="text-right px-4 py-2 text-gray-600">{v2}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Agreement samples */}
-          {agreement && agreement.samples.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                Agreement samples (up to 20 shared markets)
-              </p>
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-xs">
-                  <thead>
-                    <tr className="bg-gray-50 text-xs text-gray-400 uppercase">
-                      <th className="text-left px-3 py-1.5">Ticker</th>
-                      <th className="text-center px-3 py-1.5">v1 Dir</th>
-                      <th className="text-center px-3 py-1.5">v2 Dir</th>
-                      <th className="text-right px-3 py-1.5">v1 Prob</th>
-                      <th className="text-right px-3 py-1.5">v2 Prob</th>
-                      <th className="text-right px-3 py-1.5">Δ</th>
-                      <th className="text-center px-3 py-1.5">Agree</th>
-                      <th className="text-left px-3 py-1.5">σ source</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {agreement.samples.map((s: any) => (
-                      <tr key={s.ticker} className="border-t border-gray-100 hover:bg-gray-50">
-                        <td className="px-3 py-1.5 max-w-[140px] truncate text-gray-600 font-mono">{s.ticker}</td>
-                        <td className="text-center px-3 py-1.5">
-                          <span className={`text-xs font-medium px-1 py-0.5 rounded ${s.v1Direction === "YES" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                            {s.v1Direction}
-                          </span>
-                        </td>
-                        <td className="text-center px-3 py-1.5">
-                          <span className={`text-xs font-medium px-1 py-0.5 rounded ${s.v2Direction === "YES" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                            {s.v2Direction}
-                          </span>
-                        </td>
-                        <td className="text-right px-3 py-1.5 text-gray-600">{pct(s.v1EcProb)}</td>
-                        <td className="text-right px-3 py-1.5 text-gray-600">{pct(s.v2EcProb)}</td>
-                        <td className={`text-right px-3 py-1.5 font-medium ${s.probDiff > 0.10 ? "text-amber-600" : "text-gray-400"}`}>
-                          {(s.probDiff * 100).toFixed(1)}pp
-                        </td>
-                        <td className="text-center px-3 py-1.5">
-                          {s.agree ? (
-                            <span className="text-green-600 font-medium">✓</span>
-                          ) : (
-                            <span className="text-red-600 font-medium">✗</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-1.5 text-gray-400 text-xs">{s.v2FallbackLevel ?? "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          <p className="text-xs text-gray-400">
-            v2 calibration and bias corrections are conservative — only applied when n ≥ 5 (σ/bias)
-            or n ≥ 30 (calibration). Until then, v2 uses the v1 fixed σ table as a fallback.
-            Run "Verification" to fetch actual observed temperatures and rebuild error statistics.
-          </p>
         </div>
       </Section>
 
@@ -854,13 +779,12 @@ export default function PaperTradingPage() {
             <p className="text-xs text-gray-500">
               Showing:{" "}
               <span className="font-medium text-gray-700">
-                {segment === "current_exp"   && "Current Experiment — V2.1 + V2.2 executable (V3 contributes after first settlement)"}
-                {segment === "current_v2"    && "Corrected-Bias Comparison — V2.1 + V2.2 executable only"}
-                {segment === "v3_challenger" && "V3 Historical-Preload Challenger — no settled trades yet; breakdowns empty"}
-                {segment === "paired"        && "Strictly Paired — V2.1 + V2.2 executable (V3 adds to analytics after settlement)"}
-                {segment === "paired_v2"     && "Corrected-Bias Paired — V2.1 + V2.2 executable only"}
-                {segment === "legacy"        && "Legacy Baseline — V1.0 + V2.0 (pre-station/sigma corrections)"}
-                {segment === "research"      && "Research Signals — V2.1 + V2.2 non-executable only"}
+                {segment === "current_exp"   && "Current Experiment — V2.1 + V2.2 executable (analytics from V2.1+V2.2 settled trades)"}
+                {segment === "v21_only"      && "V2.1 executable only"}
+                {segment === "v22_only"      && "V2.2 executable only"}
+                {segment === "v3_challenger" && "V3 executable only — no settled trades yet; breakdowns empty until settlement"}
+                {segment === "paired"        && "Strictly Paired Head-to-Head — V2.1 + V2.2 executable on shared opportunities"}
+                {segment === "legacy"        && "Legacy V1/V2 — pre-station/sigma corrections, not comparable to current"}
                 {segment === "all"           && "All Versions Unfiltered ⚠"}
               </span>
               {" · "}
@@ -874,17 +798,14 @@ export default function PaperTradingPage() {
           </div>
 
           {segment === "all" && (
-            <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm">
-              <p className="font-semibold text-orange-800">⚠ Contaminated analytics</p>
+            <div className="rounded-lg border border-orange-300 bg-orange-50 px-4 py-3 text-sm">
+              <p className="font-semibold text-orange-800">⚠ Contaminated analytics — not for experiment evaluation</p>
               <p className="text-xs text-orange-700 mt-1">
-                This view mixes legacy V1/V2 trades, current-experiment executable trades, non-executable
-                research signals, and V3 open positions. All breakdowns below — direction, edge,
-                city, lead time, cumulative P/L — are dominated by the legacy cohort and are not valid
-                measures of current strategy performance.{" "}
+                These results combine legacy strategies, current strategies, and repeated exposure to the
+                same Kalshi markets. They should not be used to evaluate the current EdgeCast experiment.{" "}
                 <button className="underline font-medium text-orange-800" onClick={() => setSegment("current_exp")}>
                   Switch to Current Experiment
                 </button>
-                {" "}for the clean view.
               </p>
             </div>
           )}
@@ -1012,13 +933,12 @@ export default function PaperTradingPage() {
               Showing:{" "}
               <span className="font-medium text-gray-700">
                 {segment === "current_exp"   && "Current Experiment — V2.1 + V2.2 executable"}
-                {segment === "current_v2"    && "Corrected-Bias — V2.1 + V2.2 executable"}
-                {segment === "v3_challenger" && "V3 Challenger — no settled trades yet"}
-                {segment === "paired"        && "Strictly Paired — V2.1 + V2.2 executable"}
-                {segment === "paired_v2"     && "Corrected-Bias Paired — V2.1 + V2.2 executable"}
-                {segment === "legacy"        && "Legacy — V1.0 + V2.0"}
-                {segment === "research"      && "Research Signals — non-executable"}
-                {segment === "all"           && "All Versions ⚠ (legacy contaminated)"}
+                {segment === "v21_only"      && "V2.1 executable only"}
+                {segment === "v22_only"      && "V2.2 executable only"}
+                {segment === "v3_challenger" && "V3 executable only — no settled trades yet"}
+                {segment === "paired"        && "Strictly Paired Head-to-Head — V2.1 + V2.2 executable"}
+                {segment === "legacy"        && "Legacy V1/V2"}
+                {segment === "all"           && "All Versions ⚠ — not for experiment evaluation"}
               </span>
             </p>
             {calibration?.brierScore != null && (
@@ -1033,12 +953,11 @@ export default function PaperTradingPage() {
           </div>
 
           {segment === "all" && (
-            <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-2 text-xs">
-              <span className="font-semibold text-orange-800">⚠ Contaminated calibration: </span>
+            <div className="rounded-lg border border-orange-300 bg-orange-50 px-4 py-2 text-xs">
+              <span className="font-semibold text-orange-800">⚠ Contaminated calibration — not for experiment evaluation: </span>
               <span className="text-orange-700">
-                Brier score and bucket counts include legacy V1/V2 trades whose probability
-                engine differs significantly from V2.1/V2.2. Results are not valid for current
-                strategy calibration assessment.{" "}
+                These results combine legacy strategies, current strategies, and repeated exposure to the
+                same Kalshi markets.{" "}
               </span>
               <button className="underline font-medium text-orange-800" onClick={() => setSegment("current_exp")}>
                 Switch to Current Experiment

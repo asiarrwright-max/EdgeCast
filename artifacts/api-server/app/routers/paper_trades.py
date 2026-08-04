@@ -217,9 +217,11 @@ async def run_verification(
 # Maps segment name → filter kwargs for get_paper_trade_metrics.
 # Segments handled by special-case code in the endpoint are NOT listed here.
 _SEGMENT_FILTERS: dict[str, dict] = {
-    # Corrected-bias V2.1 vs V2.2 comparison (excludes V3)
+    # Single-strategy views
+    "v21_only":    {"strategy_versions": ["v2.1"], "is_executable": True},
+    "v22_only":    {"strategy_versions": ["v2.2"], "is_executable": True},
+    # Combined V2.1 + V2.2 views (retained for backward-compat / API consumers)
     "current_v2":  {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True},
-    # V2.1 vs V2.2 paired only (comparison_snapshot_id must match; excludes V3)
     "paired_v2":   {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True, "paired_only": True},
     "legacy":      {"strategy_versions": ["v1.0", "v2.0"]},
     "research":    {"strategy_versions": ["v2.1", "v2.2"], "is_executable": False},
@@ -538,6 +540,8 @@ async def get_segment_summary(
 # segments return empty until V3 trades settle and are joined here.
 _ANALYTICS_SEGMENT_FILTERS: dict[str, dict] = {
     "current_exp":   {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True},
+    "v21_only":      {"strategy_versions": ["v2.1"],          "is_executable": True},
+    "v22_only":      {"strategy_versions": ["v2.2"],          "is_executable": True},
     "current_v2":    {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True},
     "paired":        {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True},
     "paired_v2":     {"strategy_versions": ["v2.1", "v2.2"], "is_executable": True},
