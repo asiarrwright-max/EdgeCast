@@ -121,6 +121,17 @@ async def _apply_migrations(conn) -> None:
         "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS eligibility_status VARCHAR(20)",
         "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS eligibility_reason VARCHAR(60)",
         "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS quote_age_seconds FLOAT",
+        # Safety hardening pass 2 — market close time and decision audit fields
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS market_close_timestamp TIMESTAMPTZ",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS expected_settlement_timestamp TIMESTAMPTZ",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS decision_timestamp TIMESTAMPTZ",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS minutes_to_market_close FLOAT",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS settlement_timezone VARCHAR(100)",
+        "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS market_close_timestamp TIMESTAMPTZ",
+        "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS expected_settlement_timestamp TIMESTAMPTZ",
+        "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS decision_timestamp TIMESTAMPTZ",
+        "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS minutes_to_market_close FLOAT",
+        "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS settlement_timezone VARCHAR(100)",
     ]
     for stmt in migrations:
         try:

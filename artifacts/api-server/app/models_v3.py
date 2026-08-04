@@ -504,6 +504,13 @@ class V3PaperTrade(Base):
     eligibility_reason: Mapped[str | None] = mapped_column(String(60))
     quote_age_seconds: Mapped[float | None] = mapped_column(Float)
 
+    # Safety hardening pass 2 — market close time and decision audit trail
+    market_close_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expected_settlement_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decision_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    minutes_to_market_close: Mapped[float | None] = mapped_column(Float)
+    settlement_timezone: Mapped[str | None] = mapped_column(String(100))
+
 
 # ---------------------------------------------------------------------------
 # V3IngestionLog — per-run audit trail

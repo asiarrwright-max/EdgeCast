@@ -339,6 +339,10 @@ async def decide_trade_v22(
             "target_settlement_date_str":   market.target_date,
             "settlement_timezone":          station_tz,
             "weather_variable":             snap.settlement_variable,
+            "market_close_timestamp":       getattr(market, "close_time", None),
+            "expected_settlement_timestamp": None,
+            "decision_timestamp":           now,
+            "minutes_to_market_close":      None,
         }
 
     # ── Consensus guard (configurable) ───────────────────────────────────────
@@ -370,6 +374,23 @@ async def decide_trade_v22(
         f"Station: {station.station_name} ({'verified' if station_verified else 'unverified'})."
     )
 
+    # ── Market close audit fields ─────────────────────────────────────────────
+    market_close_ts = getattr(market, "close_time", None)
+    decision_ts = now
+    minutes_to_close: float | None = None
+    if market_close_ts is not None:
+        if market_close_ts.tzinfo is None:
+            market_close_ts = market_close_ts.replace(tzinfo=timezone.utc)
+        minutes_to_close = (market_close_ts - now).total_seconds() / 60
+
+    expected_settle_ts = None
+    if market.target_date:
+        try:
+            from app.services.eligibility import _parse_settlement_dt as _psd
+            expected_settle_ts = _psd(market.target_date)
+        except Exception:
+            pass
+
     # ── Eligibility engine (Guards 1–5, 7–8) ─────────────────────────────────
     # Guard 6 (correlated-exposure) is applied at batch level in run_paper_trading_v22.
     elig_status, elig_reason, quote_age_s = assess_trade_eligibility(
@@ -383,6 +404,7 @@ async def decide_trade_v22(
         direction=direction,
         quote_timestamp=market.collection_timestamp,
         quote_ask=quote_ask,
+        market_close_timestamp=market_close_ts,
     )
 
     # OFFICIAL trades may be executable; RESEARCH_ONLY trades are never executable.
@@ -425,6 +447,10 @@ async def decide_trade_v22(
         "target_settlement_date_str":   market.target_date,
         "settlement_timezone":          station_tz,
         "weather_variable":             snap.settlement_variable,
+        "market_close_timestamp":       market_close_ts,
+        "expected_settlement_timestamp": expected_settle_ts,
+        "decision_timestamp":           decision_ts,
+        "minutes_to_market_close":      minutes_to_close,
     }
 
 
@@ -510,6 +536,11 @@ async def maybe_create_paper_trade_v22(
             eligibility_status=decision.get("eligibility_status"),
             eligibility_reason=decision.get("eligibility_reason"),
             quote_age_seconds=decision.get("quote_age_seconds"),
+            market_close_timestamp=decision.get("market_close_timestamp"),
+            expected_settlement_timestamp=decision.get("expected_settlement_timestamp"),
+            decision_timestamp=decision.get("decision_timestamp"),
+            minutes_to_market_close=decision.get("minutes_to_market_close"),
+            settlement_timezone=decision.get("settlement_timezone"),
             comparison_snapshot_id=comparison_snapshot_id,
             collection_batch_id=batch_id,
         )
@@ -567,6 +598,11 @@ async def maybe_create_paper_trade_v22(
         eligibility_status=decision.get("eligibility_status"),
         eligibility_reason=decision.get("eligibility_reason"),
         quote_age_seconds=decision.get("quote_age_seconds"),
+        market_close_timestamp=decision.get("market_close_timestamp"),
+        expected_settlement_timestamp=decision.get("expected_settlement_timestamp"),
+        decision_timestamp=decision.get("decision_timestamp"),
+        minutes_to_market_close=decision.get("minutes_to_market_close"),
+        settlement_timezone=decision.get("settlement_timezone"),
         comparison_snapshot_id=comparison_snapshot_id,
         collection_batch_id=batch_id,
     )

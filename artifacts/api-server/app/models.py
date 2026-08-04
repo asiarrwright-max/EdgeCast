@@ -442,3 +442,16 @@ class PaperTrade(Base):
     eligibility_status: Mapped[str | None] = mapped_column(String(20), index=True)
     eligibility_reason: Mapped[str | None] = mapped_column(String(60))   # reason code or None
     quote_age_seconds: Mapped[float | None] = mapped_column(Float)        # seconds since quote was fetched
+
+    # Safety hardening pass 2 — market close time and decision audit trail
+    # All nullable; NULL on pre-hardening-pass-2 rows
+    market_close_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Actual Kalshi market close time from market metadata (not target_settlement_date)
+    expected_settlement_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Parsed target_settlement_date stored as UTC datetime for auditability
+    decision_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # UTC now() at the moment the eligibility decision was made
+    minutes_to_market_close: Mapped[float | None] = mapped_column(Float)
+    # (market_close_timestamp - decision_timestamp) in minutes, stored at write time
+    settlement_timezone: Mapped[str | None] = mapped_column(String(100))
+    # IANA timezone string for the settlement station (e.g. "America/Denver")
