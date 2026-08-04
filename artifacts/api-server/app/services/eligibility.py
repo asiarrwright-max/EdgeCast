@@ -140,14 +140,13 @@ def assess_trade_eligibility(
     """
     now_aware = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
 
-    # Normalise quote age first — used in every return path
+    # Compute quote age — stored with sign; negative means future-dated (rejected by Guard 8)
     quote_age_seconds: float | None = None
     if quote_timestamp is not None:
         qt = quote_timestamp
         if qt.tzinfo is None:
             qt = qt.replace(tzinfo=timezone.utc)
-        age = (now_aware - qt).total_seconds()
-        quote_age_seconds = max(0.0, age)
+        quote_age_seconds = (now_aware - qt).total_seconds()  # negative = future timestamp
 
     # Guard 1: Daily weather only
     if contract_type == "hourly_threshold":
@@ -161,6 +160,9 @@ def assess_trade_eligibility(
     if quote_timestamp is None:
         return "RESEARCH_ONLY", REASON_STALE_QUOTE, quote_age_seconds
     if quote_ask is None:
+        return "RESEARCH_ONLY", REASON_STALE_QUOTE, quote_age_seconds
+    if quote_age_seconds is not None and quote_age_seconds < 0:
+        # quote_timestamp is in the future — reject; do not clamp to zero
         return "RESEARCH_ONLY", REASON_STALE_QUOTE, quote_age_seconds
     if quote_age_seconds is not None and quote_age_seconds > stale_quote_seconds:
         return "RESEARCH_ONLY", REASON_STALE_QUOTE, quote_age_seconds

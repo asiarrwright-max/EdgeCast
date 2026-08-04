@@ -517,14 +517,33 @@ class TestGuard8FreshQuote:
         assert status == "RESEARCH_ONLY"
         assert reason == REASON_STALE_QUOTE
 
-    def test_future_quote_timestamp_treated_as_age_zero(self):
-        """Future timestamp → age clamped to 0 → passes freshness guard."""
+    def test_future_quote_timestamp_is_research_only(self):
+        """
+        A future-dated quote cannot become OFFICIAL.
+
+        Previously the code clamped negative age to zero, which allowed a future
+        timestamp to pass as "age 0".  The corrected behaviour is to reject it:
+        future quote_timestamp → RESEARCH_ONLY / missing_or_stale_executable_quote.
+        The actual (negative) age must be stored for auditing.
+        """
         future_ts = _now_utc() + timedelta(minutes=5)
         status, reason, age = assess_trade_eligibility(
             **_build_base_kwargs(quote_timestamp=future_ts)
         )
-        assert reason != REASON_STALE_QUOTE
-        assert age == 0.0   # max(0, negative_age)
+        assert status == "RESEARCH_ONLY"
+        assert reason == REASON_STALE_QUOTE
+        # Signed age is preserved (negative), not clamped to zero
+        assert age is not None and age < 0, (
+            f"Expected negative quote_age_seconds for a future timestamp, got {age}"
+        )
+
+    def test_future_quote_timestamp_cannot_be_official(self):
+        """Regression guard: a future-dated quote must never reach OFFICIAL status."""
+        future_ts = _now_utc() + timedelta(seconds=1)   # barely in the future
+        status, _, _ = assess_trade_eligibility(
+            **_build_base_kwargs(quote_timestamp=future_ts)
+        )
+        assert status != "OFFICIAL"
 
 
 # ── I1: Full OFFICIAL passing scenario ───────────────────────────────────────

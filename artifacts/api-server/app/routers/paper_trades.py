@@ -536,7 +536,7 @@ async def get_segment_summary(
 def _selected_side_values(
     direction: str,
     ec_side_probability: float,
-    market_yes_probability: float,
+    market_yes_probability: float,   # retained for callers; NOT used in selectedSideMarketProbability
     side_market_price: float,
     edge_pct_points: float,
 ) -> dict:
@@ -544,24 +544,20 @@ def _selected_side_values(
     Compute selected-side display values from stored trade columns.
 
     ec_side_probability    — model probability already rotated to the chosen side
-    market_yes_probability — Kalshi YES market probability (always the YES side)
-    side_market_price      — entry ask on the chosen side (yes_ask or no_ask)
+    market_yes_probability — raw Kalshi YES market probability; kept as a legacy/raw field only
+    side_market_price      — executable ask on the chosen side (yes_ask for YES; no_ask for NO)
     edge_pct_points        — edge in pp (direction-corrected)
 
-    For YES trades, selected-side market probability = market_yes_probability.
-    For NO  trades, selected-side market probability = 1 − market_yes_probability.
-    Never substitute bid, midpoint, or the opposite-side price.
+    selectedSideMarketProbability == selectedSideAsk == side_market_price.
+    In a Kalshi binary market the executable ask IS the market-implied probability (e.g. 0.50 ask
+    = 50 ¢ per $1 = 50 % market probability).  Do NOT compute as 1 − market_yes_probability;
+    that uses the raw mid-market YES price which differs from the actual executable ask.
     """
-    if direction == "YES":
-        selected_side_mkt_prob = market_yes_probability
-    else:
-        selected_side_mkt_prob = 1.0 - market_yes_probability
-
     return {
         "selectedSide":                  direction,
         "selectedSideModelProbability":  ec_side_probability,
         "selectedSideAsk":               side_market_price,
-        "selectedSideMarketProbability": round(selected_side_mkt_prob, 6),
+        "selectedSideMarketProbability": round(side_market_price, 6),  # = ask, not 1 − yes_prob
         "selectedSideEdgePctPoints":     edge_pct_points,
     }
 
@@ -661,15 +657,14 @@ async def get_best_bet_today(
     side_ask       = float(d.get("side_market_price") or 0)   # YES ask for YES trades; NO ask for NO trades
     edge_pp        = float(d.get("edge_pct_points") or 0)
 
-    # Selected-side market probability:
-    #   YES trade → market YES probability
-    #   NO  trade → market NO probability = 1 − market YES probability
-    # Never use market_yes_probability as though it were the NO probability.
-    selected_side_mkt_prob = mkt_yes_prob if direction == "YES" else (1.0 - mkt_yes_prob)
+    # selectedSideMarketProbability = selectedSideAsk = the executable ask on the chosen side.
+    # In a Kalshi binary market the ask price IS the market-implied probability.
+    # Never compute as 1 − market_yes_probability; that uses the raw mid-market YES price.
+    selected_side_mkt_prob = side_ask   # == side_market_price
 
     why = (
         f"EdgeCast estimates {ec_side_prob * 100:.1f}% for the {direction} side "
-        f"(market implies {selected_side_mkt_prob * 100:.1f}% on the {direction} side). "
+        f"(market ask implies {selected_side_mkt_prob * 100:.1f}¢ on the {direction} side). "
         f"Entry at {side_ask * 100:.0f}¢ gives a claimed edge of {edge_pp:.1f} pp. "
         f"Settlement: {settle_date}. "
         f"Lead time: {lead if lead is not None else 'N/A'} day(s). "

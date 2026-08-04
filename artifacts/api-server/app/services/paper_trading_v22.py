@@ -383,13 +383,10 @@ async def decide_trade_v22(
             market_close_ts = market_close_ts.replace(tzinfo=timezone.utc)
         minutes_to_close = (market_close_ts - now).total_seconds() / 60
 
+    # expected_settlement_timestamp is only set from an actual Kalshi settlement field.
+    # target_date is a date-only string (for display/grouping) and must not be fabricated
+    # into a timestamp here.  Leave NULL until Kalshi provides explicit settlement metadata.
     expected_settle_ts = None
-    if market.target_date:
-        try:
-            from app.services.eligibility import _parse_settlement_dt as _psd
-            expected_settle_ts = _psd(market.target_date)
-        except Exception:
-            pass
 
     # ── Eligibility engine (Guards 1–5, 7–8) ─────────────────────────────────
     # Guard 6 (correlated-exposure) is applied at batch level in run_paper_trading_v22.
