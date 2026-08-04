@@ -20,3 +20,6 @@
 - [test-quote-timestamp-freshness](test-quote-timestamp-freshness.md) — Hardcoded datetimes in test fixtures fail _is_quote_fresh (4h window) the next day; use datetime.now(timezone.utc) for quote_timestamp.
 - [orphaned-job-cleanup](orphaned-job-cleanup.md) — Deployments kill mid-flight jobs leaving status='running' rows that block future /collect triggers; fix with a startup cleanup in init_db().
 - [official-trade-eligibility](official-trade-eligibility.md) — Eight-guard eligibility engine stamps paper trades OFFICIAL or RESEARCH_ONLY; two-pass batch runner enforces correlated-exposure limit before writing rows.
+- [quote-freshness-threshold](quote-freshness-threshold.md) — OFFICIAL_STALE_QUOTE_SECONDS=300; boundary `>300` so 300s passes; test fixtures must use <300s and anchor `now` for boundary tests.
+- [guard3-market-close-timestamp](guard3-market-close-timestamp.md) — Guard 3 uses Kalshi market close_time (≤120 min → RESEARCH_ONLY); target_settlement_date_str is Guard 2 only.
+- [best-bet-selected-side](best-bet-selected-side.md) — NO trades: selectedSideMarketProbability = 1−market_yes_probability; helper _selected_side_values() is testable; regression tests in test_best_bet_logic.py.
