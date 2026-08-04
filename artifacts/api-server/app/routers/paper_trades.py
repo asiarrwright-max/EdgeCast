@@ -580,59 +580,65 @@ async def get_best_bet_today(
     """
     from sqlalchemy import text as sql_text
 
+    # PostgreSQL forbids ORDER BY expressions directly on a UNION ALL.
+    # Wrap in a subquery so the outer ORDER BY references a plain column alias.
     best_sql = sql_text("""
-        SELECT
-            'v2.2'              AS strategy_version,
-            id,
-            market_ticker,
-            city,
-            weather_variable,
-            contract_type,
-            target_settlement_date,
-            direction,
-            ec_side_probability,
-            market_yes_probability,
-            side_market_price,
-            edge_pct_points,
-            lead_time_days,
-            quote_age_seconds,
-            station_verified,
-            eligibility_status,
-            decision_explanation,
-            created_at
-        FROM paper_trades
-        WHERE eligibility_status = 'OFFICIAL'
-          AND is_executable = TRUE
-          AND status        = 'OPEN'
-          AND strategy_version = 'v2.2'
+        SELECT *
+        FROM (
+            SELECT
+                'v2.2'              AS strategy_version,
+                id,
+                market_ticker,
+                city,
+                weather_variable,
+                contract_type,
+                target_settlement_date,
+                direction,
+                ec_side_probability,
+                market_yes_probability,
+                side_market_price,
+                edge_pct_points,
+                lead_time_days,
+                quote_age_seconds,
+                station_verified,
+                eligibility_status,
+                decision_explanation,
+                created_at,
+                edge_pct_points / GREATEST(side_market_price, 0.001) AS ev_ratio
+            FROM paper_trades
+            WHERE eligibility_status = 'OFFICIAL'
+              AND is_executable = TRUE
+              AND status        = 'OPEN'
+              AND strategy_version = 'v2.2'
 
-        UNION ALL
+            UNION ALL
 
-        SELECT
-            'v3.0'              AS strategy_version,
-            id,
-            market_ticker,
-            city,
-            weather_variable,
-            contract_type,
-            target_settlement_date,
-            direction,
-            ec_side_probability,
-            market_yes_probability,
-            side_market_price,
-            edge_pct_points,
-            lead_time_days,
-            quote_age_seconds,
-            station_verified,
-            eligibility_status,
-            decision_explanation,
-            created_at
-        FROM v3_paper_trades
-        WHERE eligibility_status = 'OFFICIAL'
-          AND is_executable = TRUE
-          AND status        = 'OPEN'
-
-        ORDER BY (edge_pct_points / GREATEST(side_market_price, 0.001)) DESC
+            SELECT
+                'v3.0'              AS strategy_version,
+                id,
+                market_ticker,
+                city,
+                weather_variable,
+                contract_type,
+                target_settlement_date,
+                direction,
+                ec_side_probability,
+                market_yes_probability,
+                side_market_price,
+                edge_pct_points,
+                lead_time_days,
+                quote_age_seconds,
+                station_verified,
+                eligibility_status,
+                decision_explanation,
+                created_at,
+                edge_pct_points / GREATEST(side_market_price, 0.001) AS ev_ratio
+            FROM v3_paper_trades
+            WHERE eligibility_status = 'OFFICIAL'
+              AND is_executable = TRUE
+              AND status        = 'OPEN'
+        ) AS candidates
+        ORDER BY ev_ratio DESC
         LIMIT 1
     """)
 
