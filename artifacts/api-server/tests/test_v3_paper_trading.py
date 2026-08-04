@@ -8,26 +8,25 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.v3_paper_trading import (
-    _check_station,
-    _check_freshness,
+    _check_station_nws,
     _decide_v3,
     STRATEGY_VERSION,
 )
 
 
 # ---------------------------------------------------------------------------
-# Station check
+# Station NWS check (hard-block only on nws_settlement=False)
 # ---------------------------------------------------------------------------
 
-class TestCheckStation:
+class TestCheckStationNws:
     def test_none_city_fails(self):
-        ok, reason = _check_station(None)
+        ok, reason = _check_station_nws(None)
         assert ok is False
         assert reason is not None
 
     def test_city_no_station_fails(self):
         with patch("app.services.v3_paper_trading.get_station", return_value=None):
-            ok, reason = _check_station("Unknown")
+            ok, reason = _check_station_nws("Unknown")
         assert ok is False
 
     def test_non_nws_fails(self):
@@ -35,17 +34,23 @@ class TestCheckStation:
         st.verified = True
         st.nws_settlement = False
         with patch("app.services.v3_paper_trading.get_station", return_value=st):
-            ok, reason = _check_station("Chicago")
+            ok, reason = _check_station_nws("Chicago")
         assert ok is False
-        assert "non-NWS" in (reason or "").lower() or "nws" in (reason or "").lower()
+        assert "nws" in (reason or "").lower()
 
-    def test_unverified_fails(self):
+    def test_unverified_nws_passes_nws_guard(self):
+        """
+        Hardening change: unverified NWS cities are no longer hard-blocked.
+        They pass _check_station_nws and are demoted to RESEARCH_ONLY by the
+        eligibility engine (assess_trade_eligibility).
+        """
         st = MagicMock()
         st.verified = False
         st.nws_settlement = True
         with patch("app.services.v3_paper_trading.get_station", return_value=st):
-            ok, reason = _check_station("Denver")
-        assert ok is False
+            ok, reason = _check_station_nws("Atlanta")
+        assert ok is True
+        assert reason is None
 
     def test_verified_nws_passes(self):
         st = MagicMock()
@@ -54,47 +59,9 @@ class TestCheckStation:
         st.lat = 39.86
         st.lon = -104.67
         with patch("app.services.v3_paper_trading.get_station", return_value=st):
-            ok, reason = _check_station("Denver")
+            ok, reason = _check_station_nws("Denver")
         assert ok is True
         assert reason is None
-
-
-# ---------------------------------------------------------------------------
-# Quote freshness check
-# ---------------------------------------------------------------------------
-
-class TestCheckFreshness:
-    def _make_market(self, age_hours: float) -> MagicMock:
-        now = datetime.now(timezone.utc)
-        from datetime import timedelta
-        coll_ts = now - timedelta(hours=age_hours)
-        m = MagicMock()
-        m.collection_timestamp = coll_ts
-        return m
-
-    def test_fresh_quote_passes(self):
-        market = self._make_market(1.0)
-        ok, reason = _check_freshness(market, datetime.now(timezone.utc))
-        assert ok is True
-        assert reason is None
-
-    def test_stale_quote_fails(self):
-        market = self._make_market(5.0)  # >4 h
-        ok, reason = _check_freshness(market, datetime.now(timezone.utc))
-        assert ok is False
-        assert "stale" in (reason or "").lower()
-
-    def test_boundary_just_under_4h_passes(self):
-        market = self._make_market(3.99)
-        ok, _reason = _check_freshness(market, datetime.now(timezone.utc))
-        assert ok is True
-
-    def test_no_timestamp_fails(self):
-        m = MagicMock()
-        m.collection_timestamp = None
-        ok, reason = _check_freshness(m, datetime.now(timezone.utc))
-        assert ok is False
-        assert reason is not None
 
 
 # ---------------------------------------------------------------------------
@@ -110,11 +77,17 @@ def _make_v3_snap(ec_prob: float, market_prob: float = 0.50) -> MagicMock:
     snap.fallback_level_used = 2
     snap.bias_applied = True
     snap.market_ticker = "TEST-TICKER"
+    snap.contract_type = "threshold"
+    snap.settlement_variable = "high"
+    snap.lead_time_days = 2
     return snap
 
 
 def _make_market(yes_bid: float = 0.45, yes_ask: float = 0.50,
-                 status: str = "active") -> MagicMock:
+                 status: str = "active",
+                 days_ahead: int = 2) -> MagicMock:
+    from datetime import timedelta
+    settlement_dt = datetime.now(timezone.utc) + timedelta(days=days_ahead, hours=4)
     m = MagicMock()
     m.yes_bid = yes_bid
     m.yes_ask = yes_ask
@@ -123,6 +96,7 @@ def _make_market(yes_bid: float = 0.45, yes_ask: float = 0.50,
     m.city = "Denver"
     m.status = status
     m.collection_timestamp = datetime.now(timezone.utc)
+    m.target_date = settlement_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     return m
 
 
@@ -137,6 +111,8 @@ _GOOD_STATION = MagicMock(
     nws_settlement=True,
     lat=39.86,
     lon=-104.67,
+    timezone="America/Denver",
+    station_name="Denver International Airport (KDEN)",
 )
 
 
@@ -148,13 +124,24 @@ class TestDecideV3:
             d = _decide_v3(snap, market, _DEFAULT_SETTINGS, datetime.now(timezone.utc))
         assert d["action"] == "SKIP"
 
-    def test_unverified_station_skips(self):
+    def test_unverified_station_is_research_only(self):
+        """
+        Hardening change: unverified NWS cities no longer cause a SKIP.
+        They produce a direction decision but with eligibility_status='RESEARCH_ONLY'.
+        """
         snap = _make_v3_snap(0.70)
         market = _make_market()
-        bad_station = MagicMock(verified=False, nws_settlement=True)
+        bad_station = MagicMock(
+            verified=False, nws_settlement=True,
+            lat=33.6, lon=-84.4,
+            timezone="America/New_York",
+            station_name="Atlanta Hartsfield-Jackson (KATL)",
+        )
         with patch("app.services.v3_paper_trading.get_station", return_value=bad_station):
             d = _decide_v3(snap, market, _DEFAULT_SETTINGS, datetime.now(timezone.utc))
-        assert d["action"] == "SKIP"
+        assert d["action"] != "SKIP"
+        assert d.get("eligibility_status") == "RESEARCH_ONLY"
+        assert d.get("eligibility_reason") == "settlement_station_unverified"
 
     def test_insufficient_edge_skips(self):
         # ec_prob=0.55, yes_ask=0.50 → yes_edge=0.05 < 0.10
@@ -192,14 +179,20 @@ class TestDecideV3:
         assert d["action"] == "SKIP"
         assert "active" in (d["skip_reason"] or "").lower()
 
-    def test_stale_quote_skips(self):
+    def test_stale_quote_is_research_only(self):
+        """
+        Hardening change: stale quotes no longer cause a SKIP.
+        They produce a direction decision but with eligibility_status='RESEARCH_ONLY'.
+        """
         from datetime import timedelta
         snap = _make_v3_snap(0.75)
         market = _make_market()
         market.collection_timestamp = datetime.now(timezone.utc) - timedelta(hours=6)
         with patch("app.services.v3_paper_trading.get_station", return_value=_GOOD_STATION):
             d = _decide_v3(snap, market, _DEFAULT_SETTINGS, datetime.now(timezone.utc))
-        assert d["action"] == "SKIP"
+        assert d["action"] != "SKIP"
+        assert d.get("eligibility_status") == "RESEARCH_ONLY"
+        assert d.get("eligibility_reason") == "missing_or_stale_executable_quote"
 
     def test_higher_yes_edge_beats_no(self):
         # yes_edge=0.30, no_edge=0.15 → direction=YES

@@ -1,0 +1,213 @@
+Please implement a controlled “official trade eligibility” hardening pass based on the forensic audit.
+
+Do not change the probability formulas, historical models, bias calculations, sigma calculations, settlement outcomes, or existing records during this task. Do not delete historical trades. Do not place real Kalshi orders.
+
+The goal is to separate safe official forward testing from research-only signals.
+
+Apply the following rules independently to V2.2 and V3:
+
+1. DAILY WEATHER ONLY
+Official paper trades may only be created for daily high-temperature or daily low-temperature contracts.
+
+Hourly temperature contracts must not create official paper trades. Continue calculating their predictions if useful, but label them:
+is_executable = false
+eligibility_status = "RESEARCH_ONLY"
+eligibility_reason = "hourly_temperature_not_approved"
+
+2. NO SAME-DAY OFFICIAL ENTRY
+Require lead_time_days >= 1 for an official paper trade.
+
+Any market targeting the current local settlement date must be research-only, with:
+eligibility_reason = "same_day_not_approved"
+
+Use the market’s settlement-location timezone, not UTC date alone.
+
+3. HARD CUTOFF AND TIMEZONE GUARD
+Before creating any trade, confirm:
+- current time is before the actual Kalshi market close/settlement cutoff;
+- settlement date and cutoff are interpreted in the settlement location’s timezone;
+- the outcome has not already been observed;
+- apply a configurable safety buffer before cutoff.
+
+Suggested setting:
+official_trade_cutoff_buffer_minutes = 120
+
+If the exact cutoff cannot be verified, do not create an official trade.
+
+Reason:
+"cutoff_unverified_or_too_close"
+
+Add regression tests covering the prior UTC/local-date error that allowed trades after target_settlement_date.
+
+4. ENTRY-PRICE FLOOR
+Official paper trades require executable entry price >= $0.20.
+
+Contracts below $0.20 remain visible as research-only:
+eligibility_reason = "entry_price_below_official_floor"
+
+This applies to both YES and NO entry prices.
+
+Make the threshold configurable:
+official_min_entry_price = 0.20
+
+5. EXTREME-EDGE GUARD
+If claimed edge >= 50 percentage points, classify the signal as research-only instead of an official paper trade.
+
+Reason:
+"extreme_edge_requires_validation"
+
+Make configurable:
+official_max_edge_pp = 50
+
+Do not cap or alter the stored probability. Preserve the original probability and edge for analysis.
+
+6. CORRELATED-EXPOSURE LIMIT
+For each strategy, allow no more than one official open trade per:
+
+settlement_station + target_date + weather_variable
+
+This means multiple brackets or thresholds tied to the same underlying temperature cannot all become official trades.
+
+Choose the candidate using a deterministic ranking:
+- fresh executable quote required;
+- must pass every eligibility guard;
+- prefer highest expected value after estimated fees;
+- then lower claimed edge if tied;
+- then latest fresh quote.
+
+All other candidates remain research-only with:
+eligibility_reason = "correlated_outcome_limit"
+
+Do not combine V2.2 and V3 exposure. The limit applies independently within each strategy.
+
+7. VERIFIED SETTLEMENT STATION REQUIRED
+Official trades require a verified Kalshi settlement station.
+
+Washington, DC must remain inactive/research-only until its exact settlement station is verified.
+
+Reason:
+"settlement_station_unverified"
+
+No city-center or nearby-station fallback is permitted for official trades.
+
+8. FRESH QUOTE REQUIRED
+Every official paper trade must store:
+- quote_timestamp
+- entry-side executable ask price
+- quote_age_seconds
+- market status at decision time
+
+Require quote_timestamp to be non-null and within the configured freshness limit.
+
+If missing or stale:
+eligibility_reason = "missing_or_stale_executable_quote"
+
+Confirm YES uses yes_ask and NO uses no_ask.
+
+9. STRATEGY ISOLATION
+V2.2 and V3 must remain fully separate:
+- separate trade rows
+- separate strategy_version
+- separate snapshot linkage
+- separate settlement
+- separate P/L
+- separate ROI
+- separate Brier score
+- separate readiness milestones
+
+Do not present V2.2 + V3 as one combined strategy or one combined winner.
+
+The comparison page may show them side by side, but the preliminary leader must be selected from individual strategy performance only.
+
+10. OFFICIAL VS RESEARCH DISPLAY
+Update Strategy Comparison and Paper Trading so each strategy clearly shows:
+
+OFFICIAL FORWARD TEST
+- daily high/low only
+- lead time >= 1 day
+- verified station
+- fresh executable quote
+- entry >= $0.20
+- edge < 50pp
+- one trade per underlying outcome
+
+RESEARCH-ONLY SIGNALS
+- hourly
+- same-day
+- cheap entry
+- extreme edge
+- correlated extra brackets
+- unverified station
+- stale/missing quote
+
+Research-only records must never affect official:
+- win rate
+- ROI
+- P/L
+- Brier score
+- preliminary leader
+- readiness milestones
+- best bet today
+
+11. BEST BET TODAY
+The “Best Paper Bet Today” panel must choose only from official-eligible opportunities.
+
+Display in plain language:
+- strategy version
+- city
+- settlement date
+- Kalshi market wording
+- YES or NO
+- executable entry price
+- EdgeCast probability
+- market probability
+- edge
+- lead time
+- station
+- quote age
+- why it qualifies
+
+If no opportunity passes every official rule, show:
+“No official-quality paper bet is available right now.”
+
+Do not substitute a research-only signal.
+
+12. CURRENT METRICS CLEANUP
+Current-experiment headline metrics must exclude:
+- V1
+- V2.0
+- V2_EXCLUDED
+- non-executable trades
+- research-only signals
+- stale or unverified trades
+- historical test records
+
+Show V2.2 and V3 separately.
+
+13. TESTS AND READ-ONLY VALIDATION
+Add tests for every guard, including:
+- same-day UTC/local-time regression
+- trade after settlement cutoff
+- hourly exclusion
+- entry at $0.19 vs $0.20
+- edge at 49.9pp vs 50pp
+- correlated brackets
+- missing quote timestamp
+- stale quote
+- wrong station
+- YES/NO ask-price direction
+- strategy isolation
+- research rows excluded from all official metrics
+
+After implementation, keep both strategies running in paper mode only.
+
+Return:
+A. before/after eligibility counts;
+B. number rejected under each reason;
+C. list of official open V2.2 trades;
+D. list of official open V3 trades;
+E. confirmation that no real Kalshi orders were created;
+F. confirmation V2.2 and V3 statistics remain separate;
+G. complete test results.
+
+Do not automatically loosen these rules after implementation.

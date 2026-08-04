@@ -54,14 +54,13 @@ from app.services.paper_trading_v2 import (
     V2_FLAG_DESCRIPTIONS,
     _v2_exclusion_flag,
 )
+from app.services.eligibility import apply_correlated_limit, assess_trade_eligibility
 from app.services.paper_trading_v21 import (
     CONSENSUS_GUARD_THRESHOLD,
     NON_EXECUTABLE_MAX_PRICE,
     NON_EXECUTABLE_MAX_QTY,
     STALE_QUOTE_SECONDS,
     _check_consensus_guard,
-    _check_quote_freshness,
-    _check_station_verified,
     _is_executable,
     _skip_v21 as _skip_v22,
 )
@@ -160,13 +159,19 @@ async def decide_trade_v22(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """
-    Evaluate one market using the V2.2 probability engine with V2.1 guards.
+    Evaluate one market using the V2.2 probability engine.
 
-    Identical to decide_trade_v21 except:
-      - Imports run_analysis_v22 (corrected bias sign) instead of run_analysis_v2.
-      - Explanation prefix is "[v2.2]" instead of "[v2.1]".
-      - strategy_version is "v2.2" in created rows.
-    All guards (station, freshness, executability, consensus) are identical.
+    Changes from V2.1:
+      - Uses run_analysis_v22 (corrected bias sign).
+      - Station guard: only hard-blocks on nws_settlement=False (e.g. Washington DC).
+        Unverified NWS cities pass through and are demoted to RESEARCH_ONLY by the
+        eligibility engine below.
+      - Quote freshness is no longer a hard-stop.  Stale-quote trades are classified
+        RESEARCH_ONLY instead of SKIP, so a row is still created for analysis.
+      - Returns eligibility_status, eligibility_reason, quote_age_seconds.
+      - Returns city, target_settlement_date_str, settlement_timezone, weather_variable
+        so the batch-level correlated-exposure limit (Guard 6) can group candidates
+        without re-fetching the market row.
     """
     from app.services.probability_engine_v22 import run_analysis_v22
 
@@ -179,19 +184,25 @@ async def decide_trade_v22(
         "slippage, and fill availability are not modelled.",
     ]
 
-    # ── Guard 1: station verification ────────────────────────────────────────
-    station_ok, station_skip_reason = _check_station_verified(market.city)
-    if not station_ok:
-        return _skip_v22(station_skip_reason, None, None, warnings)
-
+    # ── Hard-stop: NWS settlement source ─────────────────────────────────────
+    # Cities like Washington DC settle on The Weather Company, not NWS.
+    # The V2.2 model is calibrated against NWS only; trading these would be
+    # meaningless.  Hard-block here; unverified NWS cities pass through.
+    if not market.city:
+        return _skip_v22("City not identified", None, None, warnings)
     station = get_station(market.city)
-    station_lat = station.lat
-    station_lon = station.lon
+    if station is None:
+        return _skip_v22(f"No settlement station for '{market.city}'", None, None, warnings)
+    if not getattr(station, "nws_settlement", True):
+        return _skip_v22(
+            f"Non-NWS settlement for '{market.city}' — permanently blocked",
+            None, None, warnings,
+        )
 
-    # ── Guard 2: quote freshness (4 h) ───────────────────────────────────────
-    fresh_ok, fresh_skip_reason = _check_quote_freshness(market, now)
-    if not fresh_ok:
-        return _skip_v22(fresh_skip_reason, None, None, warnings)
+    station_lat      = station.lat
+    station_lon      = station.lon
+    station_tz       = getattr(station, "timezone", "UTC")
+    station_verified = getattr(station, "verified", False)
 
     # ── Standard V2 pre-checks ────────────────────────────────────────────────
     if snap.analysis_status != "supported":
@@ -229,9 +240,9 @@ async def decide_trade_v22(
         session=session,
     )
 
-    ec_yes_prob = result.ec_probability
+    ec_yes_prob  = result.ec_probability
     mkt_yes_prob = result.market_probability
-    confidence = result.confidence
+    confidence   = result.confidence
 
     if ec_yes_prob is None:
         return _skip_v22("V2.2 probability unavailable", ec_yes_prob, mkt_yes_prob, warnings)
@@ -248,21 +259,21 @@ async def decide_trade_v22(
 
     # ── Edge calculation ──────────────────────────────────────────────────────
     ec_no_prob = round(1.0 - ec_yes_prob, 4)
-    min_edge = settings["min_edge_pct"] / 100.0
+    min_edge   = settings["min_edge_pct"] / 100.0
 
     yes_price, yes_src = _select_yes_price(market)
-    no_price, no_src = _select_no_price(market)
+    no_price,  no_src  = _select_no_price(market)
 
     yes_edge = (ec_yes_prob - yes_price) if yes_price is not None else None
-    no_edge = (ec_no_prob - no_price) if no_price is not None else None
+    no_edge  = (ec_no_prob  - no_price)  if no_price  is not None else None
 
     yes_qualifies = yes_edge is not None and yes_edge >= min_edge
-    no_qualifies = no_edge is not None and no_edge >= min_edge
+    no_qualifies  = no_edge  is not None and no_edge  >= min_edge
 
     if not yes_qualifies and not no_qualifies:
         candidates = [e for e in [yes_edge, no_edge] if e is not None]
         best_edge = max(candidates) if candidates else None
-        best_str = f"{best_edge * 100:.1f}pp" if best_edge is not None else "N/A"
+        best_str  = f"{best_edge * 100:.1f}pp" if best_edge is not None else "N/A"
         return _skip_v22(
             f"Edge below threshold ({best_str} < {settings['min_edge_pct']:.1f}pp)",
             ec_yes_prob, mkt_yes_prob, warnings,
@@ -278,50 +289,59 @@ async def decide_trade_v22(
 
     if direction == "YES":
         side_price, src = yes_price, yes_src
-        ec_side_prob = ec_yes_prob
-        edge = yes_edge
-        quote_bid = market.yes_bid
-        quote_ask = market.yes_ask
+        ec_side_prob    = ec_yes_prob
+        edge            = yes_edge
+        quote_bid       = market.yes_bid
+        quote_ask       = market.yes_ask
     else:
         side_price, src = no_price, no_src
-        ec_side_prob = ec_no_prob
-        edge = no_edge
-        quote_bid = market.no_bid
-        quote_ask = market.no_ask
+        ec_side_prob    = ec_no_prob
+        edge            = no_edge
+        quote_bid       = market.no_bid
+        quote_ask       = market.no_ask
+
+    edge_pp = round((edge or 0) * 100, 4)
 
     # ── V2 base exclusion checks ──────────────────────────────────────────────
     excl_flag = _v2_exclusion_flag(market, side_price)
     if excl_flag:
         return {
-            "action": "EXCLUDED",
-            "exclusion_flag": excl_flag,
-            "skip_reason": V2_FLAG_DESCRIPTIONS.get(excl_flag, excl_flag),
-            "direction": direction,
-            "ec_yes_probability": ec_yes_prob,
-            "ec_side_probability": ec_side_prob,
+            "action":               "EXCLUDED",
+            "exclusion_flag":       excl_flag,
+            "skip_reason":          V2_FLAG_DESCRIPTIONS.get(excl_flag, excl_flag),
+            "direction":            direction,
+            "ec_yes_probability":   ec_yes_prob,
+            "ec_side_probability":  ec_side_prob,
             "market_yes_probability": mkt_yes_prob,
-            "side_market_price": side_price,
-            "price_source": src,
-            "edge_pct_points": round((edge or 0) * 100, 4),
+            "side_market_price":    side_price,
+            "price_source":         src,
+            "edge_pct_points":      edge_pp,
             "decision_explanation": f"[v2.2 excluded: {excl_flag}] {result.explanation}",
-            "warnings": warnings,
-            "sigma_used": result.sigma_used,
-            "bias_correction": result.bias_correction,
-            "fallback_level": result.fallback_level,
-            "calibration_adj": result.calibration_adj,
-            "raw_ec_probability": result.raw_ec_probability,
-            "station_verified": True,
-            "station_lat": station_lat,
-            "station_lon": station_lon,
-            "quote_bid": quote_bid,
-            "quote_ask": quote_ask,
-            "quote_timestamp": market.collection_timestamp,
-            "est_available_qty": getattr(market, "open_interest", None),
-            "is_executable": None,
+            "warnings":             warnings,
+            "sigma_used":           result.sigma_used,
+            "bias_correction":      result.bias_correction,
+            "fallback_level":       result.fallback_level,
+            "calibration_adj":      result.calibration_adj,
+            "raw_ec_probability":   result.raw_ec_probability,
+            "station_verified":     station_verified,
+            "station_lat":          station_lat,
+            "station_lon":          station_lon,
+            "quote_bid":            quote_bid,
+            "quote_ask":            quote_ask,
+            "quote_timestamp":      market.collection_timestamp,
+            "est_available_qty":    getattr(market, "open_interest", None),
+            "is_executable":        False,
             "consensus_guard_triggered": False,
+            "eligibility_status":   "RESEARCH_ONLY",
+            "eligibility_reason":   "v2_excluded",
+            "quote_age_seconds":    None,
+            "city":                         market.city,
+            "target_settlement_date_str":   market.target_date,
+            "settlement_timezone":          station_tz,
+            "weather_variable":             snap.settlement_variable,
         }
 
-    # ── Guard 3: consensus guard (configurable) ───────────────────────────────
+    # ── Consensus guard (configurable) ───────────────────────────────────────
     consensus_guard_triggered = False
     if settings.get("consensus_guard_enabled", False):
         cg_ok, cg_reason = _check_consensus_guard(direction, ec_yes_prob, mkt_yes_prob)
@@ -332,55 +352,79 @@ async def decide_trade_v22(
                 ec_yes_prob, mkt_yes_prob, warnings,
                 extra={
                     "consensus_guard_triggered": True,
-                    "station_verified": True,
-                    "station_lat": station_lat,
-                    "station_lon": station_lon,
+                    "station_verified": station_verified,
+                    "station_lat":      station_lat,
+                    "station_lon":      station_lon,
                 },
             )
 
     # ── Build explanation ─────────────────────────────────────────────────────
     sigma = result.sigma_used or 0.0
-    bias = result.bias_correction or 0.0
+    bias  = result.bias_correction or 0.0
     explanation = (
         f"[v2.2] EdgeCast estimated {ec_yes_prob * 100:.1f}% YES "
         f"(σ={sigma:.1f}°F/{result.fallback_level}, bias={bias:+.1f}°F). "
         f"{'YES' if direction == 'YES' else 'NO'} price ({src}) implied "
         f"{(side_price or 0) * 100:.1f}%. "
-        f"Edge: +{(edge or 0) * 100:.1f}pp. Confidence: {confidence}. "
-        f"Station: {station.station_name} (verified)."
+        f"Edge: +{edge_pp:.1f}pp. Confidence: {confidence}. "
+        f"Station: {station.station_name} ({'verified' if station_verified else 'unverified'})."
     )
 
-    # ── Executability ─────────────────────────────────────────────────────────
-    pos_check = calculate_position(settings["stake"], side_price or 0.0)
-    executable = _is_executable(pos_check.get("quantity", 0.0), side_price or 0.0)
+    # ── Eligibility engine (Guards 1–5, 7–8) ─────────────────────────────────
+    # Guard 6 (correlated-exposure) is applied at batch level in run_paper_trading_v22.
+    elig_status, elig_reason, quote_age_s = assess_trade_eligibility(
+        contract_type=snap.contract_type,
+        target_settlement_date_str=market.target_date,
+        settlement_timezone=station_tz,
+        now=now,
+        side_market_price=side_price,
+        edge_pct_points=edge_pp,
+        station_verified=station_verified,
+        direction=direction,
+        quote_timestamp=market.collection_timestamp,
+        quote_ask=quote_ask,
+    )
+
+    # OFFICIAL trades may be executable; RESEARCH_ONLY trades are never executable.
+    executable = (elig_status == "OFFICIAL") and _is_executable(
+        calculate_position(settings["stake"], side_price or 0.0).get("quantity", 0.0),
+        side_price or 0.0,
+    )
 
     return {
-        "action": direction,
-        "exclusion_flag": None,
-        "skip_reason": None,
-        "direction": direction,
-        "ec_yes_probability": ec_yes_prob,
-        "ec_side_probability": ec_side_prob,
+        "action":               direction,
+        "exclusion_flag":       None,
+        "skip_reason":          None,
+        "direction":            direction,
+        "ec_yes_probability":   ec_yes_prob,
+        "ec_side_probability":  ec_side_prob,
         "market_yes_probability": mkt_yes_prob,
-        "side_market_price": side_price,
-        "price_source": src,
-        "edge_pct_points": round((edge or 0) * 100, 4),
+        "side_market_price":    side_price,
+        "price_source":         src,
+        "edge_pct_points":      edge_pp,
         "decision_explanation": explanation,
-        "warnings": warnings,
-        "sigma_used": result.sigma_used,
-        "bias_correction": result.bias_correction,
-        "fallback_level": result.fallback_level,
-        "calibration_adj": result.calibration_adj,
-        "raw_ec_probability": result.raw_ec_probability,
-        "station_verified": True,
-        "station_lat": station_lat,
-        "station_lon": station_lon,
-        "quote_bid": quote_bid,
-        "quote_ask": quote_ask,
-        "quote_timestamp": market.collection_timestamp,
-        "est_available_qty": getattr(market, "open_interest", None),
-        "is_executable": executable,
+        "warnings":             warnings,
+        "sigma_used":           result.sigma_used,
+        "bias_correction":      result.bias_correction,
+        "fallback_level":       result.fallback_level,
+        "calibration_adj":      result.calibration_adj,
+        "raw_ec_probability":   result.raw_ec_probability,
+        "station_verified":     station_verified,
+        "station_lat":          station_lat,
+        "station_lon":          station_lon,
+        "quote_bid":            quote_bid,
+        "quote_ask":            quote_ask,
+        "quote_timestamp":      market.collection_timestamp,
+        "est_available_qty":    getattr(market, "open_interest", None),
+        "is_executable":        executable,
         "consensus_guard_triggered": consensus_guard_triggered,
+        "eligibility_status":           elig_status,
+        "eligibility_reason":           elig_reason,
+        "quote_age_seconds":            quote_age_s,
+        "city":                         market.city,
+        "target_settlement_date_str":   market.target_date,
+        "settlement_timezone":          station_tz,
+        "weather_variable":             snap.settlement_variable,
     }
 
 
@@ -463,6 +507,9 @@ async def maybe_create_paper_trade_v22(
             quote_timestamp=decision["quote_timestamp"],
             est_available_qty=decision["est_available_qty"],
             is_executable=decision["is_executable"],
+            eligibility_status=decision.get("eligibility_status"),
+            eligibility_reason=decision.get("eligibility_reason"),
+            quote_age_seconds=decision.get("quote_age_seconds"),
             comparison_snapshot_id=comparison_snapshot_id,
             collection_batch_id=batch_id,
         )
@@ -517,6 +564,9 @@ async def maybe_create_paper_trade_v22(
         quote_timestamp=decision["quote_timestamp"],
         est_available_qty=decision["est_available_qty"],
         is_executable=decision["is_executable"],
+        eligibility_status=decision.get("eligibility_status"),
+        eligibility_reason=decision.get("eligibility_reason"),
+        quote_age_seconds=decision.get("quote_age_seconds"),
         comparison_snapshot_id=comparison_snapshot_id,
         collection_batch_id=batch_id,
     )
@@ -524,13 +574,15 @@ async def maybe_create_paper_trade_v22(
     await session.flush()
 
     logger.info(
-        "V2.2 paper trade created: %s %s @ %.4f (σ=%.1f/%s, bias=%+.1f, edge=%.1fpp, executable=%s)",
+        "V2.2 paper trade created: %s %s @ %.4f (σ=%.1f/%s, bias=%+.1f, "
+        "edge=%.1fpp, exec=%s, elig=%s)",
         decision["direction"], market.ticker, side_price,
         decision["sigma_used"] or 0,
         decision["fallback_level"],
         decision["bias_correction"] or 0,
         decision["edge_pct_points"] or 0,
         decision["is_executable"],
+        decision.get("eligibility_status"),
     )
     return {"created": True, "excluded": False, "direction": decision["direction"]}
 
@@ -545,6 +597,13 @@ async def run_paper_trading_v22(
     """
     Review all recently-analyzed markets and create V2.2 paper trades.
     Called after V2.1 paper trading in each collection run.
+
+    Two-pass design (required for Guard 6 correlated-exposure limit):
+      Phase 1 — evaluate every candidate without writing any trade rows.
+      Phase 2 — apply the correlated-exposure limit to all OFFICIAL candidates
+                 so that at most one OFFICIAL trade exists per
+                 (city, settlement_local_date, weather_variable).
+      Phase 3 — write all trade rows (OFFICIAL, RESEARCH_ONLY, and EXCLUDED).
 
     ``batch_id`` and ``comparison_snapshot_ids`` are supplied by the collector
     after creating ComparisonSnapshot rows.  When provided, every new trade
@@ -593,24 +652,166 @@ async def run_paper_trading_v22(
         m.ticker: m for m in markets_q.scalars().all()
     }
 
+    # ── Phase 1: evaluate all candidates (no DB writes) ───────────────────────
+    # list of (snap, market, decision, comp_id)
+    evaluations: list[tuple] = []
+
     for snap in latest_snaps:
         market = market_map.get(snap.market_ticker)
         if market is None:
             continue
 
+        # Duplicate check — one row per (ticker, "v2.2")
+        existing_q = await session.execute(
+            select(PaperTrade).where(
+                PaperTrade.market_ticker == market.ticker,
+                PaperTrade.strategy_version == STRATEGY_VERSION,
+            )
+        )
+        if existing_q.scalar_one_or_none() is not None:
+            stats["skipped"] += 1
+            continue
+
         stats["candidates"] += 1
         try:
-            result = await maybe_create_paper_trade_v22(
-                session, market, snap, settings, now=now,
-                comparison_snapshot_id=comp_ids.get(snap.market_ticker),
-                batch_id=batch_id,
-            )
-            if result["created"]:
-                stats["created"] += 1
-            elif result.get("excluded"):
-                stats["excluded"] += 1
-            else:
+            decision = await decide_trade_v22(snap, market, settings, session, now=now)
+            if decision["action"] == "SKIP":
                 stats["skipped"] += 1
+                continue
+            evaluations.append((snap, market, decision, comp_ids.get(snap.market_ticker)))
+        except Exception as exc:
+            stats["errors"] += 1
+            logger.warning("V2.2 decision error for %s: %s", snap.market_ticker, exc)
+
+    # ── Phase 2: correlated-exposure limit (Guard 6) ──────────────────────────
+    official_decisions = [
+        d for (_, _, d, _) in evaluations
+        if d.get("eligibility_status") == "OFFICIAL"
+    ]
+    if official_decisions:
+        apply_correlated_limit(official_decisions)
+        # apply_correlated_limit mutates the dicts in-place, so evaluations reflects the changes
+
+    # ── Phase 3: create trade rows ────────────────────────────────────────────
+    for snap, market, decision, comp_id in evaluations:
+        try:
+            stake      = settings["stake"]
+            side_price = decision["side_market_price"] or 0.0
+
+            if decision["action"] == "EXCLUDED":
+                trade = PaperTrade(
+                    market_ticker=market.ticker,
+                    event_ticker=market.event_ticker,
+                    city=market.city,
+                    weather_variable=snap.settlement_variable,
+                    contract_type=snap.contract_type,
+                    target_settlement_date=market.target_date,
+                    snapshot_id=snap.id,
+                    strategy_version=STRATEGY_VERSION,
+                    direction=decision["direction"] or "YES",
+                    ec_yes_probability=decision["ec_yes_probability"],
+                    ec_side_probability=decision["ec_side_probability"],
+                    market_yes_probability=decision["market_yes_probability"],
+                    side_market_price=side_price,
+                    price_source=decision["price_source"],
+                    edge_pct_points=decision["edge_pct_points"],
+                    confidence_score=None,
+                    confidence_label=snap.confidence,
+                    stake=0.0,
+                    quantity=0.0,
+                    lead_time_days=snap.lead_time_days,
+                    status="V2_EXCLUDED",
+                    decision_explanation=decision["decision_explanation"],
+                    warnings="; ".join(decision["warnings"]),
+                    quality_flags=[decision["exclusion_flag"]],
+                    sigma_used=decision["sigma_used"],
+                    bias_correction=decision["bias_correction"],
+                    fallback_level=decision["fallback_level"],
+                    calibration_adj=decision["calibration_adj"],
+                    station_verified=decision["station_verified"],
+                    station_lat=decision["station_lat"],
+                    station_lon=decision["station_lon"],
+                    quote_bid=decision["quote_bid"],
+                    quote_ask=decision["quote_ask"],
+                    quote_timestamp=decision["quote_timestamp"],
+                    est_available_qty=decision["est_available_qty"],
+                    is_executable=decision["is_executable"],
+                    eligibility_status=decision.get("eligibility_status"),
+                    eligibility_reason=decision.get("eligibility_reason"),
+                    quote_age_seconds=decision.get("quote_age_seconds"),
+                    comparison_snapshot_id=comp_id,
+                    collection_batch_id=batch_id,
+                )
+                session.add(trade)
+                await session.flush()
+                stats["excluded"] += 1
+                continue
+
+            if side_price <= 0:
+                stats["skipped"] += 1
+                continue
+
+            pos = calculate_position(stake, side_price)
+
+            trade = PaperTrade(
+                market_ticker=market.ticker,
+                event_ticker=market.event_ticker,
+                city=market.city,
+                weather_variable=snap.settlement_variable,
+                contract_type=snap.contract_type,
+                target_settlement_date=market.target_date,
+                snapshot_id=snap.id,
+                strategy_version=STRATEGY_VERSION,
+                direction=decision["direction"],
+                ec_yes_probability=decision["ec_yes_probability"],
+                ec_side_probability=decision["ec_side_probability"],
+                market_yes_probability=decision["market_yes_probability"],
+                side_market_price=side_price,
+                price_source=decision["price_source"],
+                edge_pct_points=decision["edge_pct_points"],
+                confidence_score=None,
+                confidence_label=snap.confidence,
+                stake=pos["stake"],
+                quantity=pos["quantity"],
+                lead_time_days=snap.lead_time_days,
+                status="OPEN",
+                decision_explanation=decision["decision_explanation"],
+                warnings="; ".join(decision["warnings"]),
+                quality_flags=None,
+                sigma_used=decision["sigma_used"],
+                bias_correction=decision["bias_correction"],
+                fallback_level=decision["fallback_level"],
+                calibration_adj=decision["calibration_adj"],
+                station_verified=decision["station_verified"],
+                station_lat=decision["station_lat"],
+                station_lon=decision["station_lon"],
+                quote_bid=decision["quote_bid"],
+                quote_ask=decision["quote_ask"],
+                quote_timestamp=decision["quote_timestamp"],
+                est_available_qty=decision["est_available_qty"],
+                is_executable=decision["is_executable"],
+                eligibility_status=decision.get("eligibility_status"),
+                eligibility_reason=decision.get("eligibility_reason"),
+                quote_age_seconds=decision.get("quote_age_seconds"),
+                comparison_snapshot_id=comp_id,
+                collection_batch_id=batch_id,
+            )
+            session.add(trade)
+            await session.flush()
+            stats["created"] += 1
+
+            logger.info(
+                "V2.2 paper trade created: %s %s @ %.4f (σ=%.1f/%s, bias=%+.1f, "
+                "edge=%.1fpp, exec=%s, elig=%s)",
+                decision["direction"], market.ticker, side_price,
+                decision["sigma_used"] or 0,
+                decision["fallback_level"],
+                decision["bias_correction"] or 0,
+                decision["edge_pct_points"] or 0,
+                decision["is_executable"],
+                decision.get("eligibility_status"),
+            )
+
         except Exception as exc:
             stats["errors"] += 1
             logger.warning("V2.2 paper trade error for %s: %s", snap.market_ticker, exc)

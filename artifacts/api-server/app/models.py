@@ -434,3 +434,11 @@ class PaperTrade(Base):
     # "strictly paired" — all strategies evaluated identical quote + forecast.
     comparison_snapshot_id: Mapped[str | None] = mapped_column(String(36), index=True)
     collection_batch_id: Mapped[str | None] = mapped_column(String(36), index=True)
+
+    # Official Trade Eligibility — hardening pass
+    # NULL = pre-hardening trade (treated as "is_executable" governs)
+    # "OFFICIAL"      = passes all eight guards; counted in official forward-test metrics
+    # "RESEARCH_ONLY" = fails one or more guards; stored for analysis but excluded from headline metrics
+    eligibility_status: Mapped[str | None] = mapped_column(String(20), index=True)
+    eligibility_reason: Mapped[str | None] = mapped_column(String(60))   # reason code or None
+    quote_age_seconds: Mapped[float | None] = mapped_column(Float)        # seconds since quote was fetched

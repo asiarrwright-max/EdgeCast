@@ -533,6 +533,135 @@ async def get_segment_summary(
     return {"rows": rows}
 
 
+@router.get("/paper-trades/best-bet-today")
+async def get_best_bet_today(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
+    """
+    Return the single best OFFICIAL open paper trade across V2.2 and V3.
+
+    "Best" = highest expected value = edge_pct_points / side_market_price.
+    Only trades with eligibility_status = 'OFFICIAL' AND is_executable = TRUE
+    AND status = 'OPEN' qualify.
+
+    Returns {"available": bool, "trade": {...} | null}.
+    When no official-quality bets exist, available=False and a clear message
+    is returned — research-only signals are never surfaced here.
+    """
+    from sqlalchemy import text as sql_text
+
+    best_sql = sql_text("""
+        SELECT
+            'v2.2'              AS strategy_version,
+            id,
+            market_ticker,
+            city,
+            weather_variable,
+            contract_type,
+            target_settlement_date,
+            direction,
+            ec_side_probability,
+            market_yes_probability,
+            side_market_price,
+            edge_pct_points,
+            lead_time_days,
+            quote_age_seconds,
+            station_verified,
+            eligibility_status,
+            decision_explanation,
+            created_at
+        FROM paper_trades
+        WHERE eligibility_status = 'OFFICIAL'
+          AND is_executable = TRUE
+          AND status        = 'OPEN'
+          AND strategy_version = 'v2.2'
+
+        UNION ALL
+
+        SELECT
+            'v3.0'              AS strategy_version,
+            id,
+            market_ticker,
+            city,
+            weather_variable,
+            contract_type,
+            target_settlement_date,
+            direction,
+            ec_side_probability,
+            market_yes_probability,
+            side_market_price,
+            edge_pct_points,
+            lead_time_days,
+            quote_age_seconds,
+            station_verified,
+            eligibility_status,
+            decision_explanation,
+            created_at
+        FROM v3_paper_trades
+        WHERE eligibility_status = 'OFFICIAL'
+          AND is_executable = TRUE
+          AND status        = 'OPEN'
+
+        ORDER BY (edge_pct_points / GREATEST(side_market_price, 0.001)) DESC
+        LIMIT 1
+    """)
+
+    row = (await db.execute(best_sql)).mappings().first()
+
+    if row is None:
+        return {
+            "available": False,
+            "message":   "No official-quality paper bet is available right now.",
+            "trade":     None,
+        }
+
+    d = dict(row)
+    edge_pp  = float(d.get("edge_pct_points")    or 0)
+    price    = float(d.get("side_market_price")  or 0)
+    ec_prob  = float(d.get("ec_side_probability") or 0)
+    mkt_prob = float(d.get("market_yes_probability") or 0)
+
+    direction   = d.get("direction", "")
+    strat       = d.get("strategy_version", "")
+    settle_date = (d.get("target_settlement_date") or "")[:10]
+    lead        = d.get("lead_time_days")
+
+    why = (
+        f"EdgeCast estimates {ec_prob * 100:.1f}% for the {direction} side "
+        f"(market implies {mkt_prob * 100:.1f}%). "
+        f"Entry at {price * 100:.0f}¢ gives a claimed edge of {edge_pp:.1f} pp. "
+        f"Settlement: {settle_date}. "
+        f"Lead time: {lead if lead is not None else 'N/A'} day(s). "
+        f"Strategy: {strat}."
+    )
+
+    return {
+        "available": True,
+        "message":   None,
+        "trade": {
+            "strategyVersion":       strat,
+            "id":                    d.get("id"),
+            "marketTicker":          d.get("market_ticker"),
+            "city":                  d.get("city"),
+            "weatherVariable":       d.get("weather_variable"),
+            "contractType":          d.get("contract_type"),
+            "targetSettlementDate":  settle_date,
+            "direction":             direction,
+            "ecSideProbability":     ec_prob,
+            "marketYesProbability":  mkt_prob,
+            "sideMarketPrice":       price,
+            "edgePctPoints":         edge_pp,
+            "leadTimeDays":          lead,
+            "quoteAgeSecs":          d.get("quote_age_seconds"),
+            "stationVerified":       d.get("station_verified"),
+            "eligibilityStatus":     d.get("eligibility_status"),
+            "whyWeLikeThisTrade":    why,
+            "decisionExplanation":   d.get("decision_explanation"),
+        },
+    }
+
+
 # ── Segment → analytics filter mapping ───────────────────────────────────────
 # Maps segment name → kwargs forwarded to get_paper_trade_analytics /
 # get_calibration_report.  Omitted keys → no filter applied.

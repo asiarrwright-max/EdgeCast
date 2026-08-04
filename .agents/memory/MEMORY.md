@@ -19,3 +19,4 @@
 - [asyncmock-add-side-effect](asyncmock-add-side-effect.md) — session.add is sync in SQLAlchemy; AsyncMock() makes it AsyncMock which never fires side_effect on bare call; must set session.add = MagicMock(side_effect=fn).
 - [test-quote-timestamp-freshness](test-quote-timestamp-freshness.md) — Hardcoded datetimes in test fixtures fail _is_quote_fresh (4h window) the next day; use datetime.now(timezone.utc) for quote_timestamp.
 - [orphaned-job-cleanup](orphaned-job-cleanup.md) — Deployments kill mid-flight jobs leaving status='running' rows that block future /collect triggers; fix with a startup cleanup in init_db().
+- [official-trade-eligibility](official-trade-eligibility.md) — Eight-guard eligibility engine stamps paper trades OFFICIAL or RESEARCH_ONLY; two-pass batch runner enforces correlated-exposure limit before writing rows.

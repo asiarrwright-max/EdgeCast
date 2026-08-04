@@ -34,6 +34,7 @@ from app.services.paper_trading import (
     _select_no_price,
     calculate_position,
 )
+from app.services.eligibility import apply_correlated_limit, assess_trade_eligibility
 from app.services.paper_trading_v21 import (
     STALE_QUOTE_SECONDS,
     _is_executable,
@@ -91,8 +92,12 @@ async def get_v3_pt_settings(session: AsyncSession) -> dict[str, Any]:
 # Pre-flight checks (shared with V2.1 logic)
 # ---------------------------------------------------------------------------
 
-def _check_station(city: str | None) -> tuple[bool, str | None]:
-    """Return (ok, skip_reason)."""
+def _check_station_nws(city: str | None) -> tuple[bool, str | None]:
+    """
+    Hard-block only on nws_settlement=False (e.g. Washington DC).
+    Unverified NWS cities return True and are demoted to RESEARCH_ONLY
+    by the eligibility engine.
+    """
     if not city:
         return False, "City not identified"
     station = get_station(city)
@@ -100,21 +105,6 @@ def _check_station(city: str | None) -> tuple[bool, str | None]:
         return False, f"No settlement station for '{city}'"
     if not getattr(station, "nws_settlement", True):
         return False, f"Non-NWS settlement source for '{city}' — V3 calibration invalid"
-    if not station.verified:
-        return False, f"Unverified station for '{city}'"
-    return True, None
-
-
-def _check_freshness(market: KalshiMarket, now: datetime) -> tuple[bool, str | None]:
-    """Return (ok, skip_reason). ok=False if quote is stale (>4 h)."""
-    coll_ts = getattr(market, "collection_timestamp", None)
-    if coll_ts is None:
-        return False, "No collection_timestamp; cannot assess quote freshness"
-    if coll_ts.tzinfo is None:
-        coll_ts = coll_ts.replace(tzinfo=timezone.utc)
-    age_s = (now - coll_ts).total_seconds()
-    if age_s > STALE_QUOTE_SECONDS:
-        return False, f"Quote is stale ({age_s / 3600:.1f} h old; limit 4 h)"
     return True, None
 
 
@@ -132,31 +122,37 @@ def _decide_v3(
     Evaluate one market and return a decision dict.
 
     Returns action = "YES" | "NO" | "SKIP".
+
+    Eligibility changes:
+      - Station guard: only hard-blocks on nws_settlement=False; unverified NWS
+        cities pass through and are demoted to RESEARCH_ONLY by assess_trade_eligibility.
+      - Quote freshness is no longer a hard-stop; stale-quote trades are
+        classified RESEARCH_ONLY so a row is still stored.
+      - Returns eligibility_status, eligibility_reason, quote_age_seconds,
+        plus city / target_settlement_date_str / settlement_timezone / weather_variable
+        for the batch-level correlated-exposure limit.
     """
     ec_yes = snap.ec_probability
     if ec_yes is None:
         return {"action": "SKIP", "skip_reason": "V3 probability unavailable",
                 "direction": None}
 
-    # Station guard
-    station_ok, station_reason = _check_station(market.city)
+    # Hard-stop: NWS settlement source only
+    station_ok, station_reason = _check_station_nws(market.city)
     if not station_ok:
         return {"action": "SKIP", "skip_reason": station_reason, "direction": None}
 
-    station = get_station(market.city)  # guaranteed non-None here
-    station_lat  = getattr(station, "lat",  None)
-    station_lon  = getattr(station, "lon",  None)
-
-    # Quote freshness guard
-    fresh_ok, fresh_reason = _check_freshness(market, now)
-    if not fresh_ok:
-        return {"action": "SKIP", "skip_reason": fresh_reason, "direction": None}
+    station          = get_station(market.city)  # guaranteed non-None here
+    station_lat      = getattr(station, "lat", None)
+    station_lon      = getattr(station, "lon", None)
+    station_tz       = getattr(station, "timezone", "UTC")
+    station_verified = getattr(station, "verified", False)
 
     if market.status != "active":
         return {"action": "SKIP", "skip_reason": "Market no longer active", "direction": None}
 
     # Edge calculation — reuse V2.1 price selectors for consistency
-    ec_no = round(1.0 - ec_yes, 4)
+    ec_no    = round(1.0 - ec_yes, 4)
     min_edge = settings["min_edge_pct"] / 100.0
 
     yes_price, yes_src = _select_yes_price(market)
@@ -190,19 +186,37 @@ def _decide_v3(
 
     if direction == "YES":
         side_price, src = yes_price, yes_src
-        ec_side_prob = ec_yes
-        edge = yes_edge
-        quote_bid = market.yes_bid
-        quote_ask = market.yes_ask
+        ec_side_prob    = ec_yes
+        edge            = yes_edge
+        quote_bid       = market.yes_bid
+        quote_ask       = market.yes_ask
     else:
         side_price, src = no_price, no_src
-        ec_side_prob = ec_no
-        edge = no_edge
-        quote_bid = getattr(market, "no_bid", None)
-        quote_ask = getattr(market, "no_ask", None)
+        ec_side_prob    = ec_no
+        edge            = no_edge
+        quote_bid       = getattr(market, "no_bid", None)
+        quote_ask       = getattr(market, "no_ask", None)
 
+    edge_pp      = round((edge or 0) * 100, 4)
     mkt_yes_prob = snap.market_probability
-    executable   = _is_executable(
+
+    # Eligibility engine (Guards 1–5, 7–8)
+    quote_ts = getattr(market, "collection_timestamp", None)
+    elig_status, elig_reason, quote_age_s = assess_trade_eligibility(
+        contract_type=snap.contract_type,
+        target_settlement_date_str=market.target_date,
+        settlement_timezone=station_tz,
+        now=now,
+        side_market_price=side_price,
+        edge_pct_points=edge_pp,
+        station_verified=station_verified,
+        direction=direction,
+        quote_timestamp=quote_ts,
+        quote_ask=quote_ask,
+    )
+
+    # OFFICIAL → may be executable; RESEARCH_ONLY → never executable
+    executable = (elig_status == "OFFICIAL") and _is_executable(
         calculate_position(settings["stake"], side_price or 0.0).get("quantity", 0.0),
         side_price or 0.0,
     )
@@ -216,20 +230,29 @@ def _decide_v3(
         "market_yes_probability": mkt_yes_prob,
         "side_market_price":   side_price,
         "price_source":        src,
-        "edge_pct_points":     round((edge or 0) * 100, 4),
+        "edge_pct_points":     edge_pp,
         "quote_bid":           quote_bid,
         "quote_ask":           quote_ask,
         "is_executable":       executable,
         "station_lat":         station_lat,
         "station_lon":         station_lon,
+        "station_verified":    station_verified,
         "decision_explanation": (
             f"[v3.0] V3 probability {ec_yes * 100:.1f}% YES "
             f"(σ={snap.final_sigma:.1f}°F/lvl{snap.fallback_level_used}, "
             f"bias_applied={snap.bias_applied}). "
             f"{'YES' if direction == 'YES' else 'NO'} price ({src}) implied "
             f"{(side_price or 0) * 100:.1f}%. "
-            f"Edge: +{(edge or 0) * 100:.1f}pp."
+            f"Edge: +{edge_pp:.1f}pp. "
+            f"Station: {station.station_name} ({'verified' if station_verified else 'unverified'})."
         ),
+        "eligibility_status":           elig_status,
+        "eligibility_reason":           elig_reason,
+        "quote_age_seconds":            quote_age_s,
+        "city":                         market.city,
+        "target_settlement_date_str":   market.target_date,
+        "settlement_timezone":          station_tz,
+        "weather_variable":             snap.settlement_variable,
     }
 
 
@@ -322,16 +345,18 @@ async def _run_paper_trading_v3_inner(
     )
     existing_tickers: set[str] = {row[0] for row in existing_q}
 
+    # ── Phase 1: evaluate all candidates (no trade rows written) ─────────────
+    # list of (v3_snap, market, decision, comp_id)
+    evaluations: list[tuple] = []
+
     for v3_snap in latest_v3:
         market = market_map.get(v3_snap.market_ticker)
         if market is None:
             continue
 
-        # Skip if analysis was not ok
         if v3_snap.analysis_status != "ok" or v3_snap.ec_probability is None:
             continue
 
-        # Duplicate check
         if v3_snap.market_ticker in existing_tickers:
             stats["skipped"] += 1
             continue
@@ -340,11 +365,25 @@ async def _run_paper_trading_v3_inner(
 
         try:
             decision = _decide_v3(v3_snap, market, settings, now)
-
             if decision["action"] == "SKIP":
                 stats["skipped"] += 1
                 continue
+            evaluations.append((v3_snap, market, decision, comp_ids.get(v3_snap.market_ticker)))
+        except Exception as exc:
+            stats["errors"] += 1
+            logger.warning("V3 decision error for %s: %s", v3_snap.market_ticker, exc, exc_info=True)
 
+    # ── Phase 2: correlated-exposure limit (Guard 6) ──────────────────────────
+    official_decisions = [
+        d for (_, _, d, _) in evaluations
+        if d.get("eligibility_status") == "OFFICIAL"
+    ]
+    if official_decisions:
+        apply_correlated_limit(official_decisions)
+
+    # ── Phase 3: create trade rows ────────────────────────────────────────────
+    for v3_snap, market, decision, comp_id in evaluations:
+        try:
             side_price = decision["side_market_price"] or 0.0
             if side_price <= 0:
                 stats["skipped"] += 1
@@ -362,7 +401,7 @@ async def _run_paper_trading_v3_inner(
                 strategy_version=STRATEGY_VERSION,
                 v3_snapshot_id=v3_snap.id,
                 comparison_group_id=v3_snap.comparison_group_id,
-                comparison_snapshot_id=comp_ids.get(v3_snap.market_ticker),
+                comparison_snapshot_id=comp_id,
                 collection_batch_id=batch_id,
                 direction=decision["direction"],
                 ec_yes_probability=decision["ec_yes_probability"],
@@ -384,7 +423,10 @@ async def _run_paper_trading_v3_inner(
                 is_executable=decision["is_executable"],
                 station_lat=decision.get("station_lat"),
                 station_lon=decision.get("station_lon"),
-                station_verified=True,
+                station_verified=decision.get("station_verified", False),
+                eligibility_status=decision.get("eligibility_status"),
+                eligibility_reason=decision.get("eligibility_reason"),
+                quote_age_seconds=decision.get("quote_age_seconds"),
                 status="OPEN",
                 decision_explanation=decision["decision_explanation"],
             )
@@ -395,12 +437,13 @@ async def _run_paper_trading_v3_inner(
 
             logger.info(
                 "V3 paper trade created: %s %s @ %.4f "
-                "(σ=%.1f/lvl%s, bias_applied=%s, edge=%.1fpp, exec=%s)",
+                "(σ=%.1f/lvl%s, bias_applied=%s, edge=%.1fpp, exec=%s, elig=%s)",
                 decision["direction"], market.ticker, side_price,
                 v3_snap.final_sigma or 0, v3_snap.fallback_level_used,
                 v3_snap.bias_applied,
                 decision["edge_pct_points"] or 0,
                 decision["is_executable"],
+                decision.get("eligibility_status"),
             )
 
         except Exception as exc:

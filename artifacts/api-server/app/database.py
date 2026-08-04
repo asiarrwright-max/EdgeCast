@@ -114,6 +114,13 @@ async def _apply_migrations(conn) -> None:
         "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS collection_batch_id VARCHAR(36)",
         "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS comparison_snapshot_id VARCHAR(36)",
         "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS collection_batch_id VARCHAR(36)",
+        # Official Trade Eligibility hardening pass — three new columns per trade table
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS eligibility_status VARCHAR(20)",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS eligibility_reason VARCHAR(60)",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS quote_age_seconds FLOAT",
+        "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS eligibility_status VARCHAR(20)",
+        "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS eligibility_reason VARCHAR(60)",
+        "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS quote_age_seconds FLOAT",
     ]
     for stmt in migrations:
         try:

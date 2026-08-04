@@ -499,6 +499,11 @@ class V3PaperTrade(Base):
     decision_explanation: Mapped[str | None] = mapped_column(Text)
     quality_flags: Mapped[list | None] = mapped_column(JSON)
 
+    # Official Trade Eligibility — hardening pass
+    eligibility_status: Mapped[str | None] = mapped_column(String(20), index=True)
+    eligibility_reason: Mapped[str | None] = mapped_column(String(60))
+    quote_age_seconds: Mapped[float | None] = mapped_column(Float)
+
 
 # ---------------------------------------------------------------------------
 # V3IngestionLog — per-run audit trail
