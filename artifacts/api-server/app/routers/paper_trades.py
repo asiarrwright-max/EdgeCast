@@ -19,7 +19,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import KalshiMarket, PaperTrade, PredictionSnapshot
+from app.models import JobRun, KalshiMarket, PaperTrade, PredictionSnapshot
 from app.models_v3 import V3PaperTrade
 from app.services.paper_trading import (
     FLAG_DESCRIPTIONS,
@@ -55,12 +55,17 @@ router = APIRouter(tags=["paper-trades"])
 
 # ── Forward-test constants ────────────────────────────────────────────────────
 
-# The date the hardened eligibility rules were deployed (commit 76e4e7d).
-# Only trades created on or after this timestamp count toward readiness metrics.
-FORWARD_TEST_START = datetime(2026, 8, 4, 0, 0, 0, tzinfo=timezone.utc)
+# Exact UTC timestamp of the hardened main commit 76e4e7d going live on the
+# API server.  Only trades created at or after this moment count toward
+# readiness metrics.  Display as "August 4, 2026" in the UI.
+FORWARD_TEST_START = datetime(2026, 8, 4, 22, 21, 44, tzinfo=timezone.utc)
 FORWARD_TEST_START_VERSION = "76e4e7d"
 FORWARD_TEST_PHASE = "Collecting clean paper-trade data"
 FORWARD_TEST_SETTLED_TARGET = 50
+
+# Set to True only after an explicit manual review of ROI, calibration,
+# strategy stability, and drawdown — never flip automatically.
+MANUAL_READINESS_APPROVAL: bool = False
 
 # Eligibility reason codes → human-readable labels for the "Why no bet?" panel.
 ELIGIBILITY_REASON_LABELS: dict[str, str] = {
@@ -78,18 +83,15 @@ ELIGIBILITY_REASON_LABELS: dict[str, str] = {
 def _ft_readiness_label(settled: int) -> str:
     """Map official settled trade count → forward-test readiness stage.
 
-    Conservative and rule-based: readiness depends only on sample size,
-    not on ROI or win rate (which are meaningless with tiny samples).
+    Automatic progression caps at 'Promising but unproven'.
+    'Ready for tiny manual testing' and 'Strong forward-test evidence' require
+    MANUAL_READINESS_APPROVAL = True — sample size alone is not sufficient.
     """
     if settled < 10:
         return "Not enough data"
     if settled < 50:
         return "Early signal"
-    if settled < 100:
-        return "Promising but unproven"
-    if settled < 200:
-        return "Ready for tiny manual testing"
-    return "Strong forward-test evidence"
+    return "Promising but unproven"
 
 
 def _ft_next_milestone(settled: int) -> str:
@@ -98,11 +100,7 @@ def _ft_next_milestone(settled: int) -> str:
         return "10 settled official trades"
     if settled < 50:
         return "50 settled official trades (minimum review point)"
-    if settled < 100:
-        return "100 settled official trades (stronger confidence)"
-    if settled < 200:
-        return "200 settled official trades (strong evidence)"
-    return "Maintaining strong forward-test evidence"
+    return "Manual review required for further advancement"
 
 
 def _ft_progress_pct(settled: int, target: int = FORWARD_TEST_SETTLED_TARGET) -> float:
@@ -113,10 +111,13 @@ def _ft_progress_pct(settled: int, target: int = FORWARD_TEST_SETTLED_TARGET) ->
 
 
 def _ft_readiness_for_real_money(settled: int) -> str:
-    """Plain-language current-readiness string for the status card."""
-    label = _ft_readiness_label(settled)
-    if label in ("Ready for tiny manual testing", "Strong forward-test evidence"):
-        return label
+    """Plain-language current-readiness string for the status card.
+
+    Only returns a non-'Not ready' value when MANUAL_READINESS_APPROVAL is True
+    AND sufficient settled trades exist.  Sample size alone never triggers this.
+    """
+    if MANUAL_READINESS_APPROVAL and settled >= 100:
+        return "Ready for tiny manual testing"
     return "Not ready for real money"
 
 
@@ -850,43 +851,70 @@ async def get_forward_test_status(
     legacy_v3 = await _ct(V3PaperTrade,  V3PaperTrade.created_at  < start)
     legacy_excluded = legacy_pt + legacy_v3
 
-    # ── Research-only reason breakdown (combined across both tables) ──────────
-    async def _reason_counts(model):
+    # ── "Why no official bet?" — batch-aware reason breakdown ────────────────
+    # Prefer the most recent completed collection job as the window so we
+    # show what happened *right now*, not cumulative all-time counts.
+    # Fall back to the past 24 hours if no recent job is found.
+    now_utc = datetime.now(tz=timezone.utc)
+    _BATCH_STALE_HOURS = 25  # treat a job older than this as stale
+
+    latest_job = (
+        await db.execute(
+            select(JobRun)
+            .where(JobRun.completed_at.is_not(None))
+            .order_by(JobRun.completed_at.desc())
+            .limit(1)
+        )
+    ).scalars().first()
+
+    if (
+        latest_job is not None
+        and (now_utc - latest_job.started_at).total_seconds() < _BATCH_STALE_HOURS * 3600
+    ):
+        reason_window_start = latest_job.started_at
+        reason_window_label = "Latest collection batch"
+    else:
+        reason_window_start = now_utc - timedelta(hours=24)
+        reason_window_label = "Past 24 hours"
+
+    async def _reason_counts(model, window_start: datetime) -> dict[str, int]:
         rows = (
             await db.execute(
                 select(model.eligibility_reason, func.count().label("n"))
-                .where(model.created_at >= start)
+                .where(model.created_at >= window_start)
                 .where(model.eligibility_status == "RESEARCH_ONLY")
                 .group_by(model.eligibility_reason)
             )
         ).all()
         return {row[0]: row[1] for row in rows if row[0]}
 
-    rc_pt = await _reason_counts(PaperTrade)
-    rc_v3 = await _reason_counts(V3PaperTrade)
-    combined_reasons: dict[str, int] = {}
+    rc_pt = await _reason_counts(PaperTrade, reason_window_start)
+    rc_v3 = await _reason_counts(V3PaperTrade, reason_window_start)
+    windowed_reasons: dict[str, int] = {}
     for code, n in list(rc_pt.items()) + list(rc_v3.items()):
-        combined_reasons[code] = combined_reasons.get(code, 0) + n
+        windowed_reasons[code] = windowed_reasons.get(code, 0) + n
 
     why_no_bet = {
-        code: {"label": label, "count": combined_reasons.get(code, 0)}
+        code: {"label": label, "count": windowed_reasons.get(code, 0)}
         for code, label in ELIGIBILITY_REASON_LABELS.items()
     }
 
     return {
-        "phase":                 FORWARD_TEST_PHASE,
-        "forwardTestStartDate":  FORWARD_TEST_START.strftime("%Y-%m-%d"),
-        "startingCodeVersion":   FORWARD_TEST_START_VERSION,
-        "officialSettledCount":  total_off_settled,
-        "officialOpenCount":     total_off_open,
-        "researchOnlyCount":     total_research,
-        "legacyExcludedCount":   legacy_excluded,
-        "progressPct":           _ft_progress_pct(total_off_settled),
-        "progressTarget":        FORWARD_TEST_SETTLED_TARGET,
-        "readinessLabel":        _ft_readiness_label(total_off_settled),
-        "nextMilestone":         _ft_next_milestone(total_off_settled),
-        "currentReadiness":      _ft_readiness_for_real_money(total_off_settled),
-        "whyNoOfficialBet":      why_no_bet,
+        "phase":                   FORWARD_TEST_PHASE,
+        "forwardTestStartDate":    FORWARD_TEST_START.strftime("%Y-%m-%d"),
+        "startingCodeVersion":     FORWARD_TEST_START_VERSION,
+        "officialSettledCount":    total_off_settled,
+        "officialOpenCount":       total_off_open,
+        "researchOnlyCount":       total_research,        # cumulative since start
+        "legacyExcludedCount":     legacy_excluded,
+        "progressPct":             _ft_progress_pct(total_off_settled),
+        "progressTarget":          FORWARD_TEST_SETTLED_TARGET,
+        "readinessLabel":          _ft_readiness_label(total_off_settled),
+        "nextMilestone":           _ft_next_milestone(total_off_settled),
+        "currentReadiness":        _ft_readiness_for_real_money(total_off_settled),
+        "manualReadinessApproval": MANUAL_READINESS_APPROVAL,
+        "whyNoOfficialBet":        why_no_bet,
+        "reasonBreakdownWindow":   reason_window_label,
         "byStrategy": {
             "v22": {
                 "officialSettled": v22_off_settled,

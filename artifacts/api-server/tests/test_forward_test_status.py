@@ -2,12 +2,16 @@
 Tests for the Forward Test Status endpoint helpers.
 
 Covers (per spec):
-  - correct forward-test start filtering (FORWARD_TEST_START constant)
-  - legacy trades excluded from new metrics (trades before start → legacy)
+  - correct forward-test start filtering (exact 22:21:44 UTC cutoff)
+  - trade created earlier on Aug 4 is legacy (regression)
+  - trade created at/after exact cutoff can count
+  - legacy trades excluded from new metrics
   - RESEARCH_ONLY trades excluded from official metrics
   - progress calculation (_ft_progress_pct)
   - zero-trade state (readiness label when settled=0)
   - milestone text (_ft_next_milestone at key thresholds)
+  - readiness label caps at "Promising but unproven" automatically
+  - 100 / 200 settled does NOT auto-trigger real-money readiness
   - readiness label defaults to "Not enough data"
 """
 from __future__ import annotations
@@ -20,6 +24,7 @@ from app.routers.paper_trades import (
     FORWARD_TEST_SETTLED_TARGET,
     FORWARD_TEST_START_VERSION,
     FORWARD_TEST_PHASE,
+    MANUAL_READINESS_APPROVAL,
     ELIGIBILITY_REASON_LABELS,
     _ft_readiness_label,
     _ft_next_milestone,
@@ -40,10 +45,11 @@ class TestForwardTestStartConstant:
         assert FORWARD_TEST_START.tzinfo is not None
         assert FORWARD_TEST_START.utcoffset().total_seconds() == 0
 
-    def test_start_at_midnight(self):
-        assert FORWARD_TEST_START.hour   == 0
-        assert FORWARD_TEST_START.minute == 0
-        assert FORWARD_TEST_START.second == 0
+    def test_start_at_exact_commit_time(self):
+        """Cutoff is the exact UTC time of commit 76e4e7d going live — not midnight."""
+        assert FORWARD_TEST_START.hour   == 22
+        assert FORWARD_TEST_START.minute == 21
+        assert FORWARD_TEST_START.second == 44
 
     def test_start_version(self):
         assert FORWARD_TEST_START_VERSION == "76e4e7d"
@@ -54,48 +60,66 @@ class TestForwardTestStartConstant:
     def test_settled_target(self):
         assert FORWARD_TEST_SETTLED_TARGET == 50
 
+    def test_manual_readiness_approval_is_false(self):
+        """Must never be flipped automatically — only after explicit review."""
+        assert MANUAL_READINESS_APPROVAL is False
+
 
 # ── Legacy / forward-test filtering logic ────────────────────────────────────
 
 class TestStartFiltering:
     """
-    Verify the start-date boundary: trades before start are legacy;
-    trades on or after start enter the forward-test window.
+    Verify the exact-timestamp boundary: trades before 22:21:44 UTC on Aug 4
+    are legacy; trades at or after that moment are in the forward-test window.
     """
-    def test_trade_before_start_is_legacy(self):
+
+    def test_trade_on_aug3_is_legacy(self):
         trade_ts = datetime(2026, 8, 3, 23, 59, 59, tzinfo=timezone.utc)
-        assert trade_ts < FORWARD_TEST_START, "Trade from Aug 3 should be before start"
+        assert trade_ts < FORWARD_TEST_START
 
-    def test_trade_on_start_date_is_forward_test(self):
+    def test_trade_at_midnight_aug4_is_legacy(self):
+        """Midnight on Aug 4 is BEFORE the 22:21:44 cutoff — must be legacy."""
         trade_ts = datetime(2026, 8, 4, 0, 0, 0, tzinfo=timezone.utc)
-        assert trade_ts >= FORWARD_TEST_START, "Trade from Aug 4 00:00:00 should be in forward-test window"
+        assert trade_ts < FORWARD_TEST_START, (
+            "A trade at 2026-08-04T00:00:00Z predates the exact cutoff "
+            "(22:21:44Z) and must be treated as legacy."
+        )
 
-    def test_trade_after_start_is_forward_test(self):
-        trade_ts = datetime(2026, 8, 4, 12, 0, 0, tzinfo=timezone.utc)
+    def test_trade_one_second_before_cutoff_is_legacy(self):
+        """Regression: a trade created 1 second before the exact cutoff is legacy."""
+        trade_ts = datetime(2026, 8, 4, 22, 21, 43, tzinfo=timezone.utc)
+        assert trade_ts < FORWARD_TEST_START, (
+            "Trade at 22:21:43Z is 1 second before the 22:21:44Z cutoff "
+            "and must not count toward forward-test metrics."
+        )
+
+    def test_trade_at_exact_cutoff_can_count(self):
+        """A trade created at exactly 22:21:44Z on Aug 4 is in the forward-test window."""
+        trade_ts = datetime(2026, 8, 4, 22, 21, 44, tzinfo=timezone.utc)
+        assert trade_ts >= FORWARD_TEST_START, (
+            "Trade at the exact cutoff timestamp must be eligible for "
+            "the forward-test window."
+        )
+
+    def test_trade_after_cutoff_is_forward_test(self):
+        trade_ts = datetime(2026, 8, 4, 22, 30, 0, tzinfo=timezone.utc)
         assert trade_ts >= FORWARD_TEST_START
 
     def test_research_only_excluded_from_official_metrics(self):
         """
-        A RESEARCH_ONLY trade after the start date must NOT be counted toward
-        officialSettled or officialOpen.  We verify this by checking that the
-        readiness label remains 'Not enough data' when only RESEARCH_ONLY
-        trades exist (settled=0 official).
+        RESEARCH_ONLY trades must not be counted toward readiness.
+        Even 10 research-only signals leave official settled at 0.
         """
-        # Simulate: 10 research-only signals, 0 official settled
         official_settled = 0
-        label = _ft_readiness_label(official_settled)
-        assert label == "Not enough data"
+        assert _ft_readiness_label(official_settled) == "Not enough data"
 
     def test_legacy_excluded_from_readiness(self):
         """
-        Legacy trades (before start) must not affect the readiness label.
-        Even with 1000 legacy settled trades, the official settled count
-        is still 0, so readiness stays 'Not enough data'.
+        Legacy trades (before start) never affect readiness — even with
+        1000 legacy settled trades, official settled stays 0.
         """
-        legacy_settled = 1000
-        official_settled = 0   # legacy trades never counted
-        label = _ft_readiness_label(official_settled)
-        assert label == "Not enough data"
+        official_settled = 0
+        assert _ft_readiness_label(official_settled) == "Not enough data"
 
 
 # ── _ft_readiness_label ───────────────────────────────────────────────────────
@@ -122,21 +146,30 @@ class TestReadinessLabel:
     def test_ninety_nine_is_promising(self):
         assert _ft_readiness_label(99) == "Promising but unproven"
 
-    def test_hundred_is_ready_for_testing(self):
-        assert _ft_readiness_label(100) == "Ready for tiny manual testing"
+    def test_hundred_is_still_promising_not_ready(self):
+        """100 settled does NOT auto-trigger 'Ready for tiny manual testing'."""
+        assert _ft_readiness_label(100) == "Promising but unproven"
 
-    def test_one_ninety_nine_is_ready_for_testing(self):
-        assert _ft_readiness_label(199) == "Ready for tiny manual testing"
+    def test_one_ninety_nine_is_still_promising(self):
+        """199 settled must not return 'Ready for tiny manual testing'."""
+        assert _ft_readiness_label(199) == "Promising but unproven"
 
-    def test_two_hundred_is_strong_evidence(self):
-        assert _ft_readiness_label(200) == "Strong forward-test evidence"
+    def test_two_hundred_is_still_promising(self):
+        """200 settled must not return 'Strong forward-test evidence'."""
+        assert _ft_readiness_label(200) == "Promising but unproven"
 
-    def test_large_count_is_strong_evidence(self):
-        assert _ft_readiness_label(500) == "Strong forward-test evidence"
+    def test_large_count_is_still_promising(self):
+        assert _ft_readiness_label(500) == "Promising but unproven"
 
     def test_default_zero_trade_state(self):
         """The 'Not enough data' stage must be the default (zero trades)."""
         assert _ft_readiness_label(0) == "Not enough data"
+
+    def test_automatic_cap_at_promising(self):
+        """Automatic readiness never advances beyond 'Promising but unproven'."""
+        automatic_stages = {_ft_readiness_label(n) for n in [0,5,10,50,100,200,500]}
+        assert "Ready for tiny manual testing" not in automatic_stages
+        assert "Strong forward-test evidence" not in automatic_stages
 
 
 # ── _ft_progress_pct ──────────────────────────────────────────────────────────
@@ -188,20 +221,17 @@ class TestNextMilestone:
         assert "50" in text
 
     def test_fifty_settled_milestone(self):
+        """At 50+ trades, further advancement requires manual review."""
         text = _ft_next_milestone(50)
-        assert "100" in text
-
-    def test_ninety_nine_settled_milestone(self):
-        text = _ft_next_milestone(99)
-        assert "100" in text
+        assert "manual" in text.lower() or "review" in text.lower()
 
     def test_hundred_settled_milestone(self):
+        """At 100+ the milestone is still manual review, not an auto threshold."""
         text = _ft_next_milestone(100)
-        assert "200" in text
+        assert "manual" in text.lower() or "review" in text.lower()
 
     def test_two_hundred_settled_milestone(self):
         text = _ft_next_milestone(200)
-        # At 200+ we're beyond the defined milestones — just a maintenance message
         assert len(text) > 0
 
 
@@ -217,13 +247,22 @@ class TestReadinessForRealMoney:
     def test_promising_is_not_ready(self):
         assert _ft_readiness_for_real_money(50) == "Not ready for real money"
 
-    def test_ready_for_testing(self):
-        result = _ft_readiness_for_real_money(100)
-        assert result != "Not ready for real money"
+    def test_hundred_is_not_ready_without_approval(self):
+        """100 settled must NOT trigger readiness — manual approval required."""
+        assert _ft_readiness_for_real_money(100) == "Not ready for real money"
 
-    def test_strong_evidence(self):
-        result = _ft_readiness_for_real_money(200)
-        assert result != "Not ready for real money"
+    def test_two_hundred_is_not_ready_without_approval(self):
+        """200 settled must NOT trigger readiness — manual approval required."""
+        assert _ft_readiness_for_real_money(200) == "Not ready for real money"
+
+    def test_current_readiness_is_always_not_ready(self):
+        """While MANUAL_READINESS_APPROVAL is False, no count triggers readiness."""
+        assert not MANUAL_READINESS_APPROVAL  # guard: must be False
+        for n in [0, 10, 50, 100, 200, 500]:
+            assert _ft_readiness_for_real_money(n) == "Not ready for real money", (
+                f"Expected 'Not ready for real money' at settled={n} "
+                f"when MANUAL_READINESS_APPROVAL=False"
+            )
 
 
 # ── ELIGIBILITY_REASON_LABELS ─────────────────────────────────────────────────

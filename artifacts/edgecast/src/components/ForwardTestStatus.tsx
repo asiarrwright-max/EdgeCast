@@ -174,7 +174,7 @@ function ResearchOnlyTab({ data }: { data: ForwardTestStatus }) {
         the forward-test start. These are never entered as official trades and never affect the
         readiness score — they exist for analysis only.
         {researchOnlyCount > 0 && (
-          <span> <strong className="text-foreground">{researchOnlyCount}</strong> signal{researchOnlyCount !== 1 ? "s" : ""} recorded.</span>
+          <span> <strong className="text-foreground">{researchOnlyCount}</strong> cumulative signal{researchOnlyCount !== 1 ? "s" : ""} recorded since {data.forwardTestStartDate}.</span>
         )}
       </p>
 
@@ -259,7 +259,7 @@ function LegacyTab({ data }: { data: ForwardTestStatus }) {
 // ── "Why no official bet?" panel ──────────────────────────────────────────────
 
 function WhyNoBetPanel({ data }: { data: ForwardTestStatus }) {
-  const { whyNoOfficialBet, officialOpenCount } = data;
+  const { whyNoOfficialBet, officialOpenCount, reasonBreakdownWindow } = data;
   if (officialOpenCount > 0) return null;
 
   const reasons = Object.entries(whyNoOfficialBet).filter(([, v]) => v.count > 0);
@@ -267,10 +267,15 @@ function WhyNoBetPanel({ data }: { data: ForwardTestStatus }) {
 
   return (
     <div className="mt-5 pt-5 border-t border-border/40">
-      <div className="flex items-center gap-2 mb-3">
-        <HelpCircle className="h-3.5 w-3.5 text-amber-400" />
-        <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
-          Why no official bet right now?
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <div className="flex items-center gap-2">
+          <HelpCircle className="h-3.5 w-3.5 text-amber-400" />
+          <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+            Why no official bet?
+          </span>
+        </div>
+        <span className="text-[9px] font-mono px-2 py-0.5 rounded border bg-amber-500/5 border-amber-500/20 text-amber-400/70">
+          {reasonBreakdownWindow}
         </span>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -285,8 +290,8 @@ function WhyNoBetPanel({ data }: { data: ForwardTestStatus }) {
         ))}
       </div>
       <p className="text-[10px] font-mono text-muted-foreground mt-2.5 opacity-70">
-        Each signal assessed since {data.forwardTestStartDate}. Counts reset to zero when no
-        RESEARCH_ONLY signals have been captured since the start date.
+        Counts reflect the <span className="text-foreground">{reasonBreakdownWindow.toLowerCase()}</span> only —
+        not cumulative totals since the forward-test start.
       </p>
     </div>
   );

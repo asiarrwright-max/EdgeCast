@@ -26,18 +26,25 @@ export interface ForwardTestReasonEntry {
 
 export interface ForwardTestStatus {
   phase: string;
+  /** Always "August 4, 2026" in display; exact cutoff is 2026-08-04T22:21:44Z internally. */
   forwardTestStartDate: string;
   startingCodeVersion: string;
   officialSettledCount: number;
   officialOpenCount: number;
+  /** Cumulative RESEARCH_ONLY count since the forward-test start. */
   researchOnlyCount: number;
   legacyExcludedCount: number;
   progressPct: number;
   progressTarget: number;
+  /** Automatic stage — caps at "Promising but unproven" without manualReadinessApproval. */
   readinessLabel: string;
   nextMilestone: string;
   currentReadiness: string;
+  /** False until an explicit review of ROI, calibration, and drawdown is completed. */
+  manualReadinessApproval: boolean;
   whyNoOfficialBet: Record<string, ForwardTestReasonEntry>;
+  /** "Latest collection batch" or "Past 24 hours" — describes the whyNoOfficialBet window. */
+  reasonBreakdownWindow: string;
   byStrategy: {
     v22: ForwardTestStrategyRow;
     v3: ForwardTestStrategyRow;
