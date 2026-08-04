@@ -533,6 +533,35 @@ async def get_segment_summary(
     return {"rows": rows}
 
 
+def _selected_side_values(
+    direction: str,
+    ec_side_probability: float,
+    market_yes_probability: float,   # retained for callers; NOT used in selectedSideMarketProbability
+    side_market_price: float,
+    edge_pct_points: float,
+) -> dict:
+    """
+    Compute selected-side display values from stored trade columns.
+
+    ec_side_probability    — model probability already rotated to the chosen side
+    market_yes_probability — raw Kalshi YES market probability; kept as a legacy/raw field only
+    side_market_price      — executable ask on the chosen side (yes_ask for YES; no_ask for NO)
+    edge_pct_points        — edge in pp (direction-corrected)
+
+    selectedSideMarketProbability == selectedSideAsk == side_market_price.
+    In a Kalshi binary market the executable ask IS the market-implied probability (e.g. 0.50 ask
+    = 50 ¢ per $1 = 50 % market probability).  Do NOT compute as 1 − market_yes_probability;
+    that uses the raw mid-market YES price which differs from the actual executable ask.
+    """
+    return {
+        "selectedSide":                  direction,
+        "selectedSideModelProbability":  ec_side_probability,
+        "selectedSideAsk":               side_market_price,
+        "selectedSideMarketProbability": round(side_market_price, 6),  # = ask, not 1 − yes_prob
+        "selectedSideEdgePctPoints":     edge_pct_points,
+    }
+
+
 @router.get("/paper-trades/best-bet-today")
 async def get_best_bet_today(
     db: AsyncSession = Depends(get_db),
@@ -617,20 +646,26 @@ async def get_best_bet_today(
         }
 
     d = dict(row)
-    edge_pp  = float(d.get("edge_pct_points")    or 0)
-    price    = float(d.get("side_market_price")  or 0)
-    ec_prob  = float(d.get("ec_side_probability") or 0)
-    mkt_prob = float(d.get("market_yes_probability") or 0)
-
     direction   = d.get("direction", "")
     strat       = d.get("strategy_version", "")
     settle_date = (d.get("target_settlement_date") or "")[:10]
     lead        = d.get("lead_time_days")
 
+    # ec_side_probability is already rotated to the chosen side — use as-is for both YES and NO.
+    ec_side_prob   = float(d.get("ec_side_probability") or 0)
+    mkt_yes_prob   = float(d.get("market_yes_probability") or 0)
+    side_ask       = float(d.get("side_market_price") or 0)   # YES ask for YES trades; NO ask for NO trades
+    edge_pp        = float(d.get("edge_pct_points") or 0)
+
+    # selectedSideMarketProbability = selectedSideAsk = the executable ask on the chosen side.
+    # In a Kalshi binary market the ask price IS the market-implied probability.
+    # Never compute as 1 − market_yes_probability; that uses the raw mid-market YES price.
+    selected_side_mkt_prob = side_ask   # == side_market_price
+
     why = (
-        f"EdgeCast estimates {ec_prob * 100:.1f}% for the {direction} side "
-        f"(market implies {mkt_prob * 100:.1f}%). "
-        f"Entry at {price * 100:.0f}¢ gives a claimed edge of {edge_pp:.1f} pp. "
+        f"EdgeCast estimates {ec_side_prob * 100:.1f}% for the {direction} side "
+        f"(market ask implies {selected_side_mkt_prob * 100:.1f}¢ on the {direction} side). "
+        f"Entry at {side_ask * 100:.0f}¢ gives a claimed edge of {edge_pp:.1f} pp. "
         f"Settlement: {settle_date}. "
         f"Lead time: {lead if lead is not None else 'N/A'} day(s). "
         f"Strategy: {strat}."
@@ -648,10 +683,18 @@ async def get_best_bet_today(
             "contractType":          d.get("contract_type"),
             "targetSettlementDate":  settle_date,
             "direction":             direction,
-            "ecSideProbability":     ec_prob,
-            "marketYesProbability":  mkt_prob,
-            "sideMarketPrice":       price,
+            # ── Selected-side fields (correct for both YES and NO) ──
+            "selectedSide":                  direction,
+            "selectedSideModelProbability":  ec_side_prob,
+            "selectedSideAsk":               side_ask,
+            "selectedSideMarketProbability": selected_side_mkt_prob,
+            "selectedSideEdgePctPoints":     edge_pp,
+            # ── Legacy fields kept for frontend compatibility ──
+            "ecSideProbability":     ec_side_prob,
+            "marketYesProbability":  mkt_yes_prob,   # raw YES prob; not used in calculations above
+            "sideMarketPrice":       side_ask,
             "edgePctPoints":         edge_pp,
+            # ── Other fields ──
             "leadTimeDays":          lead,
             "quoteAgeSecs":          d.get("quote_age_seconds"),
             "stationVerified":       d.get("station_verified"),

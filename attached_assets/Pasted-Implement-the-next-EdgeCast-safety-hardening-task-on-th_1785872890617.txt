@@ -1,0 +1,72 @@
+Implement the next EdgeCast safety hardening task on the existing `replit-work` branch.
+
+Do not redesign the UI, change historical trade rows, merge to `main`, publish, or enable real-money trading.
+
+1. Tighten quote freshness
+- Change the OFFICIAL quote freshness limit from 4 hours to 5 minutes.
+- Keep it configurable, defaulting to 300 seconds.
+- Quotes older than 5 minutes, missing a timestamp, or missing the selected-side executable ask must become:
+  - `eligibility_status = RESEARCH_ONLY`
+  - `eligibility_reason = missing_or_stale_executable_quote`
+  - `is_executable = false`
+- YES trades must use the YES ask.
+- NO trades must use the NO ask.
+- Never substitute bid, midpoint, last price, or the opposite-side price.
+- Store quote timestamp, decision timestamp, and `quote_age_seconds`.
+- Add tests for 299, 300, and 301 seconds, future timestamps, missing timestamps, missing selected-side asks, fresh YES asks, and fresh NO asks.
+
+2. Fix selected-side probability and Best Bet logic
+- Review `/api/paper-trades/best-bet-today`.
+- YES trades must compare YES model probability with the YES ask.
+- NO trades must compare NO model probability with the NO ask.
+- Do not use `market_yes_probability` as though it were the NO market probability.
+- Return:
+  - `selectedSide`
+  - `selectedSideModelProbability`
+  - `selectedSideAsk`
+  - `selectedSideMarketProbability`
+  - `selectedSideEdgePctPoints`
+- Build `whyWeLikeThisTrade` only from selected-side values.
+- Keep older response fields only if needed for frontend compatibility, but do not use them in calculations.
+- Add regression tests for both YES and NO.
+
+3. Strengthen market close-time safeguards
+- Use the actual Kalshi market close timestamp from market metadata.
+- Do not decide eligibility from `target_settlement_date` alone.
+- Store where available:
+  - `market_close_timestamp`
+  - `expected_settlement_timestamp`
+  - `decision_timestamp`
+  - `minutes_to_market_close`
+  - market timezone identifier
+- Use timezone-aware UTC internally.
+- An OFFICIAL trade requires a valid market close timestamp.
+- If close time is missing, malformed, already passed, or within the 120-minute cutoff:
+  - `eligibility_status = RESEARCH_ONLY`
+  - `eligibility_reason = cutoff_unverified_or_too_close`
+  - `is_executable = false`
+- No trade may be OFFICIAL after market close.
+- Add tests for more than 120 minutes, exactly 120, 119 minutes, already closed, missing or malformed close time, midnight timezone boundaries, DST conversion, and future settlement date with an already-passed close.
+
+Data rules
+- Add only nullable columns using the existing migration approach.
+- Do not modify or backfill historical rows.
+- Do not loosen any existing guards.
+- Keep EdgeCast paper-trading only.
+
+Validation
+- Run `pytest tests/ -q`.
+- Do not push if tests fail.
+- Commit and push only to `replit-work`.
+- Do not merge to `main`.
+
+When finished, report:
+- files changed
+- schema changes
+- exact 300-second boundary rule
+- exact 120-minute boundary rule
+- tests added or changed
+- full test results
+- latest commit SHA
+- frontend compatibility risks
+- any uncertainty about Kalshi close-time fields

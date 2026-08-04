@@ -56,13 +56,14 @@ def _make_settlement_dt(*, days_ahead: int = 2, hour_utc: int = 19) -> datetime:
 
 
 def _fresh_quote() -> datetime:
-    """Return a quote timestamp that is 30 minutes old (well within 4-hour window)."""
-    return _now_utc() - timedelta(minutes=30)
+    """Return a quote timestamp that is 60 seconds old (well within the 5-minute / 300 s window)."""
+    return _now_utc() - timedelta(seconds=60)
 
 
 def _build_base_kwargs(**overrides) -> dict:
     """Return a fully-passing set of kwargs for assess_trade_eligibility."""
-    settlement_dt = _make_settlement_dt(days_ahead=2)
+    settlement_dt   = _make_settlement_dt(days_ahead=2)
+    market_close_dt = _make_settlement_dt(days_ahead=2, hour_utc=17)   # closes same day, a few hours before settlement
     base = {
         "contract_type":                "threshold",
         "target_settlement_date_str":   settlement_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -74,6 +75,7 @@ def _build_base_kwargs(**overrides) -> dict:
         "direction":                    "NO",
         "quote_timestamp":              _fresh_quote(),
         "quote_ask":                    0.30,
+        "market_close_timestamp":       market_close_dt,
     }
     base.update(overrides)
     return base
@@ -175,44 +177,50 @@ class TestGuard2SameDay:
         assert reason != REASON_SAME_DAY
 
 
-# ── G3: Hard settlement cutoff ───────────────────────────────────────────────
+# ── G3: Market close timestamp guard ─────────────────────────────────────────
 
 class TestGuard3Cutoff:
-    def test_settlement_past_is_research_only(self):
-        """Settlement already happened → blocked."""
-        past = (_now_utc() - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    """
+    Guard 3 now uses the actual Kalshi market close timestamp.
+    target_settlement_date_str is used only for Guard 2 (same-day check).
+    """
+
+    def test_market_close_past_is_research_only(self):
+        """Market already closed → RESEARCH_ONLY via cutoff guard."""
+        past_close = _now_utc() - timedelta(hours=1)
         status, reason, _ = assess_trade_eligibility(
-            **_build_base_kwargs(target_settlement_date_str=past)
+            **_build_base_kwargs(market_close_timestamp=past_close)
         )
         assert status == "RESEARCH_ONLY"
         assert reason == REASON_CUTOFF
 
-    def test_settlement_within_buffer_is_research_only(self):
-        """Settlement < 120 minutes away → blocked."""
-        soon = (_now_utc() + timedelta(minutes=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    def test_market_close_within_buffer_is_research_only(self):
+        """Market closing in 60 minutes (< 120 min buffer) → blocked."""
+        soon_close = _now_utc() + timedelta(minutes=60)
         status, reason, _ = assess_trade_eligibility(
-            **_build_base_kwargs(target_settlement_date_str=soon)
+            **_build_base_kwargs(market_close_timestamp=soon_close)
         )
         assert status == "RESEARCH_ONLY"
         assert reason == REASON_CUTOFF
 
-    def test_missing_settlement_date_is_research_only(self):
-        """No settlement date string → blocked as unverifiable."""
+    def test_market_close_missing_is_research_only(self):
+        """No market close timestamp → RESEARCH_ONLY (OFFICIAL requires it)."""
         status, reason, _ = assess_trade_eligibility(
-            **_build_base_kwargs(target_settlement_date_str=None)
+            **_build_base_kwargs(market_close_timestamp=None)
         )
         assert status == "RESEARCH_ONLY"
         assert reason == REASON_CUTOFF
 
-    def test_settlement_well_ahead_passes_cutoff(self):
-        """Settlement 48 hours away (the default) passes the cutoff guard."""
+    def test_market_close_well_ahead_passes(self):
+        """Market closing 48 h away (the default) passes Guard 3."""
         status, reason, _ = assess_trade_eligibility(**_build_base_kwargs())
         assert reason != REASON_CUTOFF
 
 
-def _build_base_kwargs(**overrides) -> dict:    # noqa: F811  (redefined below for convenience)
+def _build_base_kwargs(**overrides) -> dict:    # noqa: F811  (redefined for convenience)
     """Fully-passing kwargs; override any key to test edge cases."""
-    settlement_dt = _make_settlement_dt(days_ahead=2)
+    settlement_dt   = _make_settlement_dt(days_ahead=2)
+    market_close_dt = _make_settlement_dt(days_ahead=2, hour_utc=17)
     base = {
         "contract_type":                "threshold",
         "target_settlement_date_str":   settlement_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -224,6 +232,7 @@ def _build_base_kwargs(**overrides) -> dict:    # noqa: F811  (redefined below f
         "direction":                    "NO",
         "quote_timestamp":              _fresh_quote(),
         "quote_ask":                    0.30,
+        "market_close_timestamp":       market_close_dt,
     }
     base.update(overrides)
     return base
@@ -476,14 +485,65 @@ class TestGuard8FreshQuote:
         assert 44 * 60 < age < 46 * 60  # ≈ 2700 s
 
     def test_exactly_at_stale_threshold(self):
-        """A quote exactly at the staleness boundary (4h) is stale."""
-        # boundary: age == OFFICIAL_STALE_QUOTE_SECONDS → stale
+        """A quote exactly at the staleness boundary is stale (age == limit → stale)."""
         boundary_ts = _now_utc() - timedelta(seconds=OFFICIAL_STALE_QUOTE_SECONDS + 1)
         status, reason, _ = assess_trade_eligibility(
             **_build_base_kwargs(quote_timestamp=boundary_ts)
         )
         assert status == "RESEARCH_ONLY"
         assert reason == REASON_STALE_QUOTE
+
+    # ── 5-minute boundary tests (spec-required) ──────────────────────────────
+
+    def test_quote_age_299_seconds_passes(self):
+        """299 s old quote is within the 300 s window → OFFICIAL."""
+        ts = _now_utc() - timedelta(seconds=299)
+        status, reason, _ = assess_trade_eligibility(**_build_base_kwargs(quote_timestamp=ts))
+        assert reason != REASON_STALE_QUOTE
+
+    def test_quote_age_300_seconds_passes(self):
+        """300 s exactly — not strictly > 300 — passes the freshness guard.
+        Both `now` and the timestamp are anchored to the same instant so the
+        computed age is exactly 300.0 s, not 300.001 due to clock advancement."""
+        now = _now_utc()
+        ts  = now - timedelta(seconds=300)
+        status, reason, _ = assess_trade_eligibility(**_build_base_kwargs(quote_timestamp=ts, now=now))
+        assert reason != REASON_STALE_QUOTE
+
+    def test_quote_age_301_seconds_is_research_only(self):
+        """301 s old quote is strictly older than 300 s → RESEARCH_ONLY."""
+        ts = _now_utc() - timedelta(seconds=301)
+        status, reason, _ = assess_trade_eligibility(**_build_base_kwargs(quote_timestamp=ts))
+        assert status == "RESEARCH_ONLY"
+        assert reason == REASON_STALE_QUOTE
+
+    def test_future_quote_timestamp_is_research_only(self):
+        """
+        A future-dated quote cannot become OFFICIAL.
+
+        Previously the code clamped negative age to zero, which allowed a future
+        timestamp to pass as "age 0".  The corrected behaviour is to reject it:
+        future quote_timestamp → RESEARCH_ONLY / missing_or_stale_executable_quote.
+        The actual (negative) age must be stored for auditing.
+        """
+        future_ts = _now_utc() + timedelta(minutes=5)
+        status, reason, age = assess_trade_eligibility(
+            **_build_base_kwargs(quote_timestamp=future_ts)
+        )
+        assert status == "RESEARCH_ONLY"
+        assert reason == REASON_STALE_QUOTE
+        # Signed age is preserved (negative), not clamped to zero
+        assert age is not None and age < 0, (
+            f"Expected negative quote_age_seconds for a future timestamp, got {age}"
+        )
+
+    def test_future_quote_timestamp_cannot_be_official(self):
+        """Regression guard: a future-dated quote must never reach OFFICIAL status."""
+        future_ts = _now_utc() + timedelta(seconds=1)   # barely in the future
+        status, _, _ = assess_trade_eligibility(
+            **_build_base_kwargs(quote_timestamp=future_ts)
+        )
+        assert status != "OFFICIAL"
 
 
 # ── I1: Full OFFICIAL passing scenario ───────────────────────────────────────
@@ -577,6 +637,140 @@ class TestGuardPriority:
 
 
 # ── I3: Research-only excluded from official-count totals ────────────────────
+
+# ── G3: Market close timestamp — comprehensive spec-required scenarios ────────
+
+class TestGuard3CloseTime:
+    """
+    Tests for Guard 3 using the actual market close timestamp.
+    Boundary rule: seconds_to_close <= 120 * 60 → RESEARCH_ONLY.
+    So exactly 120 min = RESEARCH_ONLY; > 120 min = passes Guard 3.
+    """
+
+    def test_more_than_120_min_is_official(self):
+        """121 min to close — just outside the buffer — passes Guard 3."""
+        close_ts = _now_utc() + timedelta(minutes=121)
+        status, reason, _ = assess_trade_eligibility(
+            **_build_base_kwargs(market_close_timestamp=close_ts)
+        )
+        assert reason != REASON_CUTOFF, f"121 min should pass G3, got reason={reason}"
+
+    def test_exactly_120_min_is_research_only(self):
+        """
+        Exactly 120 minutes to close is 'within the cutoff buffer' → RESEARCH_ONLY.
+        Boundary: seconds_to_close (7200) <= 7200 → True → blocked.
+        """
+        close_ts = _now_utc() + timedelta(minutes=120)
+        status, reason, _ = assess_trade_eligibility(
+            **_build_base_kwargs(market_close_timestamp=close_ts)
+        )
+        assert status == "RESEARCH_ONLY"
+        assert reason == REASON_CUTOFF
+
+    def test_119_min_is_research_only(self):
+        """119 minutes to close — well inside buffer — blocked."""
+        close_ts = _now_utc() + timedelta(minutes=119)
+        status, reason, _ = assess_trade_eligibility(
+            **_build_base_kwargs(market_close_timestamp=close_ts)
+        )
+        assert status == "RESEARCH_ONLY"
+        assert reason == REASON_CUTOFF
+
+    def test_already_closed_is_research_only(self):
+        """Market closed 1 hour ago — seconds_to_close is negative."""
+        close_ts = _now_utc() - timedelta(hours=1)
+        status, reason, _ = assess_trade_eligibility(
+            **_build_base_kwargs(market_close_timestamp=close_ts)
+        )
+        assert status == "RESEARCH_ONLY"
+        assert reason == REASON_CUTOFF
+
+    def test_missing_close_time_is_research_only(self):
+        """None close timestamp → RESEARCH_ONLY; OFFICIAL requires it."""
+        status, reason, _ = assess_trade_eligibility(
+            **_build_base_kwargs(market_close_timestamp=None)
+        )
+        assert status == "RESEARCH_ONLY"
+        assert reason == REASON_CUTOFF
+
+    def test_future_settlement_past_close_is_research_only(self):
+        """
+        Settlement date is tomorrow, but market already closed → blocked.
+        Demonstrates that target_settlement_date alone is insufficient.
+        """
+        future_settle = _make_settlement_dt(days_ahead=1)
+        past_close    = _now_utc() - timedelta(hours=3)
+        status, reason, _ = assess_trade_eligibility(
+            **_build_base_kwargs(
+                target_settlement_date_str=future_settle.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                market_close_timestamp=past_close,
+            )
+        )
+        assert status == "RESEARCH_ONLY"
+        assert reason == REASON_CUTOFF
+
+    def test_utc_based_cutoff_ignores_local_tz(self):
+        """
+        The cutoff guard uses UTC math — local timezone DST offsets don't affect it.
+        A market closing in 200 min (UTC) should pass regardless of which TZ is used.
+        """
+        far_close = _now_utc() + timedelta(minutes=200)
+        for tz_name in ["America/Denver", "America/New_York", "America/Los_Angeles", "America/Chicago"]:
+            settle_dt = _make_settlement_dt(days_ahead=2)
+            status, reason, _ = assess_trade_eligibility(
+                contract_type="threshold",
+                target_settlement_date_str=settle_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                settlement_timezone=tz_name,
+                now=_now_utc(),
+                side_market_price=0.30,
+                edge_pct_points=15.0,
+                station_verified=True,
+                direction="NO",
+                quote_timestamp=_fresh_quote(),
+                quote_ask=0.30,
+                market_close_timestamp=far_close,
+            )
+            assert reason != REASON_CUTOFF, (
+                f"200-min close in TZ {tz_name} should pass G3, got reason={reason}"
+            )
+
+    def test_naive_close_timestamp_treated_as_utc(self):
+        """Naive (no tzinfo) market_close_timestamp is accepted and treated as UTC."""
+        naive_close = (_now_utc() + timedelta(hours=5)).replace(tzinfo=None)
+        status, reason, _ = assess_trade_eligibility(
+            **_build_base_kwargs(market_close_timestamp=naive_close)
+        )
+        assert reason != REASON_CUTOFF
+
+    def test_dst_spring_forward_cutoff_still_utc(self):
+        """
+        DST spring-forward: local clock skips 1h, but UTC cutoff check is unaffected.
+        We cannot easily predict when DST transitions happen in a test, so we use a
+        fixed UTC time to verify the guard produces the expected result.
+        """
+        from datetime import timezone as _tz
+        fixed_now = datetime(2027, 3, 14, 7, 30, 0, tzinfo=_tz.utc)  # Spring-forward day in US
+        # Market closes 200 min from fixed_now — should pass
+        close_ts = fixed_now + timedelta(minutes=200)
+        settle_dt = fixed_now + timedelta(days=2)
+
+        status, reason, _ = assess_trade_eligibility(
+            contract_type="threshold",
+            target_settlement_date_str=settle_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            settlement_timezone="America/Denver",
+            now=fixed_now,
+            side_market_price=0.30,
+            edge_pct_points=15.0,
+            station_verified=True,
+            direction="NO",
+            quote_timestamp=fixed_now - timedelta(seconds=60),
+            quote_ask=0.30,
+            market_close_timestamp=close_ts,
+        )
+        assert reason != REASON_CUTOFF, (
+            f"200-min close on DST spring-forward day should pass G3, got {reason}"
+        )
+
 
 class TestResearchExclusion:
     def test_research_only_excluded_from_official_count(self):

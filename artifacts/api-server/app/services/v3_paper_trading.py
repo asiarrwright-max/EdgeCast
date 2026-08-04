@@ -200,6 +200,20 @@ def _decide_v3(
     edge_pp      = round((edge or 0) * 100, 4)
     mkt_yes_prob = snap.market_probability
 
+    # Market close audit fields
+    market_close_ts = getattr(market, "close_time", None)
+    decision_ts = now
+    minutes_to_close: float | None = None
+    if market_close_ts is not None:
+        if market_close_ts.tzinfo is None:
+            market_close_ts = market_close_ts.replace(tzinfo=timezone.utc)
+        minutes_to_close = (market_close_ts - now).total_seconds() / 60
+
+    # expected_settlement_timestamp is only set from an actual Kalshi settlement field.
+    # target_date is a date-only string (for display/grouping) and must not be fabricated
+    # into a timestamp here.  Leave NULL until Kalshi provides explicit settlement metadata.
+    expected_settle_ts = None
+
     # Eligibility engine (Guards 1–5, 7–8)
     quote_ts = getattr(market, "collection_timestamp", None)
     elig_status, elig_reason, quote_age_s = assess_trade_eligibility(
@@ -213,6 +227,7 @@ def _decide_v3(
         direction=direction,
         quote_timestamp=quote_ts,
         quote_ask=quote_ask,
+        market_close_timestamp=market_close_ts,
     )
 
     # OFFICIAL → may be executable; RESEARCH_ONLY → never executable
@@ -253,6 +268,10 @@ def _decide_v3(
         "target_settlement_date_str":   market.target_date,
         "settlement_timezone":          station_tz,
         "weather_variable":             snap.settlement_variable,
+        "market_close_timestamp":       market_close_ts,
+        "expected_settlement_timestamp": expected_settle_ts,
+        "decision_timestamp":           decision_ts,
+        "minutes_to_market_close":      minutes_to_close,
     }
 
 
@@ -427,6 +446,11 @@ async def _run_paper_trading_v3_inner(
                 eligibility_status=decision.get("eligibility_status"),
                 eligibility_reason=decision.get("eligibility_reason"),
                 quote_age_seconds=decision.get("quote_age_seconds"),
+                market_close_timestamp=decision.get("market_close_timestamp"),
+                expected_settlement_timestamp=decision.get("expected_settlement_timestamp"),
+                decision_timestamp=decision.get("decision_timestamp"),
+                minutes_to_market_close=decision.get("minutes_to_market_close"),
+                settlement_timezone=decision.get("settlement_timezone"),
                 status="OPEN",
                 decision_explanation=decision["decision_explanation"],
             )

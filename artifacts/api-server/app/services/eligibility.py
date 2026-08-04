@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 OFFICIAL_MIN_ENTRY_PRICE: float = 0.20           # Guard 4
 OFFICIAL_MAX_EDGE_PP: float = 50.0               # Guard 5
 OFFICIAL_CUTOFF_BUFFER_MINUTES: int = 120        # Guard 3
-OFFICIAL_STALE_QUOTE_SECONDS: int = 4 * 3600     # Guard 8 — 4 hours
+OFFICIAL_STALE_QUOTE_SECONDS: int = 300          # Guard 8 — 5 minutes (300 s)
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +98,7 @@ def assess_trade_eligibility(
     direction: str,
     quote_timestamp: datetime | None,
     quote_ask: float | None,
+    market_close_timestamp: datetime | None = None,
     min_entry_price: float = OFFICIAL_MIN_ENTRY_PRICE,
     max_edge_pp: float = OFFICIAL_MAX_EDGE_PP,
     cutoff_buffer_minutes: int = OFFICIAL_CUTOFF_BUFFER_MINUTES,
@@ -115,6 +116,7 @@ def assess_trade_eligibility(
         "threshold" | "range" | "hourly_threshold" — from snap.contract_type.
     target_settlement_date_str
         Market settlement date string (ISO 8601 or YYYY-MM-DD).
+        Used only for Guard 2 (same-day local timezone check).
     settlement_timezone
         IANA timezone string for the settlement station (e.g. "America/Denver").
     now
@@ -131,16 +133,20 @@ def assess_trade_eligibility(
         When the market quote was fetched (timezone-aware).
     quote_ask
         The ask price on our side: yes_ask for YES direction, no_ask for NO.
+    market_close_timestamp
+        Actual Kalshi market close time from market metadata (timezone-aware UTC).
+        OFFICIAL status requires this to be present, in the future, and more than
+        cutoff_buffer_minutes away.  None → RESEARCH_ONLY.
     """
-    # Normalise quote age first — used in every return path
+    now_aware = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+
+    # Compute quote age — stored with sign; negative means future-dated (rejected by Guard 8)
     quote_age_seconds: float | None = None
     if quote_timestamp is not None:
         qt = quote_timestamp
         if qt.tzinfo is None:
             qt = qt.replace(tzinfo=timezone.utc)
-        now_aware = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
-        age = (now_aware - qt).total_seconds()
-        quote_age_seconds = max(0.0, age)
+        quote_age_seconds = (now_aware - qt).total_seconds()  # negative = future timestamp
 
     # Guard 1: Daily weather only
     if contract_type == "hourly_threshold":
@@ -150,37 +156,47 @@ def assess_trade_eligibility(
     if not station_verified:
         return "RESEARCH_ONLY", REASON_STATION, quote_age_seconds
 
-    # Guard 8: Fresh executable quote
+    # Guard 8: Fresh executable quote (YES uses yes_ask; NO uses no_ask — never substitute)
     if quote_timestamp is None:
         return "RESEARCH_ONLY", REASON_STALE_QUOTE, quote_age_seconds
     if quote_ask is None:
         return "RESEARCH_ONLY", REASON_STALE_QUOTE, quote_age_seconds
+    if quote_age_seconds is not None and quote_age_seconds < 0:
+        # quote_timestamp is in the future — reject; do not clamp to zero
+        return "RESEARCH_ONLY", REASON_STALE_QUOTE, quote_age_seconds
     if quote_age_seconds is not None and quote_age_seconds > stale_quote_seconds:
         return "RESEARCH_ONLY", REASON_STALE_QUOTE, quote_age_seconds
 
-    # Guard 3 + Guard 2: Settlement cutoff + same-day check
+    # Guard 3: Market close timestamp — must be present, future, and beyond cutoff buffer.
+    # Do NOT use target_settlement_date alone for this check.
+    if market_close_timestamp is None:
+        return "RESEARCH_ONLY", REASON_CUTOFF, quote_age_seconds
+    try:
+        mc = market_close_timestamp
+        if mc.tzinfo is None:
+            mc = mc.replace(tzinfo=timezone.utc)
+        seconds_to_close = (mc - now_aware).total_seconds()
+        # Boundary: exactly cutoff_buffer_minutes is RESEARCH_ONLY ("within the buffer")
+        if seconds_to_close <= cutoff_buffer_minutes * 60:
+            return "RESEARCH_ONLY", REASON_CUTOFF, quote_age_seconds
+    except Exception as exc:
+        logger.warning("Eligibility close-time guard error: %s", exc)
+        return "RESEARCH_ONLY", REASON_CUTOFF, quote_age_seconds
+
+    # Guard 2: Same-day detection — settlement must be tomorrow or later in local timezone
     if not target_settlement_date_str:
         return "RESEARCH_ONLY", REASON_CUTOFF, quote_age_seconds
     try:
         from zoneinfo import ZoneInfo
         settlement_dt = _parse_settlement_dt(target_settlement_date_str)
-        now_aware = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
-        seconds_to_settlement = (settlement_dt - now_aware).total_seconds()
-
-        # Guard 3: Cutoff buffer
-        if seconds_to_settlement < cutoff_buffer_minutes * 60:
-            return "RESEARCH_ONLY", REASON_CUTOFF, quote_age_seconds
-
-        # Guard 2: Same-day in settlement-station local timezone
         local_tz = ZoneInfo(settlement_timezone)
         settlement_local_date = settlement_dt.astimezone(local_tz).date()
         now_local_date = now_aware.astimezone(local_tz).date()
         lead_local = (settlement_local_date - now_local_date).days
         if lead_local < 1:
             return "RESEARCH_ONLY", REASON_SAME_DAY, quote_age_seconds
-
     except Exception as exc:
-        logger.warning("Eligibility cutoff parse error for %r: %s", target_settlement_date_str, exc)
+        logger.warning("Eligibility same-day parse error for %r: %s", target_settlement_date_str, exc)
         return "RESEARCH_ONLY", REASON_CUTOFF, quote_age_seconds
 
     # Guard 4: Entry-price floor
