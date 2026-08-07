@@ -1,0 +1,46 @@
+metric,value,notes
+forward_test_start,2026-08-04T22:21:44Z,UTC timestamp of first eligible live collection
+audit_as_of,2026-08-07,READ-ONLY — no data was modified
+,,
+=== OVERALL ===,,
+total_settled_official,15,
+wins,9,
+losses,6,
+win_rate_pct,60,%
+total_stake,150,USD — $10 per trade
+total_profit_loss,-25.4806,USD
+roi_pct,-16.99,%
+average_entry_price,0.652667,average side_market_price
+average_model_probability,0.913247,average ec_side_probability
+average_claimed_edge_pct_points,26.058,average edge_pct_points
+largest_win,7.5439,USD profit_loss on best trade
+largest_loss,-10,USD profit_loss on worst trade
+,,
+=== BY STRATEGY ===,,
+v2_2_settled,14,
+v2_2_wins,8,
+v2_2_losses,6,
+v2_2_win_rate_pct,57.14,%
+v2_2_profit_loss,-28.1389,USD
+v2_2_roi_pct,-20.1,%
+v3_settled,1,
+v3_wins,1,
+v3_losses,0,
+v3_win_rate_pct,100,%
+v3_profit_loss,2.6582,USD
+v3_roi_pct,26.58,%
+,,
+=== BY DIRECTION ===,,
+yes_settled,1,
+yes_wins,0,
+yes_losses,1,
+yes_win_rate_pct,0,%
+yes_profit_loss,-10,USD
+no_settled,14,
+no_wins,9,
+no_losses,5,
+no_win_rate_pct,64.29,%
+no_profit_loss,-15.4806,USD
+,,
+=== SCHEMA NOTE ===,,
+settlement_station,"lat,lon coordinates",production schema has no station-name column; station_verified=bool + station_lat/lon used instead

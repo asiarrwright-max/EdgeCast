@@ -7,7 +7,7 @@
     "note": "READ-ONLY audit — no records, settings, or logic were modified.",
     "schema_notes": [
       "paper_trades: ec_yes_probability=model YES prob, ec_side_probability=model selected-side prob, side_market_price=market price for selected side, quote_ask=executable ask from quote snapshot",
-      "v3_paper_trades: no separate quote_ask or quote_timestamp columns; quote_age_seconds pre-computed at write time",
+      "v3_paper_trades: no separate quote_ask or quote_timestamp columns; quote_age_/seconds pre-computed at write time",
       "station_verified=boolean (no station name string column); verified via station coords at trade creation"
     ]
   },
