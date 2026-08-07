@@ -105,3 +105,10 @@ uri = "file://edgecast_false_confidence_losses.csv"
 type = "table"
 title = "False Confidence Losses"
 description = "All losses where model was ≥85% confident — with hypotheses"
+
+[[outputs]]
+id = "gBfUeKEHtHnWQwF2azONd"
+uri = "file://edgecast_forward_test_diagnostics.zip"
+type = "unspecified"
+title = "All 12 Diagnostic CSVs (zip)"
+description = "edgecast_calibration_summary, loss_autopsy, performance_by_*, settlement_integrity_audit, false_confidence_losses, and the two earlier audit files"
