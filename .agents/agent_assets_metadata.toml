@@ -7,3 +7,17 @@ uri = "file://.agents/outputs/edgecast-forensic-audit-2026-08-04.md"
 type = "text"
 title = "EdgeCast Forensic Audit — 2026-08-04"
 description = "Read-only audit of V2.0 (466 settled), V2.2 exec (11 settled), and V3 exec (5 settled). Covers 15 dimensional breakdowns, 30 traced trades, explicit bug tests, and 4-part reconciliation."
+
+[[outputs]]
+id = "vFZD81J8T7m-eJM6kQCoG"
+uri = "file://edgecast_forward_test_audit.json"
+type = "unspecified"
+title = "EdgeCast Forward Test Audit — JSON"
+description = "Full production audit: totals, OFFICIAL trades, research-only reasons, DQ checks, collection health. 2026-08-04T22:21:44Z onward."
+
+[[outputs]]
+id = "mPUSQYqd8F6KL-9aT-Occ"
+uri = "file://edgecast_forward_test_audit.csv"
+type = "table"
+title = "EdgeCast Forward Test Audit — OFFICIAL Trades CSV"
+description = "35 OFFICIAL forward-test trades (34 V2.2 + 1 V3) with all audit fields. One row per trade."
