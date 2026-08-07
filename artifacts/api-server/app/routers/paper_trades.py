@@ -30,8 +30,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import JobRun, KalshiMarket, PaperTrade, PredictionSnapshot
-from app.models_v3 import V3PaperTrade
+from app.models import (
+    ForecastVerification,
+    JobRun,
+    KalshiMarket,
+    PaperTrade,
+    PredictionSnapshot,
+)
+from app.models_v3 import V3PaperTrade, V3PredictionSnapshot
 from app.services.paper_trading import (
     FLAG_DESCRIPTIONS,
     _empty_metrics,
@@ -1026,6 +1032,505 @@ async def get_calibration(
         strategy_versions=seg_filters.get("strategy_versions"),
         is_executable=seg_filters.get("is_executable"),
     )
+
+
+@router.get("/paper-trades/forward-test-diagnostics")
+async def get_forward_test_diagnostics(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
+    """
+    Forward-test calibration diagnostic report (READ-ONLY).
+
+    Returns probability-band calibration, Brier Score, Log Loss, ECE, MACE,
+    false-confidence losses (model ≥85%, outcome = LOSS), and settlement
+    integrity flags for settled OFFICIAL trades since the forward-test start.
+
+    Nothing is written or modified.
+    """
+    import math
+    import re
+    from datetime import timezone as _tz
+    from sqlalchemy import tuple_ as _tuple
+
+    # ── Probability bands ─────────────────────────────────────────────────────
+    PROB_BANDS: list[tuple[str, float, float]] = [
+        ("<50%",    0.00, 0.50),
+        ("50–59%",  0.50, 0.60),
+        ("60–69%",  0.60, 0.70),
+        ("70–79%",  0.70, 0.80),
+        ("80–84%",  0.80, 0.85),
+        ("85–89%",  0.85, 0.90),
+        ("90–94%",  0.90, 0.95),
+        ("95–100%", 0.95, 1.01),
+    ]
+
+    # ── 1. Fetch paper_trades settled OFFICIAL + prediction snapshots ──────────
+    pt_stmt = (
+        select(PaperTrade, PredictionSnapshot)
+        .outerjoin(
+            PredictionSnapshot,
+            PredictionSnapshot.id == PaperTrade.snapshot_id,
+        )
+        .where(
+            PaperTrade.created_at >= FORWARD_TEST_START,
+            PaperTrade.eligibility_status == "OFFICIAL",
+            PaperTrade.status == "SETTLED",
+        )
+    )
+    pt_rows = (await db.execute(pt_stmt)).all()
+
+    # ── 2. Fetch v3_paper_trades settled OFFICIAL + v3 prediction snapshots ───
+    v3_stmt = (
+        select(V3PaperTrade, V3PredictionSnapshot)
+        .outerjoin(
+            V3PredictionSnapshot,
+            V3PredictionSnapshot.id == V3PaperTrade.v3_snapshot_id,
+        )
+        .where(
+            V3PaperTrade.created_at >= FORWARD_TEST_START,
+            V3PaperTrade.eligibility_status == "OFFICIAL",
+            V3PaperTrade.status == "SETTLED",
+        )
+    )
+    v3_rows = (await db.execute(v3_stmt)).all()
+
+    if not pt_rows and not v3_rows:
+        return {
+            "sampleWarning": "No settled OFFICIAL forward-test trades yet.",
+            "asOf": datetime.now(timezone.utc).isoformat(),
+            "forwardTestStart": FORWARD_TEST_START.isoformat(),
+            "settledCount": 0,
+            "wins": 0, "losses": 0, "winRatePct": 0.0,
+            "totalStake": 0.0, "totalPl": 0.0, "roiPct": 0.0,
+            "avgPredictedProbPct": 0.0, "avgEntryPrice": 0.0, "avgClaimedEdgePp": 0.0,
+            "brierScore": None, "logLoss": None,
+            "expectedCalibrationErrorPct": None, "meanAbsCalibrationErrorPct": None,
+            "calibrationBands": [], "byStrategy": [], "byDirection": [],
+            "byEdgeBucket": [], "byEntryPriceBucket": [],
+            "falseConfidenceLosses": [], "settlementIntegrityFlags": [],
+            "chartPoints": [],
+        }
+
+    # ── 3. ERA5 / GHCND actual values ─────────────────────────────────────────
+    combos: set[tuple[str, str, str]] = set()
+    for pt, _ in pt_rows:
+        combos.add((pt.city, pt.weather_variable, str(pt.target_settlement_date)[:10]))
+    for v3, _ in v3_rows:
+        combos.add((v3.city, v3.weather_variable, str(v3.target_settlement_date)[:10]))
+
+    fv_map: dict[tuple[str, str, str], Any] = {}
+    if combos:
+        fv_stmt = select(ForecastVerification).where(
+            _tuple(
+                ForecastVerification.city,
+                ForecastVerification.weather_variable,
+                ForecastVerification.target_date,
+            ).in_(list(combos)),
+            ForecastVerification.source_label.in_(
+                ["ghcnd_observation", "ghcnd_observation_unverified", "era5_reanalysis"]
+            ),
+        )
+        SOURCE_RANK = {
+            "ghcnd_observation": 3,
+            "ghcnd_observation_unverified": 2,
+            "era5_reanalysis": 1,
+        }
+        for fv in (await db.execute(fv_stmt)).scalars():
+            key = (fv.city, fv.weather_variable, fv.target_date)
+            existing = fv_map.get(key)
+            if existing is None or (
+                SOURCE_RANK.get(fv.source_label, 0) > SOURCE_RANK.get(existing.source_label, 0)
+            ):
+                fv_map[key] = fv
+
+    # ── 4. Kalshi rules (settlement station text) ─────────────────────────────
+    all_tickers = {pt.market_ticker for pt, _ in pt_rows} | {v3.market_ticker for v3, _ in v3_rows}
+    km_stmt = select(KalshiMarket.ticker, KalshiMarket.raw_data).where(
+        KalshiMarket.ticker.in_(list(all_tickers))
+    )
+    km_map: dict[str, Any] = {
+        row[0]: (row[1] or {}) for row in (await db.execute(km_stmt)).all()
+    }
+
+    def _kalshi_station(ticker: str) -> str | None:
+        rules = km_map.get(ticker, {}).get("rules_primary", "") or ""
+        m = re.search(r"recorded at (.+?) for", rules)
+        return m.group(1).strip() if m else None
+
+    def _model_station(explanation: str | None) -> tuple[str | None, str | None]:
+        if not explanation:
+            return None, None
+        m = re.search(r"Station:\s*([^(]+)\s*\(([^)]+)\)", explanation)
+        if m:
+            return m.group(1).strip(), m.group(2).strip()
+        return None, None
+
+    # ── 5. Build normalised trade dicts ───────────────────────────────────────
+    def _norm_pt(pt: PaperTrade, snap: PredictionSnapshot | None) -> dict[str, Any]:
+        date = str(pt.target_settlement_date)[:10]
+        fv = fv_map.get((pt.city, pt.weather_variable, date))
+        sname, sid = _model_station(pt.decision_explanation)
+        forecast_val = snap.forecast_value if snap else None
+        era5_actual  = fv.actual_value if fv else None
+        dec_err = (
+            round(forecast_val - era5_actual, 4)
+            if forecast_val is not None and era5_actual is not None
+            else None
+        )
+        lower = snap.lower_bound if snap else None
+        upper = snap.upper_bound if snap else None
+        threshold = snap.settlement_threshold if snap else None
+        op = snap.settlement_operator if snap else None
+        era5_pred = _era5_predicted(era5_actual, lower, upper, threshold, op)
+        return {
+            "table": "paper_trades", "id": pt.id,
+            "marketTicker": pt.market_ticker, "city": pt.city,
+            "weatherVariable": pt.weather_variable, "contractType": pt.contract_type,
+            "targetSettlementDate": date, "strategyVersion": pt.strategy_version,
+            "direction": pt.direction,
+            "ecSideProb": pt.ec_side_probability or 0.0,
+            "sideMarketPrice": pt.side_market_price or 0.0,
+            "edgePctPoints": pt.edge_pct_points or 0.0,
+            "leadTimeDays": pt.lead_time_days or 0,
+            "sigmaUsed": pt.sigma_used,
+            "fallbackLevel": pt.fallback_level,
+            "confidenceLabel": pt.confidence_label,
+            "stake": pt.stake or 0.0, "profitLoss": pt.profit_loss or 0.0,
+            "outcome": pt.outcome, "kalshiResult": pt.kalshi_result,
+            "decisionTimestamp": pt.decision_timestamp.isoformat() if pt.decision_timestamp else None,
+            "settlementTimestamp": pt.settlement_timestamp.isoformat() if pt.settlement_timestamp else None,
+            "stationLat": pt.station_lat, "stationLon": pt.station_lon,
+            "modelStationName": sname, "modelStationId": sid,
+            "kalshiSettlementStation": _kalshi_station(pt.market_ticker),
+            "forecastValue": forecast_val,
+            "lowerBound": lower, "upperBound": upper,
+            "settlementThreshold": threshold, "settlementOperator": op,
+            "era5Actual": era5_actual, "decisionForecastError": dec_err,
+            "era5PredictedResult": era5_pred,
+            "era5SourceLabel": fv.source_label if fv else None,
+            "era5GhcndStationId": fv.ghcnd_station_id if fv else None,
+        }
+
+    def _norm_v3(v3: V3PaperTrade, snap: V3PredictionSnapshot | None) -> dict[str, Any]:
+        date = str(v3.target_settlement_date)[:10]
+        fv = fv_map.get((v3.city, v3.weather_variable, date))
+        sname, sid = _model_station(v3.decision_explanation)
+        forecast_val = snap.forecast_value if snap else None
+        era5_actual  = fv.actual_value if fv else None
+        dec_err = (
+            round(forecast_val - era5_actual, 4)
+            if forecast_val is not None and era5_actual is not None
+            else None
+        )
+        era5_pred = _era5_predicted(era5_actual, None, None, None, None)
+        return {
+            "table": "v3_paper_trades", "id": v3.id,
+            "marketTicker": v3.market_ticker, "city": v3.city,
+            "weatherVariable": v3.weather_variable, "contractType": v3.contract_type,
+            "targetSettlementDate": date, "strategyVersion": v3.strategy_version or "v3.0",
+            "direction": v3.direction,
+            "ecSideProb": v3.ec_side_probability or 0.0,
+            "sideMarketPrice": v3.side_market_price or 0.0,
+            "edgePctPoints": v3.edge_pct_points or 0.0,
+            "leadTimeDays": v3.lead_time_days or 0,
+            "sigmaUsed": v3.historical_sigma,
+            "fallbackLevel": str(v3.fallback_level_used) if v3.fallback_level_used is not None else None,
+            "confidenceLabel": None,
+            "stake": v3.stake or 0.0, "profitLoss": v3.profit_loss or 0.0,
+            "outcome": v3.outcome, "kalshiResult": v3.kalshi_result,
+            "decisionTimestamp": v3.decision_timestamp.isoformat() if v3.decision_timestamp else None,
+            "settlementTimestamp": v3.settlement_timestamp.isoformat() if v3.settlement_timestamp else None,
+            "stationLat": v3.station_lat, "stationLon": v3.station_lon,
+            "modelStationName": sname, "modelStationId": sid,
+            "kalshiSettlementStation": _kalshi_station(v3.market_ticker),
+            "forecastValue": forecast_val,
+            "lowerBound": None, "upperBound": None,
+            "settlementThreshold": None, "settlementOperator": None,
+            "era5Actual": era5_actual, "decisionForecastError": dec_err,
+            "era5PredictedResult": era5_pred,
+            "era5SourceLabel": fv.source_label if fv else None,
+            "era5GhcndStationId": fv.ghcnd_station_id if fv else None,
+        }
+
+    def _era5_predicted(
+        actual: float | None,
+        lower: float | None, upper: float | None,
+        threshold: float | None, op: str | None,
+    ) -> str | None:
+        if actual is None:
+            return None
+        if lower is not None and upper is not None:
+            return "yes" if lower <= actual < upper + 1 else "no"
+        if threshold is not None and op:
+            if op == "gte":
+                return "yes" if actual >= threshold else "no"
+            if op == "lte":
+                return "yes" if actual <= threshold else "no"
+        return None
+
+    trades: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for pt, snap in pt_rows:
+        k = f"pt:{pt.id}"
+        if k not in seen_ids:
+            seen_ids.add(k)
+            trades.append(_norm_pt(pt, snap))
+    for v3, snap in v3_rows:
+        k = f"v3:{v3.id}"
+        if k not in seen_ids:
+            seen_ids.add(k)
+            trades.append(_norm_v3(v3, snap))
+
+    n = len(trades)
+    if n == 0:
+        return {"settledCount": 0, "sampleWarning": "No settled OFFICIAL forward-test trades.", "calibrationBands": []}
+
+    # ── 6. Metric helpers ─────────────────────────────────────────────────────
+    def _is_win(t: dict) -> bool:
+        return t["outcome"] == "WIN"
+
+    def _grp(rows: list[dict]) -> dict[str, Any] | None:
+        if not rows:
+            return None
+        wins = sum(1 for t in rows if _is_win(t))
+        pl   = sum(t["profitLoss"] for t in rows)
+        stk  = sum(t["stake"] for t in rows)
+        wr   = wins / len(rows) * 100 if rows else 0.0
+        avg_prob  = sum(t["ecSideProb"] for t in rows) / len(rows)
+        avg_entry = sum(t["sideMarketPrice"] for t in rows) / len(rows)
+        avg_edge  = sum(t["edgePctPoints"] for t in rows) / len(rows)
+        roi = pl / stk * 100 if stk > 0 else 0.0
+        cal = wr / 100 - avg_prob
+        bs = sum((t["ecSideProb"] - (1.0 if _is_win(t) else 0.0)) ** 2 for t in rows) / len(rows)
+        ll = -sum(
+            math.log(max(0.001, t["ecSideProb"])) if _is_win(t)
+            else math.log(max(0.001, 1.0 - t["ecSideProb"]))
+            for t in rows
+        ) / len(rows)
+        return {
+            "n": len(rows), "wins": wins, "losses": len(rows) - wins,
+            "winRatePct": round(wr, 2), "avgPredictedProbPct": round(avg_prob * 100, 2),
+            "avgEntryPrice": round(avg_entry, 6), "avgClaimedEdgePp": round(avg_edge, 2),
+            "totalPl": round(pl, 4), "totalStake": round(stk, 4),
+            "roiPct": round(roi, 2), "calibrationErrorPp": round(cal * 100, 2),
+            "brierScore": round(bs, 4), "logLoss": round(ll, 4),
+        }
+
+    def _band_row(label: str, rows: list[dict]) -> dict[str, Any]:
+        g = _grp(rows)
+        return {
+            "band": label,
+            "numBets": g["n"] if g else 0,
+            "wins": g["wins"] if g else 0,
+            "losses": g["losses"] if g else 0,
+            "observedWinRatePct": g["winRatePct"] if g else None,
+            "avgPredictedProbPct": g["avgPredictedProbPct"] if g else None,
+            "calibrationErrorPp": g["calibrationErrorPp"] if g else None,
+            "avgEntryPrice": g["avgEntryPrice"] if g else None,
+            "avgClaimedEdgePp": g["avgClaimedEdgePp"] if g else None,
+            "totalPl": g["totalPl"] if g else None,
+            "roiPct": g["roiPct"] if g else None,
+        }
+
+    def _group_row(label: str, rows: list[dict]) -> dict[str, Any]:
+        g = _grp(rows) or {}
+        return {"label": label, **{k: g.get(k) for k in
+            ["n", "wins", "losses", "winRatePct", "avgPredictedProbPct",
+             "totalPl", "roiPct", "brierScore", "logLoss", "calibrationErrorPp"]}}
+
+    # ── 7. Calibration bands ──────────────────────────────────────────────────
+    cal_bands = [
+        _band_row(label, [t for t in trades if lo <= t["ecSideProb"] < hi])
+        for label, lo, hi in PROB_BANDS
+    ]
+
+    # ── 8. Overall metrics ────────────────────────────────────────────────────
+    overall = _grp(trades) or {}
+    ece = sum(
+        (len(rows) / n) * abs((sum(1 for t in rows if _is_win(t)) / len(rows)) - (sum(t["ecSideProb"] for t in rows) / len(rows)))
+        for _, lo, hi in PROB_BANDS
+        if (rows := [t for t in trades if lo <= t["ecSideProb"] < hi])
+    )
+    non_empty_bands = [
+        abs((sum(1 for t in rows if _is_win(t)) / len(rows)) - (sum(t["ecSideProb"] for t in rows) / len(rows)))
+        for _, lo, hi in PROB_BANDS
+        if (rows := [t for t in trades if lo <= t["ecSideProb"] < hi])
+    ]
+    mace = sum(non_empty_bands) / len(non_empty_bands) if non_empty_bands else 0.0
+
+    # ── 9. Group breakdowns ───────────────────────────────────────────────────
+    by_strategy = [
+        _group_row("v2.2",  [t for t in trades if t["strategyVersion"] == "v2.2"]),
+        _group_row("v3.0",  [t for t in trades if (t["strategyVersion"] or "").startswith("v3")]),
+    ]
+    by_direction = [
+        _group_row("YES",   [t for t in trades if t["direction"] == "YES"]),
+        _group_row("NO",    [t for t in trades if t["direction"] == "NO"]),
+    ]
+    EDGE_BANDS = [("<5pp",0,5),("5–9.9pp",5,10),("10–14.9pp",10,15),
+                  ("15–19.9pp",15,20),("20–29.9pp",20,30),("30+pp",30,999)]
+    PRICE_BANDS = [("<0.50",0,0.50),("0.50–0.59",0.50,0.60),("0.60–0.69",0.60,0.70),
+                   ("0.70–0.79",0.70,0.80),("0.80+",0.80,2.0)]
+    by_edge = [
+        _group_row(lbl, [t for t in trades if lo <= t["edgePctPoints"] < hi])
+        for lbl, lo, hi in EDGE_BANDS
+    ]
+    by_entry_price = [
+        _group_row(lbl, [t for t in trades if lo <= t["sideMarketPrice"] < hi])
+        for lbl, lo, hi in PRICE_BANDS
+    ]
+
+    # ── 10. False-confidence losses ───────────────────────────────────────────
+    def _thresh_str(t: dict) -> str:
+        if t["lowerBound"] is not None:
+            return f"{t['lowerBound']}–{t['upperBound']}°F range"
+        if t["settlementThreshold"] is not None:
+            return f"{t['settlementOperator']} {t['settlementThreshold']}°F"
+        return ""
+
+    def _hypothesis(t: dict) -> str:
+        if t.get("integrityFlag"):
+            return (
+                "ERA5 and NWS disagree on the actual value — likely a station/measurement "
+                "source mismatch. Verify against the NWS Daily CLI report before drawing conclusions."
+            )
+        cat = t.get("lossCategory", "")
+        fe = t.get("decisionForecastError")
+        if cat == "Forecast miss" and fe is not None:
+            return (
+                f"Model forecast ({t['forecastValue']}°F) diverged from ERA5 actual "
+                f"({t['era5Actual']}°F) by {abs(fe):.1f}°F. "
+                "ERA5 grid vs point-station difference, or the NWP forecast itself missed."
+            )
+        if cat == "Threshold too close":
+            return (
+                "Actual value fell within the range. The fixed sigma floor may "
+                "underestimate uncertainty for temperatures near typical daily ranges."
+            )
+        return "Insufficient data for automatic classification."
+
+    def _loss_category(t: dict) -> str:
+        era5_pred = t.get("era5PredictedResult")
+        if era5_pred and era5_pred != t["kalshiResult"]:
+            return "Station/Settlement mismatch"
+        fe = t.get("decisionForecastError")
+        dist = t.get("distanceFromThreshold")
+        if fe is not None and abs(fe) > 3:
+            return "Forecast miss"
+        if dist is not None and dist < 1.5:
+            return "Threshold too close"
+        if fe is not None:
+            return "Forecast miss"
+        return "Unknown"
+
+    def _dist_from_threshold(t: dict) -> float | None:
+        actual = t.get("era5Actual")
+        if actual is None:
+            return None
+        lower, upper = t.get("lowerBound"), t.get("upperBound")
+        if lower is not None and upper is not None:
+            return round(min(abs(actual - lower), abs(actual - (upper + 1))), 3)
+        thr = t.get("settlementThreshold")
+        if thr is not None:
+            return round(abs(actual - thr), 3)
+        return None
+
+    false_confidence_losses: list[dict] = []
+    for t in trades:
+        if t["ecSideProb"] >= 0.85 and t["outcome"] == "LOSS":
+            integrity_flag = (
+                "ERA5_KALSHI_DISAGREE"
+                if t.get("era5PredictedResult") and t["era5PredictedResult"] != t["kalshiResult"]
+                else None
+            )
+            t["integrityFlag"] = integrity_flag
+            t["lossCategory"] = _loss_category(t)
+            t["distanceFromThreshold"] = _dist_from_threshold(t)
+            false_confidence_losses.append({
+                "marketTicker": t["marketTicker"],
+                "city": t["city"],
+                "weatherVariable": t["weatherVariable"],
+                "contractType": t["contractType"],
+                "direction": t["direction"],
+                "strategyVersion": t["strategyVersion"],
+                "modelProbabilityPct": round(t["ecSideProb"] * 100, 2),
+                "marketEntryPrice": t["sideMarketPrice"],
+                "claimedEdgePp": t["edgePctPoints"],
+                "forecastValueF": t.get("forecastValue"),
+                "era5ActualF": t.get("era5Actual"),
+                "decisionForecastError": t.get("decisionForecastError"),
+                "thresholdOrRange": _thresh_str(t),
+                "distanceFromThreshold": t["distanceFromThreshold"],
+                "sigmaUsed": t.get("sigmaUsed"),
+                "lossCategory": t["lossCategory"],
+                "integrityFlag": integrity_flag,
+                "hypothesis": _hypothesis(t),
+            })
+
+    # ── 11. Settlement integrity flags ────────────────────────────────────────
+    integrity_flags: list[dict] = []
+    for t in trades:
+        era5_pred = t.get("era5PredictedResult")
+        if era5_pred and era5_pred != t.get("kalshiResult"):
+            integrity_flags.append({
+                "marketTicker": t["marketTicker"],
+                "city": t["city"],
+                "weatherVariable": t["weatherVariable"],
+                "targetDate": t["targetSettlementDate"],
+                "direction": t["direction"],
+                "outcome": t["outcome"],
+                "kalshiResult": t["kalshiResult"],
+                "era5ActualF": t.get("era5Actual"),
+                "era5PredictedResult": era5_pred,
+                "flag": "ERA5_KALSHI_DISAGREE",
+                "detail": (
+                    f"ERA5 actual {t['era5Actual']}°F → would give kalshi={era5_pred}, "
+                    f"but Kalshi settled {t['kalshiResult']}"
+                ),
+                "sourceLabel": t.get("era5SourceLabel"),
+            })
+
+    # ── 12. Chart points ──────────────────────────────────────────────────────
+    chart_points = [
+        {
+            "predictedProbPct": round(t["ecSideProb"] * 100, 2),
+            "isWin": _is_win(t),
+            "strategyVersion": t["strategyVersion"],
+        }
+        for t in trades
+    ]
+
+    return {
+        "sampleWarning": (
+            f"Early forward-test results — {n} settled OFFICIAL trades. "
+            "Calibration conclusions are preliminary."
+        ),
+        "asOf": datetime.now(timezone.utc).isoformat(),
+        "forwardTestStart": FORWARD_TEST_START.isoformat(),
+        "settledCount": n,
+        "wins": overall.get("wins", 0),
+        "losses": overall.get("losses", 0),
+        "winRatePct": overall.get("winRatePct", 0.0),
+        "totalStake": overall.get("totalStake", 0.0),
+        "totalPl": overall.get("totalPl", 0.0),
+        "roiPct": overall.get("roiPct", 0.0),
+        "avgPredictedProbPct": overall.get("avgPredictedProbPct", 0.0),
+        "avgEntryPrice": overall.get("avgEntryPrice", 0.0),
+        "avgClaimedEdgePp": overall.get("avgClaimedEdgePp", 0.0),
+        "brierScore": overall.get("brierScore"),
+        "logLoss": overall.get("logLoss"),
+        "expectedCalibrationErrorPct": round(ece * 100, 2),
+        "meanAbsCalibrationErrorPct": round(mace * 100, 2),
+        "calibrationBands": cal_bands,
+        "byStrategy": by_strategy,
+        "byDirection": by_direction,
+        "byEdgeBucket": by_edge,
+        "byEntryPriceBucket": by_entry_price,
+        "falseConfidenceLosses": false_confidence_losses,
+        "settlementIntegrityFlags": integrity_flags,
+        "chartPoints": chart_points,
+    }
 
 
 @router.post("/paper-trades/settle-now")

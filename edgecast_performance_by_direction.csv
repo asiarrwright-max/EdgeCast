@@ -1,0 +1,4 @@
+group,sample_size,wins,losses,win_rate_pct,avg_predicted_prob_pct,total_pl,roi_pct,calibration_error_pp,note
+YES,1,0,1,0,43.38,-10,-100,-43.38,1 trade — interpret with extreme caution
+NO,14,9,5,64.29,94.75,-15.4806,-11.06,-30.46,
+all,16,9,7,56.25,85.62,-25.4806,-16.99,-29.37,

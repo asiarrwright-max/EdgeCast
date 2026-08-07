@@ -1,0 +1,28 @@
+probability_band,num_bets,wins,losses,actual_win_rate_pct,avg_predicted_prob_pct,calibration_error_pp,avg_entry_price,avg_claimed_edge_pp,total_pl,roi_pct,note
+<50%,2,0,2,0,21.69,-21.69,0.105,11.19,-10,-100,small sample
+50–59%,,,,,,,,,,,
+60–69%,,,,,,,,,,,
+70–79%,,,,,,,,,,,
+80–84%,,,,,,,,,,,
+85–89%,,,,,,,,,,,
+90–94%,10,5,5,50,93.79,-43.79,0.665,27.29,-31.8017,-31.8,
+95–100%,4,4,0,100,97.15,2.85,0.7325,23.9,16.3211,40.8,small sample
+
+=== GLOBAL CALIBRATION METRICS ===
+metric,value,interpretation
+brier_score,0.2889,0=perfect; 0.25=always-50% baseline; lower is better
+log_loss,0.9818,0=perfect; 0.693=always-50% baseline; lower is better
+expected_calibration_error_pct,30.79,avg |predicted_prob − actual_win_rate| weighted by bin size
+mean_abs_calibration_error_pct,22.78,unweighted avg across non-empty bands
+settled_sample_size,16,forward-test trades only; interpret all metrics as preliminary
+overall_win_rate_pct,56.25,
+overall_avg_predicted_prob_pct,85.62,
+overall_calibration_error_pp,-29.37,negative = overconfident
+
+=== PER-GROUP CALIBRATION ===
+group,n,wins,wr%,avg_prob%,brier,log_loss,cal_error_pp
+overall,16,9,56.25,85.62,0.2889,0.9818,-29.37
+v2.2,14,8,57.14,91.13,0.3299,1.0681,-33.99
+v3.0,1,1,100,94,0.0036,0.0619,6
+YES,1,0,0,43.38,0.1882,0.5688,-43.38
+NO,14,9,64.29,94.75,0.3167,1.0319,-30.46

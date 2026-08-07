@@ -1,0 +1,7 @@
+group,sample_size,wins,losses,win_rate_pct,avg_predicted_prob_pct,total_pl,roi_pct,calibration_error_pp,note
+<6h,1,0,1,0,0,0,,0,
+6–12h,0,0,0,,,,,,no data
+12–24h,0,0,0,,,,,,no data
+24–48h,1,1,0,100,99.09,1.6279,16.28,0.91,
+48+h,14,8,6,57.14,90.77,-27.1086,-19.36,-33.63,
+all,16,9,7,56.25,85.62,-25.4806,-16.99,-29.37,

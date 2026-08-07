@@ -1,0 +1,24 @@
+market_ticker,city,weather_variable,target_date,direction,outcome,kalshi_result,model_station_name,model_station_id,model_station_lat,model_station_lon,kalshi_settlement_station,kalshi_nws_station_extracted,forecast_value_f,era5_actual_f,era5_decision_forecast_error,lower_bound,upper_bound,threshold,threshold_operator,era5_predicted_kalshi_result,kalshi_actual_result,result_agrees,integrity_flag,integrity_detail,station_verified
+,,,,,,,,,,,,,,,,,,,,,,N/A,,,
+KXHIGHDEN-26AUG05-T83,Denver,high,2026-08-06,NO,WIN,no,Denver International Airport,KDEN,39.8561,-104.6737,,,94.8,93.2,1.6,,,83,lte,no,no,YES,,,t
+KXHIGHDEN-26AUG06-B96.5,Denver,high,2026-08-07,NO,LOSS,yes,Denver International Airport,KDEN,39.8561,-104.6737,,,100.5,96,4.5,96,97,,,yes,yes,YES,,,t
+KXHIGHMIA-26AUG06-B89.5,Miami,high,2026-08-07,NO,WIN,no,Miami International Airport,KMIA,25.7959,-80.287,Miami International Airport,,89.9,86,3.9,89,90,,,no,no,YES,,,t
+KXHIGHMIA-26AUG06-B91.5,Miami,high,2026-08-07,NO,WIN,no,Miami International Airport,KMIA,25.7959,-80.287,Miami International Airport,,90.7,86,4.7,91,92,,,no,no,YES,,,t
+KXHIGHTDAL-26AUG06-B100.5,Dallas,high,2026-08-07,NO,LOSS,yes,Dallas/Fort Worth International Airport,KDFW,32.8998,-97.0403,,,103,102.3,0.7,100,101,,,no,yes,NO,ERA5_KALSHI_DISAGREE,"ERA5 actual 102.3°F → would give kalshi=no, but Kalshi settled yes",t
+KXHIGHTDAL-26AUG06-B98.5,Dallas,high,2026-08-07,NO,WIN,no,Dallas/Fort Worth International Airport,KDFW,32.8998,-97.0403,,,104.1,102.3,1.8,98,99,,,no,no,YES,,,t
+KXHIGHTMIN-26AUG06-B84.5,Minneapolis,high,2026-08-07,NO,WIN,no,Minneapolis–Saint Paul International Airport,KMSP,44.8848,-93.2223,,,94.7,80.5,14.2,84,85,,,no,no,YES,,,t
+KXLOWTDAL-26AUG06-B81.5,Dallas,low,2026-08-07,NO,LOSS,yes,Dallas/Fort Worth International Airport,KDFW,32.8998,-97.0403,,,80.9,81.3,-0.4,81,82,,,yes,yes,YES,,,t
+KXLOWTDEN-26AUG06-B57.5,Denver,low,2026-08-07,NO,WIN,no,Denver International Airport,KDEN,39.8561,-104.6737,,,62.6,63.2,-0.6,57,58,,,no,no,YES,,,t
+KXLOWTHOU-26AUG06-B77.5,Houston,low,2026-08-07,NO,LOSS,yes,Houston William P. Hobby Airport,KHOU,29.6454,-95.2789,,,78.2,78.3,-0.1,77,78,,,yes,yes,YES,,,t
+KXLOWTLAX-26AUG06-B68.5,Los Angeles,low,2026-08-08,NO,LOSS,yes,Los Angeles International Airport,KLAX,33.9381,-118.3889,,,71.5,,,68,69,,,,yes,N/A,,,t
+KXLOWTNYC-26AUG06-T75,New York City,low,2026-08-07,YES,LOSS,no,"Central Park, NY",verified,40.7789,-73.9692,,,74,75.7,-1.7,,,75,gte,yes,no,NO,ERA5_KALSHI_DISAGREE,"ERA5 actual 75.7°F → would give kalshi=yes, but Kalshi settled no",t
+KXLOWTOKC-26AUG06-B75.5,Oklahoma City,low,2026-08-07,NO,WIN,no,Will Rogers World Airport,KOKC,35.3931,-97.6007,,,73.9,,,75,76,,,,no,N/A,,,t
+KXLOWTOKC-26AUG06-B77.5,Oklahoma City,low,2026-08-07,NO,WIN,no,Will Rogers World Airport,KOKC,35.3931,-97.6007,,,74.8,,,77,78,,,,no,N/A,,,t
+KXLOWTOKC-26AUG06-B77.5,Oklahoma City,low,2026-08-07,NO,WIN,no,Will Rogers World Airport,KOKC,35.3931,-97.6007,,,74.8,,,77,78,,,,no,N/A,,,t
+
+=== SUMMARY ===
+total_trades,16
+era5_kalshi_agree,9
+era5_kalshi_disagree_flagged,2
+no_era5_actual_available,5
+note,ERA5 reanalysis ≠ NWS station data — disagreements may reflect model-area vs point-station differences; treat as investigation leads not confirmed errors

@@ -1,0 +1,4 @@
+group,sample_size,wins,losses,win_rate_pct,avg_predicted_prob_pct,total_pl,roi_pct,calibration_error_pp,note
+v2.2,14,8,6,57.14,91.13,-28.1389,-20.1,-33.99,
+v3.0,1,1,0,100,94,2.6582,26.58,6,
+all,16,9,7,56.25,85.62,-25.4806,-16.99,-29.37,
