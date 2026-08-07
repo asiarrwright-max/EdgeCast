@@ -35,3 +35,73 @@ uri = "file://edgecast_forward_test_summary.csv"
 type = "table"
 title = "EdgeCast — Forward Test Summary Statistics"
 description = "Overall, by strategy (V2.2 / V3), and by direction (YES / NO) — win rate, P&L, ROI, edge averages. READ-ONLY."
+
+[[outputs]]
+id = "wxLLT4h2ET0GD-GGMJ182"
+uri = "file://edgecast_calibration_summary.csv"
+type = "table"
+title = "Calibration Summary"
+description = "Overall calibration metrics and probability band breakdown"
+
+[[outputs]]
+id = "0Db2uf_4cTZ9B7EPAnyCn"
+uri = "file://edgecast_loss_autopsy.csv"
+type = "table"
+title = "Loss Autopsy"
+description = "Deep dive on every losing trade: station, ERA5 actual, forecast error, category"
+
+[[outputs]]
+id = "1JsCWaH32Xfr6qgv5QVW9"
+uri = "file://edgecast_performance_by_strategy.csv"
+type = "table"
+title = "Performance by Strategy"
+description = "V2.2 vs V3.0 win rate, ROI, and calibration error"
+
+[[outputs]]
+id = "Moh9NJFI-e4hehXVLlxmk"
+uri = "file://edgecast_performance_by_direction.csv"
+type = "table"
+title = "Performance by Direction"
+description = "YES vs NO bet performance"
+
+[[outputs]]
+id = "i8vfNzMpRh06JO2O1CgvD"
+uri = "file://edgecast_performance_by_station.csv"
+type = "table"
+title = "Performance by Station"
+description = "Win rate and calibration broken down by model station"
+
+[[outputs]]
+id = "Oi70pgLjQwEZ9nhfydGgP"
+uri = "file://edgecast_performance_by_lead_time.csv"
+type = "table"
+title = "Performance by Lead Time"
+description = "Does shorter lead time improve calibration?"
+
+[[outputs]]
+id = "YoXKJNnc94GHnWDSXdYDp"
+uri = "file://edgecast_performance_by_entry_price.csv"
+type = "table"
+title = "Performance by Entry Price"
+description = "Performance at different market price levels"
+
+[[outputs]]
+id = "71UlojWTNR2WpcEsg2jrG"
+uri = "file://edgecast_performance_by_edge.csv"
+type = "table"
+title = "Performance by Edge"
+description = "Does higher claimed edge predict better outcomes?"
+
+[[outputs]]
+id = "nYTkBs1ScqcdUHVQaywn1"
+uri = "file://edgecast_settlement_integrity_audit.csv"
+type = "table"
+title = "Settlement Integrity Audit"
+description = "ERA5 vs Kalshi settlement comparison for all 15 trades"
+
+[[outputs]]
+id = "vtBqjdnlmFNT-BKzfwlha"
+uri = "file://edgecast_false_confidence_losses.csv"
+type = "table"
+title = "False Confidence Losses"
+description = "All losses where model was ≥85% confident — with hypotheses"

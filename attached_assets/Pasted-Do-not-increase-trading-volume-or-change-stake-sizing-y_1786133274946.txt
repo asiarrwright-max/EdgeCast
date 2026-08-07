@@ -1,0 +1,395 @@
+Do not increase trading volume or change stake sizing yet.
+
+The forward-test results show a calibration problem that needs to be diagnosed first.
+
+Current forward-test summary as of 2026-08-07:
+
+- 15 settled official bets
+- 9 wins
+- 6 losses
+- 60% win rate
+- $150 total stake
+- -$25.48 P/L
+- -16.99% ROI
+- Average entry price: 0.6527
+- Average model probability: 0.9132
+- Average claimed edge: 26.06 percentage points
+
+By strategy:
+
+v2.2:
+- 14 settled
+- 8 wins
+- 6 losses
+- -$28.14 P/L
+- -20.1% ROI
+
+v3:
+- 1 settled
+- 1 win
+- +$2.66 P/L
+- +26.58% ROI
+
+By direction:
+
+YES:
+- 1 settled
+- 0 wins
+- 1 loss
+
+NO:
+- 14 settled
+- 9 wins
+- 5 losses
+- 64.29% win rate
+- -$15.48 P/L
+
+The model is averaging approximately 91% predicted probability but only realizing a 60% win rate so far. That is the primary issue to investigate.
+
+====================================
+1. BUILD A CALIBRATION REPORT
+====================================
+
+Create a forward-test calibration report using ONLY legitimately forward-recorded predictions.
+
+Do not mix backfilled predictions with true forward-test predictions.
+
+For settled official bets, group predictions into probability bands:
+
+- 50–59%
+- 60–69%
+- 70–79%
+- 80–84%
+- 85–89%
+- 90–94%
+- 95–100%
+
+For each band report:
+
+- number of bets
+- wins
+- losses
+- actual win rate
+- average predicted probability
+- calibration error
+- average entry price
+- average claimed edge
+- total P/L
+- ROI
+
+Example:
+
+Predicted 90–94%
+Expected win rate: 92%
+Observed win rate: 61%
+Calibration error: -31 points
+
+====================================
+2. CALCULATE CALIBRATION METRICS
+====================================
+
+Add:
+
+- Brier Score
+- Log Loss
+- Expected Calibration Error
+- Mean absolute calibration error
+- Predicted probability vs actual win-rate chart data
+
+Calculate these:
+
+- overall
+- v2.2
+- v3
+- YES
+- NO
+
+Do not overinterpret groups with very small sample sizes.
+
+====================================
+3. LOSS AUTOPSY
+====================================
+
+Create a detailed loss-autopsy table for every losing official forward-test bet.
+
+Include:
+
+- market
+- station
+- market date
+- prediction timestamp
+- settlement timestamp
+- strategy version
+- YES or NO
+- model probability
+- market entry price
+- claimed edge
+- stake
+- realized P/L
+- forecast weather value
+- official settlement value
+- forecast error
+- threshold
+- distance from threshold
+- lead time
+- source forecast/model
+- confidence inputs
+- reason the model considered the trade attractive
+
+Add an automatically generated loss category.
+
+Suggested categories:
+
+- Forecast miss
+- Threshold too close
+- Probability overconfidence
+- Market mapping issue
+- Station mismatch
+- Settlement mismatch
+- Timing / stale forecast
+- Price too expensive
+- Tail-risk event
+- Unknown
+
+====================================
+4. CHECK STATION AND SETTLEMENT INTEGRITY
+====================================
+
+This is critical.
+
+For every settled forward-test bet verify:
+
+- forecast station coordinates
+- settlement station coordinates
+- expected station ID
+- actual official station ID
+- settlement source
+- market settlement rule
+- unit conversion
+- rounding convention
+- local date versus UTC date
+- precipitation measurement window
+- temperature measurement window
+
+Flag any case where prediction and settlement may not be using the exact same station, coordinates, measurement period, or rule.
+
+Do not include questionable settlements in calibration results until reviewed.
+
+====================================
+5. ANALYZE PERFORMANCE BY DIMENSION
+====================================
+
+Break performance down by:
+
+Strategy:
+- v2.2
+- v3
+
+Direction:
+- YES
+- NO
+
+Weather variable:
+- precipitation
+- high temperature
+- low temperature
+- snowfall
+- any other supported variable
+
+Station
+
+City
+
+Forecast lead time:
+- under 6 hours
+- 6–12 hours
+- 12–24 hours
+- 24–48 hours
+- 48+ hours
+
+Entry price:
+- under 0.50
+- 0.50–0.59
+- 0.60–0.69
+- 0.70–0.79
+- 0.80+
+
+Claimed edge:
+- under 5 points
+- 5–9.9
+- 10–14.9
+- 15–19.9
+- 20–29.9
+- 30+ points
+
+Distance from weather threshold.
+
+For every group show:
+
+- sample size
+- win rate
+- average predicted probability
+- P/L
+- ROI
+- calibration error
+
+====================================
+6. IDENTIFY FALSE CONFIDENCE
+====================================
+
+Create a “False Confidence” report.
+
+Highlight trades where:
+
+- model probability >= 85%
+- but the trade lost
+
+These are particularly important.
+
+For each one explain:
+
+- what drove the high probability
+- whether forecast models agreed
+- actual forecast error
+- how close the market threshold was
+- whether the model underestimated weather uncertainty
+- whether there was a station/settlement issue
+
+====================================
+7. COMPARE MODEL PROBABILITY TO MARKET PRICE
+====================================
+
+For every settled bet calculate:
+
+model edge =
+model probability - implied market probability
+
+Then compare claimed edge to realized outcome.
+
+Determine whether larger claimed edges are actually performing better.
+
+Create a table:
+
+Edge bucket | Bets | Win Rate | Avg Entry | P/L | ROI
+
+If 20–30 point claimed edges are losing, that is evidence the probability model is miscalibrated rather than evidence that the market is offering extraordinary value.
+
+====================================
+8. DO NOT RETROACTIVELY CHANGE THE FORWARD TEST
+====================================
+
+Preserve all original predictions exactly as they existed when the trade was generated.
+
+Any corrected or recalibrated probability must be stored separately.
+
+Never overwrite:
+
+- original model probability
+- original edge
+- original recommendation
+- original strategy version
+- original snapshot
+
+We need an auditable forward test.
+
+====================================
+9. ADD RECALIBRATED PROBABILITY
+====================================
+
+After enough data exists, support:
+
+- rawModelProbability
+- calibratedProbability
+
+Do not activate recalibration automatically yet.
+
+For now, calculate what a simple calibration model would produce and display it for research purposes only.
+
+Possible methods:
+
+- isotonic regression
+- Platt/logistic calibration
+
+Do not train calibration on the same observation being evaluated.
+
+Use expanding-window or leave-one-out logic where possible.
+
+With only 15 settlements, clearly label calibration as highly preliminary.
+
+====================================
+10. DASHBOARD
+====================================
+
+Add a Forward Test Diagnostics section.
+
+Show:
+
+- settled sample size
+- raw predicted probability
+- actual win rate
+- Brier Score
+- calibration error
+- ROI
+- v2.2 versus v3
+- YES versus NO
+- false-confidence losses
+- suspicious settlement/station records
+
+Add a clear warning while sample size is small:
+
+“Early forward-test results. Calibration conclusions are preliminary.”
+
+====================================
+11. DO NOT OPTIMIZE TO 15 BETS
+====================================
+
+Do not modify strategy thresholds simply to improve these 15 historical outcomes.
+
+The purpose of this task is diagnosis.
+
+Do not:
+
+- remove losing trades
+- change historical probabilities
+- select parameters based on which would have won these trades
+- disable YES because the only YES bet lost
+- conclude v3 is superior from one settlement
+
+Instead identify hypotheses that can be prospectively tested.
+
+====================================
+12. OUTPUT
+====================================
+
+Generate downloadable CSVs for:
+
+- calibration_summary
+- loss_autopsy
+- performance_by_strategy
+- performance_by_direction
+- performance_by_station
+- performance_by_lead_time
+- performance_by_entry_price
+- performance_by_edge
+- settlement_integrity_audit
+- false_confidence_losses
+
+====================================
+13. GITHUB
+====================================
+
+Commit and push completed code to the existing EdgeCast GitHub repository.
+
+At completion report:
+
+- commit SHA
+- settled observations analyzed
+- Brier Score
+- Expected Calibration Error
+- number of >=85% confidence losses
+- number of settlement/station integrity flags
+- worst-performing probability band
+- worst-performing edge band
+- tests/build results
+
+Do not recommend live strategy changes until this diagnostic report is complete.
