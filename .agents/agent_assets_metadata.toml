@@ -119,3 +119,17 @@ uri = "file://edgecast_mechanics_audit.md"
 type = "text"
 title = "EdgeCast Mechanics Audit"
 description = "9-section read-only audit of the forecast-to-settlement pipeline."
+
+[[outputs]]
+id = "80bIjAXsHm4jriulTGspG"
+uri = "file://edgecast_final_audit_prompt.txt"
+type = "text"
+title = "EdgeCast Final Audit Prompt"
+description = "Read-only audit instructions covering calibration adjustment factors and settlement/ERA5 matching pipeline."
+
+[[outputs]]
+id = "4-JuxGVJ4ZB_lKQyfAXPS"
+uri = "file://edgecast_final_audit_prompt.md"
+type = "text"
+title = "EdgeCast Final Audit Prompt"
+description = "Read-only audit instructions covering calibration adjustment factors and settlement/ERA5 matching pipeline."
