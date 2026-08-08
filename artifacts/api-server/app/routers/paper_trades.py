@@ -69,6 +69,12 @@ FORWARD_TEST_START_VERSION = "76e4e7d"
 FORWARD_TEST_PHASE = "Collecting clean paper-trade data"
 FORWARD_TEST_SETTLED_TARGET = 50
 
+# Forward Test B — set after corrections are deployed and runtime-verified.
+# None = "Preparing Forward Test B" (not yet activated).
+# Must be set to the exact UTC deployment timestamp of the correction commit.
+FORWARD_TEST_START_B: datetime | None = None
+FORWARD_TEST_PHASE_B = "Preparing Forward Test B"
+
 # Set to True only after an explicit manual review of ROI, calibration,
 # strategy stability, and drawdown — never flip automatically.
 MANUAL_READINESS_APPROVAL: bool = False
@@ -814,25 +820,28 @@ async def get_forward_test_status(
         return (await db.execute(q)).scalar_one() or 0
 
     # ── V2.2 post-hardening counts (paper_trades table) ───────────────────────
+    # V2.2/V2.3 combined — v2.3 is the corrected continuation of v2.2 (same engine,
+    # corrected constants); both count toward the same forward-test strategy slot.
+    _v2x_versions = ["v2.2", "v2.3"]
     v22_off_settled = await _ct(
         PaperTrade,
         PaperTrade.created_at >= start,
         PaperTrade.eligibility_status == "OFFICIAL",
         PaperTrade.status == "SETTLED",
-        PaperTrade.strategy_version == "v2.2",
+        PaperTrade.strategy_version.in_(_v2x_versions),
     )
     v22_off_open = await _ct(
         PaperTrade,
         PaperTrade.created_at >= start,
         PaperTrade.eligibility_status == "OFFICIAL",
         PaperTrade.status == "OPEN",
-        PaperTrade.strategy_version == "v2.2",
+        PaperTrade.strategy_version.in_(_v2x_versions),
     )
     v22_research = await _ct(
         PaperTrade,
         PaperTrade.created_at >= start,
         PaperTrade.eligibility_status == "RESEARCH_ONLY",
-        PaperTrade.strategy_version == "v2.2",
+        PaperTrade.strategy_version.in_(_v2x_versions),
     )
 
     # ── V3 post-hardening counts (v3_paper_trades table) ─────────────────────
@@ -951,6 +960,11 @@ async def get_forward_test_status(
             "count toward readiness. Older trades remain available as research "
             "history but are excluded from the new score."
         ),
+        "forwardTestB": {
+            "phase":      FORWARD_TEST_PHASE_B,
+            "startDate":  FORWARD_TEST_START_B.strftime("%Y-%m-%d") if FORWARD_TEST_START_B else None,
+            "activated":  FORWARD_TEST_START_B is not None,
+        },
     }
 
 

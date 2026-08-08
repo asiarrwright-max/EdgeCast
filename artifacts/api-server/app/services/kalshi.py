@@ -97,8 +97,8 @@ SERIES_TO_CITY: dict[str, tuple[str, float, float] | None] = {
     "KXTEMPLAXH":   ("Los Angeles",     33.9381, -118.3889),  # KLAX station (USC Downtown unverified)
     "KXLAXSNOWM":   ("Los Angeles",     33.9381, -118.3889),  # KLAX station (USC Downtown unverified)
     "KXHIGHTMIN":   ("Minneapolis",     44.8848, -93.2223),  # KMSP station
-    "KXPHILHIGH":   ("Philadelphia",    39.9526, -75.1652),
-    "KXHIGHTTSATX": ("San Antonio",     29.4241, -98.4936),
+    "KXPHILHIGH":   ("Philadelphia",    39.8721, -75.2411),  # KPHL airport station (corrected from city-centre)
+    "KXHIGHTTSATX": ("San Antonio",     29.5337, -98.4698),  # KSAT airport station (corrected from city-centre)
     "KXLOWTOKC":    ("Oklahoma City",   35.3931, -97.6007),  # KOKC station (verified 2026-07-30)
     "KXTEMPDCH":    ("Washington DC",   38.8521, -77.0377),  # KDCA station
     "KXTEMPCHIH":   ("Chicago",         41.7867, -87.7522),  # KMDW (Midway) station

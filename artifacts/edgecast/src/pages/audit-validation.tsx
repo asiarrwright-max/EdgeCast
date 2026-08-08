@@ -33,7 +33,7 @@ import {
 // ---------------------------------------------------------------------------
 
 type Severity = "CRITICAL" | "HIGH" | "MODERATE" | "LOW";
-type FindingStatus = "Confirmed" | "Suspected" | "Required" | "Confirmed structural issue";
+type FindingStatus = "Confirmed" | "Suspected" | "Required" | "Confirmed structural issue" | "Fix Implemented";
 type DbCheckStatus = "Pending DB verification";
 
 interface Blocker {
@@ -235,77 +235,78 @@ const BLOCKERS: Blocker[] = [
     id: 1,
     title: "NWS integer threshold rounding",
     severity: "CRITICAL",
-    status: "Confirmed",
+    status: "Fix Implemented",
     mustFix: "Yes",
     finding:
-      "Integer threshold probability formulas do not account for NWS integer rounding. Approximate probability impact identified in audit: ~5.7 percentage points in representative cases.",
+      "Integer threshold probability formulas did not account for NWS integer rounding. Approximate probability impact: ~5.7 percentage points in representative cases.",
     requiredAction:
-      "Apply settlement-aware ±0.5°F boundary handling for integer thresholds. Do not apply this correction to half-integer thresholds.",
+      "Apply settlement-aware T−0.5 boundary for integer thresholds in _calc_prob_threshold (V2, V3). Half-integer thresholds unchanged. ✓ Implemented in probability_engine_v2.py and v3_probability_engine.py.",
   },
   {
     id: 2,
     title: "NWS range contract rounding",
     severity: "CRITICAL",
-    status: "Confirmed",
+    status: "Fix Implemented",
     mustFix: "Yes",
     finding:
-      "Range probability calculations currently use raw lower/upper bounds instead of settlement-aware lower−0.5 / upper+0.5 boundaries. Representative impact estimated around ~11 percentage points.",
-    requiredAction: "Use settlement-aware integration bounds.",
+      "Range probability calculations used raw lower/upper bounds instead of settlement-aware lower−0.5 / upper+0.5 boundaries. Representative impact ~11 percentage points.",
+    requiredAction:
+      "Use settlement-aware integration bounds in _calc_prob_range (V2, V3). ✓ Implemented in probability_engine_v2.py and v3_probability_engine.py.",
   },
   {
     id: 3,
     title: "ERA5 local-date extraction",
     severity: "CRITICAL",
-    status: "Suspected",
-    mustFix: "Yes — if confirmed",
+    status: "Fix Implemented",
+    mustFix: "Yes",
     finding:
-      "target_settlement_date may be derived from a UTC close/expiration timestamp and sliced as a UTC calendar date. This may cause CDT/MDT/PDT markets to be verified against the following local day.",
+      "DB Check B confirmed: target_settlement_date stored as UTC ISO timestamp was sliced as UTC calendar date. LA trade 2026-08-08T04:54:08Z produced UTC date 2026-08-08 but correct local PDT date was 2026-08-07.",
     requiredAction:
-      "Run DB verification. If confirmed, convert UTC timestamp to settlement-station local timezone before extracting the verification date.",
+      "Convert UTC timestamp to settlement-station local timezone in forecast_verifier.py. ✓ Implemented via _local_settlement_date() helper. Pending deployment verification.",
   },
   {
     id: 4,
     title: "Hourly sigma floor",
     severity: "HIGH",
-    status: "Confirmed",
+    status: "Fix Implemented",
     mustFix: "Yes",
     finding:
-      "Hourly contracts can use the daily sigma floor instead of the intended hourly sigma behavior.",
+      "Hourly contracts used the daily sigma floor (3.5°F) instead of the intended hourly floor (2.0°F) because hourly=True was not passed to _sigma_v2().",
     requiredAction:
-      "Pass hourly=True for hourly_threshold contracts in V2.1/V2.2 logic.",
+      "Pass hourly=(contract_type == 'hourly_threshold') to _sigma_v2() in run_analysis_v2 and run_analysis_v22. ✓ Implemented in probability_engine_v2.py and probability_engine_v22.py.",
   },
   {
     id: 5,
     title: "Station verification eligibility",
     severity: "HIGH",
-    status: "Confirmed",
+    status: "Fix Implemented",
     mustFix: "Yes",
     finding:
-      "get_verified_station can return an unverified station object, and V2.2/V3 paper-trading eligibility does not consistently check .verified.",
+      "get_verified_station() had a bug: the else branch returned the unverified station instead of None, making the function's name misleading. V2.2/V3 already passed station_verified to assess_trade_eligibility (which correctly stamps RESEARCH_ONLY for unverified stations).",
     requiredAction:
-      "Fix verification behavior and enforce verified stations before OFFICIAL eligibility.",
+      "Fix get_verified_station() to return None for unverified stations. ✓ Implemented in settlement_stations.py. Eligibility engine guard already correct (line 156-157).",
   },
   {
     id: 6,
     title: "Philadelphia / San Antonio coordinates",
     severity: "HIGH",
-    status: "Confirmed",
+    status: "Fix Implemented",
     mustFix: "Yes",
     finding:
-      "Forecast coordinates require correction to align with intended settlement stations.",
+      "SERIES_TO_CITY used city-centre coordinates for Philadelphia (39.9526, -75.1652) and San Antonio (29.4241, -98.4936) instead of the KPHL and KSAT settlement station coordinates.",
     requiredAction:
-      "Correct SERIES_TO_CITY coordinates before those cities participate in Forward Test B.",
+      "Correct SERIES_TO_CITY: Philadelphia → KPHL (39.8721, -75.2411), San Antonio → KSAT (29.5337, -98.4698). ✓ Implemented in kalshi.py.",
   },
   {
     id: 7,
     title: "Calibration reset for corrected strategy",
     severity: "HIGH",
-    status: "Confirmed structural issue",
+    status: "Fix Implemented",
     mustFix: "Yes",
     finding:
-      'V2.1/V2.2 look up calibration rows under strategy_version="v2.0", but no calibration write mechanism exists in the current codebase. Existing rows, if any, have unknown provenance and will become invalid after settlement-rounding corrections.',
+      'V2.2 looked up calibration rows under strategy_version="v2.0". After corrections, new trades must not inherit any v2.0-era calibration. STRATEGY_VERSION must advance to v2.3.',
     requiredAction:
-      "Audit existing rows, do not inherit them, and start corrected strategy as v2.3 with calibration bypassed (factor 1.0) until clean corrected-version outcomes are available.",
+      "Change STRATEGY_VERSION to v2.3 in paper_trading_v22.py. Update _calibration_adj_v2 to accept strategy_version param. V2.3 calibration resolves to 1.0 (no rows). ✓ Implemented.",
   },
   {
     id: 8,
@@ -314,9 +315,9 @@ const BLOCKERS: Blocker[] = [
     status: "Required",
     mustFix: "Yes",
     finding:
-      "Old and corrected model results must not be mixed.",
+      "Old and corrected model results must not be mixed. FORWARD_TEST_START_B constant added and set to None (not yet activated).",
     requiredAction:
-      "After corrected model deployment, set a new FORWARD_TEST_START timestamp and clearly label all prior data as Baseline Forward Test A.",
+      "After corrected model passes deployment verification, set FORWARD_TEST_START_B to the exact UTC deployment timestamp. Currently: Preparing Forward Test B.",
   },
 ];
 
@@ -409,6 +410,7 @@ const COUNT_CONFIRMED = BLOCKERS.filter(
   (b) => b.status === "Confirmed" || b.status === "Confirmed structural issue" || b.status === "Required"
 ).length;
 const COUNT_SUSPECTED = BLOCKERS.filter((b) => b.status === "Suspected").length;
+const COUNT_FIX_IMPLEMENTED = BLOCKERS.filter((b) => b.status === "Fix Implemented").length;
 const COUNT_RESOLVED = 0;
 
 // ---------------------------------------------------------------------------
@@ -480,6 +482,13 @@ function StatusBadge({ status }: { status: FindingStatus | DbCheckStatus }) {
       </span>
     );
   }
+  if (status === "Fix Implemented") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-sky-500/15 text-sky-400 border border-sky-500/30">
+        <CheckCircle2 className="h-3 w-3" /> Fix Implemented
+      </span>
+    );
+  }
   if (status === "Pending DB verification") {
     return (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-orange-500/10 text-orange-400 border border-orange-500/25">
@@ -536,7 +545,7 @@ function ValidationStatus() {
           </div>
           <div>
             <div className="text-[11px] text-muted-foreground uppercase tracking-wider mb-1">Model status</div>
-            <div className="text-sm font-semibold text-orange-400">Corrections required before new clean forward test</div>
+            <div className="text-sm font-semibold text-sky-400">7 of 8 blockers: fix implemented — pending deployment verification</div>
           </div>
           <div>
             <div className="text-[11px] text-muted-foreground uppercase tracking-wider mb-1">Real-money readiness</div>
@@ -551,8 +560,8 @@ function ValidationStatus() {
           <CounterCard label="High findings" value={COUNT_HIGH} variant="high" />
           <CounterCard label="Moderate findings" value={COUNT_MODERATE} variant="moderate" />
           <CounterCard label="FTB blockers" value={COUNT_BLOCKERS} variant="primary" />
-          <CounterCard label="Confirmed" value={COUNT_CONFIRMED} variant="default" />
-          <CounterCard label="Suspected" value={COUNT_SUSPECTED} variant="muted" />
+          <CounterCard label="Fix implemented" value={COUNT_FIX_IMPLEMENTED} variant="default" />
+          <CounterCard label="Confirmed open" value={COUNT_CONFIRMED} variant="muted" />
           <CounterCard label="Resolved" value={COUNT_RESOLVED} variant="muted" />
         </div>
       </CardBody>

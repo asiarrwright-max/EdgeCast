@@ -387,16 +387,30 @@ def test_yes_no_complement_for_threshold():
 
 
 def test_yes_no_complement_for_range():
-    """Sum of all adjacent 2°F range buckets ≈ 1.0 for a reasonable distribution."""
+    """
+    Sum of properly non-overlapping integer range buckets ≈ 1.0.
+
+    With the NWS rounding correction, _calc_prob_range([lo, lo+1]) expands to
+    [lo−0.5, lo+1.5].  Adjacent bins that SHARE an integer endpoint (e.g.
+    [50,51] and [51,52]) will therefore OVERLAP by 1°F — this is expected
+    and correct semantics (both bins claim ownership of X=51, which is
+    physically correct since round(50.5–51.5)=51 is in both ranges).
+
+    For a sum-to-1 test, use single-integer bins [lo, lo] which expand to
+    [lo−0.5, lo+0.5] — adjacent bins then touch only at a half-integer
+    boundary (zero-measure overlap) and their sum covers the full integer axis.
+    """
     from app.services.probability_engine_v2 import _calc_prob_range
 
     mu, sigma = 75.0, 5.0
-    # Sum a dense set of 1°F-wide buckets from 50°F to 100°F
+    # Single-integer bins: [lo, lo] expands to [lo−0.5, lo+0.5].
+    # Adjacent bins [lo,lo] and [lo+1,lo+1] touch at the half-integer point
+    # lo+0.5 — non-overlapping, exhaustive partition of the integer axis.
     total = sum(
-        _calc_prob_range(float(lo), float(lo + 1), mu, sigma)
+        _calc_prob_range(float(lo), float(lo), mu, sigma)
         for lo in range(50, 100)
     )
-    # Should be very close to 1.0 (small residual in tails)
+    # Should be very close to P(actual ∈ [49.5, 99.5]) ≈ 1.0 for μ=75, σ=5
     assert abs(total - 1.0) < 0.02, (
         f"Sum of range probabilities = {total:.4f}; expected ≈ 1.0"
     )

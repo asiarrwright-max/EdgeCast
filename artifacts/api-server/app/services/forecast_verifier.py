@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import logging
 import statistics
+import zoneinfo
 from datetime import datetime, timezone
 
 import httpx
@@ -50,6 +51,42 @@ logger = logging.getLogger(__name__)
 
 _MIN_SAMPLE_FOR_GLOBAL = 3   # minimum distinct cities before writing a global row
 _ERA5_API = "https://archive-api.open-meteo.com/v1/archive"
+
+
+def _local_settlement_date(raw_date: str, city: str) -> str:
+    """
+    Return the station-local calendar date (YYYY-MM-DD) for a settlement record.
+
+    NWS settlement is based on the local calendar date at the reporting station.
+    Kalshi market expiry timestamps are stored in UTC; slicing [:10] returns the
+    UTC date, which is one calendar day ahead for western US cities during morning
+    UTC hours (e.g. 2026-08-08T04:54:08Z → UTC date "2026-08-08", but the local
+    PDT date is "2026-08-07").
+
+    For plain date strings (no time component) the raw string is returned unchanged.
+    Falls back to raw_date[:10] if the timezone lookup or parse fails.
+    """
+    if not raw_date or len(raw_date) < 10:
+        return raw_date
+    # No time component — already a plain date string, no conversion needed.
+    if "T" not in raw_date and "t" not in raw_date:
+        return raw_date[:10]
+
+    station = get_station(city)
+    tz_name = station.timezone if station else "UTC"
+    try:
+        dt = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local_dt = dt.astimezone(zoneinfo.ZoneInfo(tz_name))
+        return local_dt.date().isoformat()
+    except Exception:
+        logger.warning(
+            "forecast_verifier: could not convert '%s' to local date for city '%s' "
+            "(tz=%s); falling back to UTC slice.",
+            raw_date, city, tz_name,
+        )
+        return raw_date[:10]
 
 # source_label values written by this module
 SRC_GHCND_VERIFIED   = "ghcnd_observation"             # confirmed settlement station
@@ -256,7 +293,10 @@ async def fetch_and_store_verifications(session: AsyncSession) -> dict[str, int]
     seen: dict[tuple[str, str, str], dict] = {}
     for trade in settled_trades:
         raw_date = trade.target_settlement_date or ""
-        date_str = raw_date[:10]  # "YYYY-MM-DD" — safe for both plain dates and ISO timestamps
+        # Convert UTC timestamps to the station-local calendar date (Fix 6).
+        # NWS settlement is based on local date; slicing UTC gives wrong date for
+        # western-timezone cities when the market closes after midnight UTC.
+        date_str = _local_settlement_date(raw_date, trade.city or "")
         if not date_str or len(date_str) < 10:
             continue
         key = (trade.city, trade.weather_variable, date_str)

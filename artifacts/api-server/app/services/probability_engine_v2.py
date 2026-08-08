@@ -275,14 +275,19 @@ async def _bias_v2(
 async def _calibration_adj_v2(
     ec_prob: float,
     session: AsyncSession,
+    *,
+    strategy_version: str = "v2.0",
 ) -> float:
     """
     Return multiplicative calibration adjustment factor.
     Returns 1.0 when sample < MIN_CALIB_SAMPLE or no calibration row found.
+
+    Pass strategy_version="v2.3" for V2.3 trades so they cannot inherit
+    any v2.0-era rows even if those rows are added in the future.
     """
     q = await session.execute(
         select(CalibrationAdjustment).where(
-            CalibrationAdjustment.strategy_version == "v2.0",
+            CalibrationAdjustment.strategy_version == strategy_version,
             CalibrationAdjustment.bucket_lo <= ec_prob,
             CalibrationAdjustment.bucket_hi > ec_prob,
             CalibrationAdjustment.sample_size >= MIN_CALIB_SAMPLE,
@@ -299,21 +304,36 @@ async def _calibration_adj_v2(
 # Gaussian helpers (same math as v1, but parameterised)
 # ---------------------------------------------------------------------------
 
+def _is_integer_threshold(v: float) -> bool:
+    """True when v is a whole number (e.g. 90, 100) vs a half-integer (e.g. 100.5)."""
+    return v == math.floor(v)
+
+
 def _calc_prob_threshold(
     operator: str,
     threshold: float,
     mu: float,
     sigma: float,
 ) -> float:
-    z = (threshold - mu) / sigma
+    # NWS settlement rounds continuous temperatures to the nearest integer.
+    # For integer thresholds, the effective CDF boundary is T − 0.5.
+    # Example: P(X_rounded ≥ 90) = P(actual ≥ 89.5) since round(89.5) = 90.
+    # Half-integer thresholds (e.g. 100.5) are not settlement-rounded; leave as-is.
+    effective_t = (threshold - 0.5) if _is_integer_threshold(threshold) else threshold
+    z = (effective_t - mu) / sigma
     if operator == "gte":
         return round(1.0 - _normal_cdf(z), 4)
     return round(_normal_cdf(z), 4)
 
 
 def _calc_prob_range(lower: float, upper: float, mu: float, sigma: float) -> float:
-    z_hi = (upper - mu) / sigma
-    z_lo = (lower - mu) / sigma
+    # NWS settlement rounds to the nearest integer.  For integer range bounds,
+    # expand the integration interval by ±0.5 to capture the correct probability mass.
+    # P(Lo_rounded ≤ X ≤ Hi_rounded) = P(Lo − 0.5 ≤ actual ≤ Hi + 0.5).
+    eff_lo = (lower - 0.5) if _is_integer_threshold(lower) else lower
+    eff_hi = (upper + 0.5) if _is_integer_threshold(upper) else upper
+    z_hi = (eff_hi - mu) / sigma
+    z_lo = (eff_lo - mu) / sigma
     return round(max(0.0, _normal_cdf(z_hi) - _normal_cdf(z_lo)), 4)
 
 
@@ -407,7 +427,8 @@ async def run_analysis_v2(
 
     if session is not None:
         sigma, fallback_level = await _sigma_v2(
-            effective_city, effective_variable, lead_time_days, month, session
+            effective_city, effective_variable, lead_time_days, month, session,
+            hourly=(contract_type == "hourly_threshold"),  # Fix: 2.0°F floor for hourly
         )
         bias = await _bias_v2(
             effective_city, effective_variable, lead_time_days, month, session
@@ -438,7 +459,7 @@ async def run_analysis_v2(
 
     # ── Calibration ───────────────────────────────────────────────────────────
     if session is not None:
-        calib_adj = await _calibration_adj_v2(raw_prob, session)
+        calib_adj = await _calibration_adj_v2(raw_prob, session, strategy_version="v2.0")
     else:
         calib_adj = 1.0
 

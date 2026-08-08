@@ -68,7 +68,7 @@ from app.services.settlement_stations import get_station
 
 logger = logging.getLogger(__name__)
 
-STRATEGY_VERSION = "v2.2"
+STRATEGY_VERSION = "v2.3"
 
 # ── Feature flag names ────────────────────────────────────────────────────────
 

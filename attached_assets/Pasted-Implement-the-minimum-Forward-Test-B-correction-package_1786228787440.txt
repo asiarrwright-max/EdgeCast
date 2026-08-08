@@ -1,0 +1,241 @@
+Implement the minimum Forward Test B correction package.
+
+Work only on replit-work.
+Do not merge to main yet.
+Do not enable real-money trading.
+
+Goal:
+Correct the known forecast-to-settlement validity issues, start the corrected V2 strategy as v2.3, preserve all historical Forward Test A data, and prepare for a new clean Forward Test B.
+
+====================================
+1. NWS SETTLEMENT ROUNDING
+====================================
+
+Fix threshold and range probability calculations in all applicable probability engines.
+
+Integer threshold contracts:
+- Apply settlement-aware ±0.5°F boundaries.
+- Example:
+  P(X >= T) should use the NWS integer-rounding boundary equivalent at T - 0.5.
+- Do not apply this correction to half-integer thresholds such as 100.5.
+
+Range contracts:
+- Use:
+  lower - 0.5
+  upper + 0.5
+  as the probability integration bounds for integer settlement ranges.
+
+Apply consistently to:
+- V2.1
+- V2.2 / corrected V2.3 path
+- V3 equivalent logic
+
+Add boundary-specific unit tests.
+
+====================================
+2. HOURLY SIGMA FLOOR
+====================================
+
+Fix the confirmed hourly sigma bug.
+
+For hourly_threshold contracts in V2.1/V2.2:
+- pass hourly=True into the sigma logic
+- ensure hourly contracts use the intended hourly uncertainty floor rather than the daily floor
+
+Add tests proving daily and hourly contracts use the correct floors.
+
+====================================
+3. STATION VERIFICATION ELIGIBILITY
+====================================
+
+Fix get_verified_station so its behavior matches its name.
+
+Requirements:
+- an unverified station must not be treated as verified
+- V2.2/V2.3 OFFICIAL eligibility must explicitly require station.verified == True
+- V3 OFFICIAL eligibility must explicitly require station.verified == True
+- unverified stations may remain available for RESEARCH_ONLY diagnostics if appropriate, but must not produce OFFICIAL paper trades
+
+Add regression tests.
+
+====================================
+4. PHILADELPHIA / SAN ANTONIO COORDINATES
+====================================
+
+Correct SERIES_TO_CITY forecast coordinates for:
+- Philadelphia
+- San Antonio
+
+Use the intended Kalshi settlement-station coordinates identified in the audit.
+
+Verify all supported city mappings still resolve correctly.
+
+Do not alter unrelated cities.
+
+====================================
+5. CREATE CORRECTED V2.3 STRATEGY BOUNDARY
+====================================
+
+The corrected V2 path must identify itself as:
+
+v2.3
+
+Do not rewrite any historical V2.2 trades.
+
+Requirements:
+- historical V2.2 trades remain V2.2
+- newly created corrected trades use strategy_version = "v2.3"
+- V2.3 must not inherit old v2.0 calibration rows
+- calibration factor for V2.3 should resolve to 1.0 when no v2.3 calibration rows exist
+
+Production audit confirmed calibration_adjustments currently has zero rows.
+Do not delete the table.
+
+Do not build or fit a new calibration model in this task.
+
+====================================
+6. FIX ERA5 / GHCND LOCAL SETTLEMENT DATE
+====================================
+
+Production confirmed the UTC/local-date bug.
+
+Current bad behavior:
+target_settlement_date[:10]
+
+can use the UTC calendar date rather than the settlement-station local calendar date.
+
+Confirmed affected example:
+KXLOWTLAX-26AUG06-B68.5
+
+Stored UTC timestamp:
+2026-08-08T04:54:08Z
+
+Verifier used:
+2026-08-08
+
+Correct Los Angeles local settlement date:
+2026-08-07
+
+Fix the verification date path so:
+- timestamp is converted to the market/station settlement timezone
+- local calendar date is extracted only after timezone conversion
+- ERA5 and GHCND verification use that local date
+
+Do not alter Kalshi settlement fetching by ticker.
+
+Add tests covering:
+- Eastern
+- Central
+- Mountain
+- Pacific
+- UTC dates that cross local midnight
+- DST-aware timezone behavior
+
+====================================
+7. FORWARD TEST B START BOUNDARY
+====================================
+
+Do NOT set the final Forward Test B timestamp until after the corrected build is deployed successfully.
+
+Prepare the code/UI so that once deployment is verified:
+- a new exact FORWARD_TEST_START_B can be set
+- V2.3/V3 corrected trades after that timestamp count toward Forward Test B
+- all prior Forward Test A trades remain historical and excluded from Forward Test B metrics
+- Forward Test A results are not deleted
+
+The Audit & Validation tab should show:
+Preparing Forward Test B
+until the new start timestamp is explicitly activated.
+
+====================================
+8. AUDIT & VALIDATION STATUS
+====================================
+
+Update the Audit & Validation tab to reflect code fixes once verified.
+
+Do not mark anything RESOLVED merely because code was edited.
+
+A finding becomes RESOLVED only after:
+- implementation exists
+- relevant tests pass
+- runtime verification passes
+
+Keep the coordinate DB audit check active since weather_locations is currently empty in production.
+
+====================================
+9. DO NOT INCLUDE THESE DEFERRED ITEMS
+====================================
+
+Do not implement these in this task:
+
+- multi-model weighted consensus
+- GFS cycle awareness
+- calibration refit/write mechanism
+- ERA5 diagnostic rounding cleanup
+- error-stat source separation
+- additional feature work
+- stake sizing changes
+- real-money execution
+
+====================================
+10. TESTING
+====================================
+
+Run the full test suite:
+
+pytest tests/ -q
+
+Also run any frontend/type checks normally used by EdgeCast.
+
+Report:
+- passed
+- failed
+- warnings
+
+Provide focused test results for:
+- integer rounding
+- range rounding
+- half-integer thresholds unchanged
+- hourly sigma
+- station verification
+- V2.3 strategy versioning
+- calibration bypass
+- timezone/local-date conversion
+- preservation of historical V2.2 trades
+
+====================================
+11. RUNTIME VALIDATION
+====================================
+
+Start the app on replit-work.
+
+Verify:
+- no startup errors
+- no DB errors
+- no API 500s
+- Audit & Validation loads
+- current production/history data is untouched
+- new corrected V2 trades would identify as v2.3
+
+Do not create fake historical trades to force tests.
+
+====================================
+12. STOP BEFORE MERGE / FINAL ACTIVATION
+====================================
+
+Push completed work to replit-work.
+
+Do not merge to main.
+Do not set FORWARD_TEST_START_B yet.
+Do not publish unless explicitly instructed after review.
+
+Return:
+
+COMMIT SHA:
+FILES CHANGED:
+TESTS:
+RUNTIME:
+FIXES VERIFIED:
+AUDIT ITEMS RESOLVED:
+AUDIT ITEMS STILL OPEN:
+SAFE TO REVIEW FOR MERGE: YES / NO

@@ -127,7 +127,8 @@ async def run_analysis_v22(
 
     if session is not None:
         sigma, fallback_level = await _sigma_v2(
-            effective_city, effective_variable, lead_time_days, month, session
+            effective_city, effective_variable, lead_time_days, month, session,
+            hourly=(contract_type == "hourly_threshold"),  # Fix: 2.0°F floor for hourly
         )
         bias = await _bias_v2(
             effective_city, effective_variable, lead_time_days, month, session
@@ -137,7 +138,7 @@ async def run_analysis_v22(
         fallback_level = "fixed_table"
         bias = 0.0
 
-    # ── Bias-corrected μ  ── V2.2 CORRECTED SIGN ─────────────────────────────
+    # ── Bias-corrected μ  ── V2.3 CORRECTED SIGN ─────────────────────────────
     # Convention: mean_error = mean(actual − forecast).
     #   positive → GFS under-forecasts → raise mu  → ADD mean_error  (V2.2 ✓)
     #   negative → GFS over-forecasts  → lower mu  → ADD mean_error  (V2.2 ✓)
@@ -154,8 +155,9 @@ async def run_analysis_v22(
         raw_prob = _calc_prob_threshold(operator, threshold, mu, sigma)
 
     # ── Calibration ───────────────────────────────────────────────────────────
+    # strategy_version="v2.3" ensures V2.3 trades never inherit v2.0-era rows.
     if session is not None:
-        calib_adj = await _calibration_adj_v2(raw_prob, session)
+        calib_adj = await _calibration_adj_v2(raw_prob, session, strategy_version="v2.3")
     else:
         calib_adj = 1.0
 
@@ -193,14 +195,14 @@ async def run_analysis_v22(
     if contract_type == "range":
         var_label = "high" if weather_variable == "high" else "low"
         explanation = (
-            f"[v2.2] Open-Meteo forecasts {forecast_value:.1f}°F {var_label} for "
+            f"[v2.3] Open-Meteo forecasts {forecast_value:.1f}°F {var_label} for "
             f"{city or 'this city'}.{bias_note}{sigma_note}. "
             f"P({lower_bound:.0f}–{upper_bound:.0f}°F) = {ec_prob * 100:.1f}%.{calib_note}"
         )
     elif contract_type == "hourly_threshold":
         op_label = "≥" if operator == "gte" else "≤"
         explanation = (
-            f"[v2.2] Open-Meteo hourly: {forecast_value:.1f}°F for "
+            f"[v2.3] Open-Meteo hourly: {forecast_value:.1f}°F for "
             f"{city or 'this city'}.{bias_note}{sigma_note}. "
             f"P(T {op_label} {threshold:.1f}°F) = {ec_prob * 100:.1f}%.{calib_note}"
         )
@@ -208,7 +210,7 @@ async def run_analysis_v22(
         var_label = "high" if weather_variable == "high" else "low"
         op_label = "≥" if operator == "gte" else "≤"
         explanation = (
-            f"[v2.2] Open-Meteo {var_label}: {forecast_value:.1f}°F for "
+            f"[v2.3] Open-Meteo {var_label}: {forecast_value:.1f}°F for "
             f"{city or 'this city'}.{bias_note}{sigma_note}. "
             f"P(T {op_label} {threshold:.0f}°F) = {ec_prob * 100:.1f}%.{calib_note}"
         )
@@ -217,7 +219,7 @@ async def run_analysis_v22(
         gap = (ec_prob - mkt_prob) * 100
         sign = "+" if gap >= 0 else ""
         explanation += (
-            f" Kalshi: {mkt_prob * 100:.1f}% (EdgeCast v2.2 − Market: {sign}{gap:.1f}pp)."
+            f" Kalshi: {mkt_prob * 100:.1f}% (EdgeCast v2.3 − Market: {sign}{gap:.1f}pp)."
         )
 
     return AnalysisResultV2(

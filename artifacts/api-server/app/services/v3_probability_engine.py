@@ -48,18 +48,31 @@ def _normal_cdf(z: float) -> float:
     return 0.5 * (1.0 + math.erf(z / math.sqrt(2)))
 
 
+def _is_integer_threshold(v: float) -> bool:
+    """True when v is a whole number (e.g. 90, 100) vs a half-integer (e.g. 100.5)."""
+    return v == math.floor(v)
+
+
 def _calc_prob_threshold(operator: str, threshold: float, mu: float, sigma: float) -> float:
-    """P(X >= threshold) or P(X < threshold) under N(mu, sigma)."""
-    z = (threshold - mu) / sigma
+    """P(X >= threshold) or P(X < threshold) under N(mu, sigma), with NWS rounding correction."""
+    # NWS settlement rounds continuous temperatures to the nearest integer.
+    # For integer thresholds, the effective CDF boundary is T − 0.5.
+    # Half-integer thresholds (e.g. 100.5) are not settlement-rounded; leave as-is.
+    effective_t = (threshold - 0.5) if _is_integer_threshold(threshold) else threshold
+    z = (effective_t - mu) / sigma
     if operator == "gte":
         return round(1.0 - _normal_cdf(z), 6)
     return round(_normal_cdf(z), 6)
 
 
 def _calc_prob_range(lower: float, upper: float, mu: float, sigma: float) -> float:
-    """P(lower <= X <= upper) under N(mu, sigma)."""
-    z_hi = (upper - mu) / sigma
-    z_lo = (lower - mu) / sigma
+    """P(lower <= X <= upper) under N(mu, sigma), with NWS rounding correction."""
+    # NWS settlement rounds to the nearest integer.  For integer range bounds,
+    # expand the integration interval by ±0.5.
+    eff_lo = (lower - 0.5) if _is_integer_threshold(lower) else lower
+    eff_hi = (upper + 0.5) if _is_integer_threshold(upper) else upper
+    z_hi = (eff_hi - mu) / sigma
+    z_lo = (eff_lo - mu) / sigma
     return round(max(0.0, _normal_cdf(z_hi) - _normal_cdf(z_lo)), 6)
 
 

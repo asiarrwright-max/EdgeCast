@@ -35,13 +35,27 @@ def _norm_cdf(x: float) -> float:
 
 
 def _gaussian_gte(threshold: float, mu: float, sigma: float) -> float:
-    """P(T >= threshold | mu, sigma)."""
+    """P(T >= threshold | mu, sigma) — raw formula, no NWS rounding correction."""
     return 1.0 - _norm_cdf((threshold - mu) / sigma)
 
 
 def _gaussian_lte(threshold: float, mu: float, sigma: float) -> float:
-    """P(T <= threshold | mu, sigma)."""
+    """P(T <= threshold | mu, sigma) — raw formula, no NWS rounding correction."""
     return _norm_cdf((threshold - mu) / sigma)
+
+
+def _is_int(v: float) -> bool:
+    return v == math.floor(v)
+
+
+def _gaussian_gte_nws(threshold: float, mu: float, sigma: float) -> float:
+    """
+    P(X_rounded >= threshold | mu, sigma) with NWS integer rounding correction.
+    For integer thresholds uses T−0.5 boundary (round(actual)>=T ↔ actual>=T−0.5).
+    Half-integer thresholds are unchanged.
+    """
+    eff = (threshold - 0.5) if _is_int(threshold) else threshold
+    return round(1.0 - _norm_cdf((eff - mu) / sigma), 4)
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +160,8 @@ class TestV22BiasSign:
             result = await run_analysis_v22(**kwargs)
 
         expected_mu   = forecast + mean_error          # 93.4
-        expected_prob = _gaussian_gte(threshold, expected_mu, sigma)
+        # Use NWS-corrected formula (T−0.5 for integer threshold)
+        expected_prob = _gaussian_gte_nws(threshold, expected_mu, sigma)
         assert result.ec_probability is not None
         assert abs(result.ec_probability - expected_prob) < 1e-4, (
             f"Expected P(T≥{threshold} | μ={expected_mu}, σ={sigma}) "
@@ -172,7 +187,7 @@ class TestV22BiasSign:
             result = await run_analysis_v22(**kwargs)
 
         expected_mu   = forecast + mean_error          # 89.13
-        expected_prob = _gaussian_gte(95.0, expected_mu, sigma)
+        expected_prob = _gaussian_gte_nws(95.0, expected_mu, sigma)
         assert abs(result.ec_probability - expected_prob) < 1e-4
 
     @pytest.mark.asyncio
@@ -188,7 +203,7 @@ class TestV22BiasSign:
              _patch_v22(0.0, sigma, fallback="fixed_table")[2]:
             result = await run_analysis_v22(**kwargs)
 
-        expected_prob = _gaussian_gte(95.0, forecast, sigma)
+        expected_prob = _gaussian_gte_nws(95.0, forecast, sigma)
         assert abs(result.ec_probability - expected_prob) < 1e-4
         assert result.bias_correction == 0.0
 
@@ -219,8 +234,8 @@ class TestV22BiasSign:
              _patch_v21(mean_error, sigma)[2]:
             v21 = await run_analysis_v2(**kwargs_21)
 
-        p_v22 = _gaussian_gte(threshold, forecast + mean_error, sigma)  # 92.9
-        p_v21 = _gaussian_gte(threshold, forecast - mean_error, sigma)  # 89.9
+        p_v22 = _gaussian_gte_nws(threshold, forecast + mean_error, sigma)  # 92.9
+        p_v21 = _gaussian_gte_nws(threshold, forecast - mean_error, sigma)  # 89.9
 
         assert abs(v22.ec_probability - p_v22) < 1e-4, \
             f"V2.2 expected {p_v22:.4f} got {v22.ec_probability:.4f}"
@@ -255,7 +270,7 @@ class TestV21Unchanged:
 
         # V2.1 SUBTRACTS: mu = 91.4 − 2.0 = 89.4 (inverted — preserved by design)
         expected_mu   = forecast - mean_error
-        expected_prob = _gaussian_gte(95.0, expected_mu, sigma)
+        expected_prob = _gaussian_gte_nws(95.0, expected_mu, sigma)
         assert abs(result.ec_probability - expected_prob) < 1e-4
 
     @pytest.mark.asyncio
@@ -290,13 +305,15 @@ class TestStrategyIsolation:
 
     def test_strategy_version_constant(self):
         from app.services.paper_trading_v22 import STRATEGY_VERSION
-        assert STRATEGY_VERSION == "v2.2"
+        # Changed to v2.3 after Forward Test B correction package (NWS rounding,
+        # hourly sigma, coordinate corrections, calibration isolation).
+        assert STRATEGY_VERSION == "v2.3"
 
     def test_v22_strategy_version_distinct_from_v21(self):
         from app.services.paper_trading_v21 import STRATEGY_VERSION as V21
         from app.services.paper_trading_v22 import STRATEGY_VERSION as V22
         assert V21 == "v2.1"
-        assert V22 == "v2.2"
+        assert V22 == "v2.3"  # v2.3 after FTB correction package
         assert V21 != V22
 
     def test_flag_keys_distinct_from_v3(self):
@@ -399,19 +416,19 @@ class TestThresholdCrossingComparison:
              _patch_v21(mean_error, sigma)[2]:
             v21 = await run_analysis_v2(**kw21)
 
-        p_v22 = _gaussian_gte(threshold, forecast + mean_error, sigma)  # 89.63
-        p_v21 = _gaussian_gte(threshold, forecast - mean_error, sigma)  # 94.17
+        p_v22 = _gaussian_gte_nws(threshold, forecast + mean_error, sigma)  # mu=89.63
+        p_v21 = _gaussian_gte_nws(threshold, forecast - mean_error, sigma)  # mu=94.17
 
         assert abs(v22.ec_probability - p_v22) < 1e-4, \
-            f"V2.2: expected {p_v22:.4f} got {v22.ec_probability:.4f}"
+            f"V2.3: expected {p_v22:.4f} got {v22.ec_probability:.4f}"
         assert abs(v21.ec_probability - p_v21) < 1e-4, \
             f"V2.1: expected {p_v21:.4f} got {v21.ec_probability:.4f}"
 
-        # V2.1 amplified overforecast → inflated P(hot); V2.2 corrected → lower P
+        # V2.1 amplified overforecast → inflated P(hot); V2.3 corrected → lower P
         assert v21.ec_probability > v22.ec_probability, \
             "V2.1 should have higher P(T≥95) — it amplified Denver's overforecast"
-        assert v22.ec_probability < _gaussian_gte(threshold, forecast, sigma), \
-            "V2.2 should be below raw-forecast baseline (corrects downward)"
+        assert v22.ec_probability < _gaussian_gte_nws(threshold, forecast, sigma), \
+            "V2.3 should be below raw-forecast baseline (corrects downward)"
 
     @pytest.mark.asyncio
     async def test_synthetic_la_low_underforecast(self):
@@ -451,12 +468,12 @@ class TestThresholdCrossingComparison:
              _patch_v21(mean_error, sigma)[2]:
             v21 = await run_analysis_v2(**kw21)
 
-        p_v22 = _gaussian_gte(threshold, forecast + mean_error, sigma)  # 66.63
-        p_v21 = _gaussian_gte(threshold, forecast - mean_error, sigma)  # 62.17
+        p_v22 = _gaussian_gte_nws(threshold, forecast + mean_error, sigma)  # mu=66.63
+        p_v21 = _gaussian_gte_nws(threshold, forecast - mean_error, sigma)  # mu=62.17
 
         assert abs(v22.ec_probability - p_v22) < 1e-4, \
-            f"V2.2: expected {p_v22:.4f} got {v22.ec_probability:.4f}"
+            f"V2.3: expected {p_v22:.4f} got {v22.ec_probability:.4f}"
         assert abs(v21.ec_probability - p_v21) < 1e-4, \
             f"V2.1: expected {p_v21:.4f} got {v21.ec_probability:.4f}"
         assert v22.ec_probability > v21.ec_probability, \
-            "V2.2 should have higher P(warm night) — corrects LA's underforecast"
+            "V2.3 should have higher P(warm night) — corrects LA's underforecast"

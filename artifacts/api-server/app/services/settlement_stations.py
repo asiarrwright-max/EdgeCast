@@ -454,7 +454,7 @@ def get_station(city: str) -> SettlementStation | None:
 def get_verified_station(city: str) -> SettlementStation | None:
     """Return the settlement station only if ``verified=True``, else ``None``."""
     s = SETTLEMENT_STATIONS.get(city)
-    return s if (s is not None and s.verified) else s  # returns all stations; callers check .verified
+    return s if (s is not None and s.verified) else None
 
 
 def verified_cities() -> list[str]:
