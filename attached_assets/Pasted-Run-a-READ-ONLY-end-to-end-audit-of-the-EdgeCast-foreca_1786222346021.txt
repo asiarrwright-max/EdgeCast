@@ -1,0 +1,94 @@
+Run a READ-ONLY end-to-end audit of the EdgeCast forecast-to-settlement pipeline.
+
+Do not modify code, data, model logic, eligibility rules, or production settings yet.
+
+Goal:
+Identify every remaining place where EdgeCast may be predicting a different event than the exact event Kalshi settles.
+
+Audit these areas in order:
+
+1. FORECAST SOURCES
+- List every actual weather forecast/model source used by V2.2 and V3.
+- Distinguish explicit sources from Open-Meteo internal/default blends.
+- Show whether any source label is metadata only and does not reflect the true underlying source.
+- Show whether weights are explicit or uncontrolled.
+- Show whether weights vary by city, lead time, variable, or historical accuracy.
+
+2. MODEL RUN AGE / RELEASE TIMING
+- For each source, identify whether EdgeCast records the underlying NWP model run timestamp.
+- Determine whether EdgeCast knows when major forecast cycles become available.
+- Check whether paper trades can be created using a fresh Kalshi quote but an old weather model run.
+- Review recent settled losses for whether they were entered before or after major model updates.
+
+3. STATION ALIGNMENT
+- For every supported city, compare:
+  - Kalshi settlement station
+  - coordinates used by EdgeCast forecast calls
+  - fallback/city-centre coordinates
+- Quantify distance between forecast coordinates and settlement station.
+- Flag cities where the mismatch could materially affect daily high/low temperatures.
+- Distinguish grid-cell forecast data from actual physical station observations.
+
+4. SETTLEMENT / ROUNDING RULES
+- Trace the exact Kalshi/NWS settlement rule for each supported temperature contract type.
+- Show how EdgeCast currently converts forecast temperature distributions into:
+  - range probabilities
+  - threshold probabilities
+  - YES/NO probabilities
+- Identify any half-degree, integer-rounding, LCD/NWS, or bracket-boundary mismatch.
+- Quantify the probability difference caused by the current method on representative examples.
+
+5. FORECAST-TO-CONTRACT TRANSLATION
+- For a representative set of recent OFFICIAL trades, reconstruct:
+  - model mean
+  - sigma
+  - bias correction
+  - settlement-aware threshold/range
+  - EdgeCast probability
+  - selected-side ask
+  - claimed edge
+- Show whether EdgeCast probability corresponds to the exact settled event.
+
+6. RECENT LOSS AUTOPSY
+- Re-analyze every settled OFFICIAL loss in the current forward test.
+- For each loss, identify whether it may be explained by:
+  - rounding/boundary math
+  - stale NWP run
+  - station/grid mismatch
+  - extreme probability overconfidence
+  - source/model issue
+  - normal forecast error
+- Do not force a cause if evidence is insufficient.
+
+7. REMAINING KNOWN BUGS / GAPS
+- Include:
+  - get_verified_station naming/verification issue
+  - v2_excluded reason-code gap
+  - any other known issue affecting model quality or auditability
+- Separate cosmetic/UI issues from anything that could change trade probability or eligibility.
+
+8. PRIORITY RANKING
+Create a final table with:
+- issue
+- severity
+- expected impact on probability accuracy
+- expected impact on profitability
+- confidence in finding
+- recommended fix order
+
+Use:
+CRITICAL / HIGH / MODERATE / LOW
+
+9. FINISH LINE
+At the end, answer:
+- What must be fixed before we restart a clean forward test?
+- What can wait until later?
+- What should remain unchanged?
+- Is there any other major part of the forecast-to-settlement chain that has not yet been audited?
+
+Return findings only.
+
+Do not write code.
+Do not create a branch.
+Do not change production.
+Do not alter historical trades.
