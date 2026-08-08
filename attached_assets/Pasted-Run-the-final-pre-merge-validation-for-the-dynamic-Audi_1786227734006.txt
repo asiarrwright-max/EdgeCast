@@ -1,0 +1,102 @@
+Run the final pre-merge validation for the dynamic Audit & Validation feature.
+
+Do not merge to main yet.
+
+1. CHECK OUT / USE replit-work
+
+Confirm the branch contains commit:
+
+a3bcf8a09c45073dbd29d38fb67f471daf8da135
+
+2. RUN THE FULL TEST SUITE
+
+Run:
+
+pytest tests/ -q
+
+Report:
+- passed
+- failed
+- warnings
+
+Do not proceed if there are any new failures related to the audit feature.
+
+3. START THE APP ON replit-work
+
+Launch the API and frontend using the normal Replit runtime.
+
+Confirm there are no:
+- startup errors
+- database migration/create_all errors
+- audit-check exceptions
+- API 500s
+- frontend rendering errors
+
+4. RUN / VERIFY THE THREE DB AUDIT CHECKS
+
+Make sure these checks actually execute against the live Replit database and write results into audit_check_results:
+
+- db_calibration_contents
+- db_date_alignment
+- db_coord_alignment
+
+Report the latest result for each with:
+
+- status
+- severity
+- summary
+- action_required
+- checked_at
+
+Also answer:
+
+A. Is V2.2 calibration currently active?
+B. Is the ERA5 UTC/local-date bug confirmed?
+C. Are WeatherLocation and forecast coordinates materially mismatched anywhere?
+D. Does any result change the existing Forward Test B fix list?
+
+5. VERIFY THE AUDIT & VALIDATION TAB
+
+Open the Audit & Validation page and confirm that the three DB results are visible from the API-backed dynamic section.
+
+Confirm they are not just hard-coded placeholders.
+
+6. PUT THIS VERSION ONLINE FOR REVIEW
+
+Deploy/publish the replit-work version to the live EdgeCast Replit app so the Audit & Validation tab and the latest audit results are accessible online.
+
+This is for review only.
+
+Do not merge to GitHub main yet unless explicitly instructed later.
+
+After publishing, report:
+
+- live URL
+- deployment/build identifier if available
+- commit SHA deployed
+- whether Audit & Validation loads successfully
+- whether the three DB results are visible online
+- whether there are any production startup/API/frontend errors
+
+7. PUSH ANY VALIDATION-ONLY CHANGES
+
+If you had to make any small validation/UI fix, commit and push it to replit-work and provide the new SHA.
+
+Do not change:
+- model logic
+- trading logic
+- eligibility rules
+- settlement logic
+- calibration behavior
+- stake sizing
+- historical trades
+- FORWARD_TEST_START
+- real-money trading behavior
+
+When complete, give one compact final status:
+
+TESTS:
+RUNTIME:
+AUDIT RESULTS:
+LIVE DEPLOYMENT:
+SAFE TO MERGE TO MAIN: YES / NO
