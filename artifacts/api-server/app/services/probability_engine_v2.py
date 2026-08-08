@@ -315,15 +315,32 @@ def _calc_prob_threshold(
     mu: float,
     sigma: float,
 ) -> float:
-    # NWS settlement rounds continuous temperatures to the nearest integer.
-    # For integer thresholds, the effective CDF boundary is T − 0.5.
-    # Example: P(X_rounded ≥ 90) = P(actual ≥ 89.5) since round(89.5) = 90.
-    # Half-integer thresholds (e.g. 100.5) are not settlement-rounded; leave as-is.
-    effective_t = (threshold - 0.5) if _is_integer_threshold(threshold) else threshold
-    z = (effective_t - mu) / sigma
+    """
+    P(X_rounded >= threshold) for 'gte', P(X_rounded <= threshold) for 'lte',
+    with NWS integer-rounding correction applied per-operator.
+
+    NWS settlement rounds continuous temperatures to the nearest integer degree.
+    The effective CDF boundary differs by operator direction:
+
+      GTE  P(round(actual) >= T) = P(actual >= T − 0.5)   boundary shifts DOWN
+      LTE  P(round(actual) <= T) = P(actual <  T + 0.5)   boundary shifts UP
+
+    Note: for integer T, P(GTE) + P(LTE) > 1.0 because settlement temperature T
+    itself wins both an "at or above T" contract and an "at or below T" contract.
+
+    Half-integer thresholds (e.g. 100.5) are not NWS-rounded; boundary unchanged.
+    Unknown operators raise ValueError — no silent fallback.
+    """
     if operator == "gte":
-        return round(1.0 - _normal_cdf(z), 4)
-    return round(_normal_cdf(z), 4)
+        eff = (threshold - 0.5) if _is_integer_threshold(threshold) else threshold
+        return round(1.0 - _normal_cdf((eff - mu) / sigma), 4)
+    elif operator == "lte":
+        eff = (threshold + 0.5) if _is_integer_threshold(threshold) else threshold
+        return round(_normal_cdf((eff - mu) / sigma), 4)
+    else:
+        raise ValueError(
+            f"Unsupported operator {operator!r}; expected 'gte' or 'lte'."
+        )
 
 
 def _calc_prob_range(lower: float, upper: float, mu: float, sigma: float) -> float:

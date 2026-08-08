@@ -1,0 +1,80 @@
+Review correction required before Forward Test B merge.
+
+Do not merge, publish, or activate FORWARD_TEST_START_B yet.
+
+I found a directional bug in the new NWS integer threshold rounding implementation.
+
+The settlement parser represents daily threshold contracts as:
+
+operator="gte" for "X° or above"
+operator="lte" for "X° or below"
+
+But _calc_prob_threshold currently applies threshold - 0.5 to BOTH operators.
+
+That is incorrect.
+
+For integer settlement thresholds:
+
+1. GTE / "X or above"
+
+Rounded settlement >= T corresponds to continuous temperature boundary:
+
+T - 0.5
+
+So:
+
+P(settled >= T)
+= P(continuous >= T - 0.5)
+
+2. LTE / "X or below"
+
+Rounded settlement <= T corresponds to continuous temperature boundary:
+
+T + 0.5
+
+So:
+
+P(settled <= T)
+= P(continuous < T + 0.5)
+
+Do not use T - 0.5 for LTE.
+
+Correct this consistently in:
+
+- probability_engine_v2.py
+- V2.3 path through probability_engine_v22.py
+- v3_probability_engine.py
+
+Also inspect hourly operator semantics and ensure each operator is handled explicitly rather than relying on a generic "else".
+
+IMPORTANT:
+Do not silently treat unknown operators as LTE.
+Use explicit branches for supported operator values and fail safely for unexpected values.
+
+Update tests.
+
+Required regression tests:
+
+- integer GTE uses T - 0.5
+- integer LTE uses T + 0.5
+- at mu=T, integer GTE probability should be >50%
+- at mu=T, integer LTE probability should also be >50%
+  because settlement temperature T itself wins both inclusive boundary contracts
+- half-integer GTE remains unchanged
+- half-integer LTE remains unchanged
+- parser "90° or above" → gte → correct probability boundary
+- parser "90° or below" → lte → correct probability boundary
+- V2 and V3 produce the same boundary behavior
+- range behavior lower-0.5 / upper+0.5 remains unchanged
+
+Remove or correct the current test that asserts the below/LTE side uses T - 0.5.
+
+Run the entire test suite afterward.
+
+Push the correction to replit-work only.
+
+Do not merge.
+Do not publish.
+Do not set FORWARD_TEST_START_B.
+
+Return the new commit SHA and full test result.

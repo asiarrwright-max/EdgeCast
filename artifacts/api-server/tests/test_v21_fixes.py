@@ -368,21 +368,58 @@ def test_executability_thresholds_match_constants():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_yes_no_complement_for_threshold():
-    """P(T ≥ k) + P(T < k) should sum to ≈ 1.0 (within 4dp rounding)."""
+    """
+    NWS integer-rounding semantics: P(GTE) + P(LTE) for integer thresholds.
+
+    Because NWS settlement rounds to the nearest integer, a contract with
+    settlement temperature exactly T wins BOTH an 'at or above T' contract
+    (GTE) and an 'at or below T' contract (LTE).  These two contracts are
+    NOT mutually exclusive, so their probabilities legitimately sum to > 1.0.
+
+      GTE boundary: T − 0.5  (round(actual) >= T ↔ actual >= T − 0.5)
+      LTE boundary: T + 0.5  (round(actual) <= T ↔ actual <  T + 0.5)
+      Overlap:      P(T − 0.5 ≤ actual < T + 0.5) = P(round(actual) == T)
+
+    For half-integer thresholds (e.g. 70.5) there is no NWS rounding, the
+    two operators ARE mutually exclusive, and their sum is exactly 1.0.
+    """
     from app.services.probability_engine_v2 import _calc_prob_threshold
 
+    # ── Integer thresholds: P(GTE) + P(LTE) > 1.0 ──────────────────────────
     for mu, sigma, threshold in [
         (72.0, 5.0, 70.0),
         (80.0, 5.0, 85.0),
-        (65.0, 4.0, 65.0),  # exactly at boundary
+        (65.0, 4.0, 65.0),  # exactly at boundary: both directions peak
     ]:
-        # "gte" = P(T >= k); any other operator returns the CDF = P(T < k)
-        p_yes = _calc_prob_threshold("gte", threshold, mu, sigma)
-        p_no = _calc_prob_threshold("lte", threshold, mu, sigma)
-        total = p_yes + p_no
+        p_gte = _calc_prob_threshold("gte", threshold, mu, sigma)
+        p_lte = _calc_prob_threshold("lte", threshold, mu, sigma)
+        total = p_gte + p_lte
+        assert total > 1.0, (
+            f"Integer k={threshold}: P(GTE)+P(LTE)={total:.4f}; "
+            "must exceed 1.0 — settlement T wins both inclusive boundary contracts."
+        )
+        # Each side must also be individually valid probability
+        assert 0.0 < p_gte <= 1.0, f"P(GTE)={p_gte} out of range"
+        assert 0.0 < p_lte <= 1.0, f"P(LTE)={p_lte} out of range"
+        # Overlap is exactly P(round(actual)==T) which is the 1°F bucket probability
+        # — verify the excess above 1.0 is small and positive
+        excess = total - 1.0
+        assert 0.0 < excess < 0.30, (
+            f"P(GTE)+P(LTE) excess = {excess:.4f}; expected small positive value"
+        )
+
+    # ── Half-integer thresholds: no rounding correction → sum == 1.0 ────────
+    for mu, sigma, threshold in [
+        (72.0, 5.0, 70.5),
+        (80.0, 5.0, 85.5),
+        (65.0, 4.0, 65.5),
+    ]:
+        p_gte = _calc_prob_threshold("gte", threshold, mu, sigma)
+        p_lte = _calc_prob_threshold("lte", threshold, mu, sigma)
+        total = p_gte + p_lte
         assert abs(total - 1.0) <= 0.0001, (
-            f"P(YES)+P(NO)={total:.4f} for μ={mu},σ={sigma},k={threshold}; "
-            "must equal 1.0 (±0.0001 for rounding)"
+            f"Half-integer k={threshold}: P(GTE)+P(LTE)={total:.4f}; "
+            "must equal 1.0 (±0.0001) — no NWS rounding correction applied."
         )
 
 

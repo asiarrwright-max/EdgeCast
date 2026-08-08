@@ -54,46 +54,41 @@ class TestNWSRoundingV2:
         assert _is_integer_threshold(0.5) is False
         assert _is_integer_threshold(74.0 + 0.01) is False  # not exact integer
 
-    # ── Fix 1: integer threshold uses T − 0.5 boundary ─────────────────────
+    # ── Fix 1a: GTE — integer threshold boundary is T − 0.5 ─────────────────
 
-    def test_calc_prob_threshold_integer_uses_t_minus_half(self):
-        """For integer T, P(X≥T) should match Gaussian at T−0.5, not T."""
+    def test_calc_prob_threshold_gte_integer_uses_t_minus_half(self):
+        """
+        For integer T, P(round(actual) >= T) = P(actual >= T−0.5).
+        Parser 'X° or above' → operator='gte' → boundary T−0.5.
+        """
         from app.services.probability_engine_v2 import _calc_prob_threshold
-        mu, sigma, T = 90.0, 5.0, 90.0  # 50% naive, but ~55% with rounding correction
+        mu, sigma, T = 90.0, 5.0, 90.0
 
         result = _calc_prob_threshold("gte", T, mu, sigma)
         expected = round(1.0 - _norm_cdf((T - 0.5 - mu) / sigma), 4)
         assert result == expected, (
-            f"Expected {expected} (boundary T−0.5={T-0.5}), got {result}"
-        )
-        # Must be clearly above 0.5 (rounding correction raises probability)
-        naive = round(1.0 - _norm_cdf((T - mu) / sigma), 4)
-        assert result > naive, "Rounding correction must increase ≥T probability"
-
-    def test_calc_prob_threshold_lt_integer(self):
-        """For integer T, P(X<T) should match Gaussian at T−0.5."""
-        from app.services.probability_engine_v2 import _calc_prob_threshold
-        mu, sigma, T = 90.0, 5.0, 90.0
-
-        result = _calc_prob_threshold("lt", T, mu, sigma)
-        expected = round(_norm_cdf((T - 0.5 - mu) / sigma), 4)
-        assert result == expected
-
-    def test_calc_prob_threshold_half_integer_unchanged(self):
-        """Half-integer thresholds (e.g. 100.5) must NOT get the rounding correction."""
-        from app.services.probability_engine_v2 import _calc_prob_threshold
-        mu, sigma, T = 100.0, 5.0, 100.5
-
-        result = _calc_prob_threshold("gte", T, mu, sigma)
-        expected = round(1.0 - _norm_cdf((T - mu) / sigma), 4)
-        assert result == expected, (
-            f"Half-integer threshold must not be corrected. Expected {expected}, got {result}"
+            f"GTE integer: expected boundary T−0.5={T-0.5}, "
+            f"expected P={expected}, got {result}"
         )
 
-    def test_threshold_rounding_5_7pp_representative(self):
+    def test_gte_integer_at_mu_equals_t_exceeds_50_percent(self):
         """
-        The audit identified ~5.7pp impact. For T=90, mu=84, sigma=5
-        the impact of the T−0.5 correction should be measurable (>2pp).
+        At mu=T, P(round(actual) >= T) > 50%.
+        Settlement temperature T itself wins the 'at or above T' contract,
+        so the corrected probability is strictly above the naive 50%.
+        """
+        from app.services.probability_engine_v2 import _calc_prob_threshold
+        T = 90.0
+        result = _calc_prob_threshold("gte", T, mu=T, sigma=5.0)
+        assert result > 0.50, (
+            f"GTE at mu=T: expected >50%, got {result:.4f}. "
+            "NWS rounding correction (T−0.5 boundary) must push above 50%."
+        )
+
+    def test_gte_integer_rounding_impact_exceeds_2pp(self):
+        """
+        Audit identified ~5.7pp impact. For T=90, mu=84, sigma=5 the
+        T−0.5 correction must produce a measurable increase (>2pp) vs naive.
         """
         from app.services.probability_engine_v2 import _calc_prob_threshold
         mu, sigma, T = 84.0, 5.0, 90.0
@@ -102,8 +97,98 @@ class TestNWSRoundingV2:
         naive = round(1.0 - _norm_cdf((T - mu) / sigma), 4)
         impact_pp = (corrected - naive) * 100
         assert impact_pp > 2.0, (
-            f"Expected >2pp rounding correction impact, got {impact_pp:.2f}pp"
+            f"Expected >2pp GTE rounding correction impact, got {impact_pp:.2f}pp"
         )
+
+    def test_calc_prob_threshold_gte_half_integer_unchanged(self):
+        """Half-integer GTE thresholds (e.g. 100.5) must NOT be corrected."""
+        from app.services.probability_engine_v2 import _calc_prob_threshold
+        mu, sigma, T = 100.0, 5.0, 100.5
+
+        result = _calc_prob_threshold("gte", T, mu, sigma)
+        expected = round(1.0 - _norm_cdf((T - mu) / sigma), 4)
+        assert result == expected, (
+            f"Half-integer GTE must not be corrected: expected {expected}, got {result}"
+        )
+
+    # ── Fix 1b: LTE — integer threshold boundary is T + 0.5 ─────────────────
+
+    def test_calc_prob_threshold_lte_integer_uses_t_plus_half(self):
+        """
+        For integer T, P(round(actual) <= T) = P(actual < T+0.5).
+        Parser 'X° or below' → operator='lte' → boundary T+0.5, NOT T−0.5.
+        """
+        from app.services.probability_engine_v2 import _calc_prob_threshold
+        mu, sigma, T = 90.0, 5.0, 90.0
+
+        result = _calc_prob_threshold("lte", T, mu, sigma)
+        expected = round(_norm_cdf((T + 0.5 - mu) / sigma), 4)
+        assert result == expected, (
+            f"LTE integer: expected boundary T+0.5={T+0.5}, "
+            f"expected P={expected}, got {result}"
+        )
+        # Must NOT equal the wrong T−0.5 value
+        wrong = round(_norm_cdf((T - 0.5 - mu) / sigma), 4)
+        assert result != wrong, (
+            "LTE must use T+0.5, not T−0.5. Got same value as T−0.5 formula."
+        )
+
+    def test_lte_integer_at_mu_equals_t_exceeds_50_percent(self):
+        """
+        At mu=T, P(round(actual) <= T) > 50%.
+        Settlement temperature T wins the 'at or below T' contract too,
+        so corrected LTE probability is strictly above 50%.
+        """
+        from app.services.probability_engine_v2 import _calc_prob_threshold
+        T = 90.0
+        result = _calc_prob_threshold("lte", T, mu=T, sigma=5.0)
+        assert result > 0.50, (
+            f"LTE at mu=T: expected >50%, got {result:.4f}. "
+            "NWS rounding correction (T+0.5 boundary) must push above 50%."
+        )
+
+    def test_calc_prob_threshold_lte_half_integer_unchanged(self):
+        """Half-integer LTE thresholds (e.g. 89.5) must NOT be corrected."""
+        from app.services.probability_engine_v2 import _calc_prob_threshold
+        mu, sigma, T = 90.0, 5.0, 89.5
+
+        result = _calc_prob_threshold("lte", T, mu, sigma)
+        expected = round(_norm_cdf((T - mu) / sigma), 4)
+        assert result == expected, (
+            f"Half-integer LTE must not be corrected: expected {expected}, got {result}"
+        )
+
+    # ── Fix 1c: both inclusive contracts win at settlement temperature T ──────
+
+    def test_gte_and_lte_both_above_50_at_mu_equals_t(self):
+        """
+        At mu=T (integer), BOTH P(GTE) > 50% AND P(LTE) > 50%.
+        Settlement temperature T wins both inclusive boundary contracts.
+        P(GTE) + P(LTE) > 1.0 is correct — contracts are not mutually exclusive.
+        """
+        from app.services.probability_engine_v2 import _calc_prob_threshold
+        T, sigma = 90.0, 5.0
+        p_gte = _calc_prob_threshold("gte", T, mu=T, sigma=sigma)
+        p_lte = _calc_prob_threshold("lte", T, mu=T, sigma=sigma)
+        assert p_gte > 0.50, f"GTE: expected >50% at mu=T, got {p_gte:.4f}"
+        assert p_lte > 0.50, f"LTE: expected >50% at mu=T, got {p_lte:.4f}"
+        assert p_gte + p_lte > 1.0, (
+            f"P(GTE)+P(LTE)={p_gte+p_lte:.4f} should exceed 1.0 for integer T "
+            "because T wins both contracts."
+        )
+
+    # ── Fix 1d: unknown operator raises ValueError ────────────────────────────
+
+    def test_unknown_operator_raises_value_error(self):
+        """Unknown operators must raise ValueError, not silently fallback."""
+        import pytest
+        from app.services.probability_engine_v2 import _calc_prob_threshold
+        with pytest.raises(ValueError, match="Unsupported operator"):
+            _calc_prob_threshold("lt", 90.0, 90.0, 5.0)
+        with pytest.raises(ValueError, match="Unsupported operator"):
+            _calc_prob_threshold("gt", 90.0, 90.0, 5.0)
+        with pytest.raises(ValueError, match="Unsupported operator"):
+            _calc_prob_threshold("", 90.0, 90.0, 5.0)
 
     # ── Fix 2: range contract uses lower−0.5, upper+0.5 boundaries ─────────
 
@@ -148,7 +233,8 @@ class TestNWSRoundingV3:
         assert _is_integer_threshold(90.0) is True
         assert _is_integer_threshold(90.5) is False
 
-    def test_v3_calc_prob_threshold_integer_corrected(self):
+    def test_v3_calc_prob_threshold_gte_integer_corrected(self):
+        """V3 GTE: integer threshold uses T−0.5 boundary."""
         from app.services.v3_probability_engine import _calc_prob_threshold
         mu, sigma, T = 90.0, 5.0, 90.0
 
@@ -156,13 +242,67 @@ class TestNWSRoundingV3:
         expected = round(1.0 - _norm_cdf((T - 0.5 - mu) / sigma), 6)
         assert result == expected
 
-    def test_v3_calc_prob_threshold_half_integer_unchanged(self):
+    def test_v3_calc_prob_threshold_lte_integer_uses_t_plus_half(self):
+        """V3 LTE: integer threshold uses T+0.5 boundary, NOT T−0.5."""
+        from app.services.v3_probability_engine import _calc_prob_threshold
+        mu, sigma, T = 90.0, 5.0, 90.0
+
+        result = _calc_prob_threshold("lte", T, mu, sigma)
+        expected = round(_norm_cdf((T + 0.5 - mu) / sigma), 6)
+        assert result == expected, (
+            f"V3 LTE integer: expected T+0.5 boundary ({expected}), got {result}"
+        )
+        wrong = round(_norm_cdf((T - 0.5 - mu) / sigma), 6)
+        assert result != wrong, "V3 LTE must use T+0.5, not T−0.5"
+
+    def test_v3_calc_prob_threshold_gte_half_integer_unchanged(self):
+        """V3: half-integer GTE thresholds are not corrected."""
         from app.services.v3_probability_engine import _calc_prob_threshold
         mu, sigma, T = 100.0, 5.0, 100.5
 
         result = _calc_prob_threshold("gte", T, mu, sigma)
         expected = round(1.0 - _norm_cdf((T - mu) / sigma), 6)
         assert result == expected
+
+    def test_v3_unknown_operator_raises_value_error(self):
+        """V3: unknown operators must raise ValueError, not silently fallback."""
+        import pytest
+        from app.services.v3_probability_engine import _calc_prob_threshold
+        with pytest.raises(ValueError, match="Unsupported operator"):
+            _calc_prob_threshold("lt", 90.0, 90.0, 5.0)
+
+    def test_v2_v3_same_gte_boundary(self):
+        """
+        V2 and V3 use the same GTE boundary formula (T−0.5 for integer T).
+        V2 rounds to 4dp; V3 to 6dp — compare within 0.0002 to allow for
+        the 1-ULP difference that arises when re-rounding 6dp to 4dp.
+        """
+        from app.services.probability_engine_v2 import _calc_prob_threshold as v2_fn
+        from app.services.v3_probability_engine import _calc_prob_threshold as v3_fn
+        mu, sigma, T = 88.0, 4.5, 92.0
+
+        v2 = v2_fn("gte", T, mu, sigma)              # 4dp
+        v3 = v3_fn("gte", T, mu, sigma)              # 6dp
+        assert abs(v2 - v3) < 0.0002, (
+            f"V2 GTE={v2} and V3 GTE={v3} differ by more than 0.0002; "
+            "both engines must use the same T−0.5 boundary formula."
+        )
+
+    def test_v2_v3_same_lte_boundary(self):
+        """
+        V2 and V3 use the same LTE boundary formula (T+0.5 for integer T).
+        Compared within 0.0002 to allow for the V2/V3 precision difference.
+        """
+        from app.services.probability_engine_v2 import _calc_prob_threshold as v2_fn
+        from app.services.v3_probability_engine import _calc_prob_threshold as v3_fn
+        mu, sigma, T = 88.0, 4.5, 92.0
+
+        v2 = v2_fn("lte", T, mu, sigma)              # 4dp
+        v3 = v3_fn("lte", T, mu, sigma)              # 6dp
+        assert abs(v2 - v3) < 0.0002, (
+            f"V2 LTE={v2} and V3 LTE={v3} differ by more than 0.0002; "
+            "both engines must use the same T+0.5 boundary formula."
+        )
 
     def test_v3_calc_prob_range_integer_bounds_expanded(self):
         from app.services.v3_probability_engine import _calc_prob_range
