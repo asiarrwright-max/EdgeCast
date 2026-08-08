@@ -133,3 +133,10 @@ uri = "file://edgecast_final_audit_prompt.md"
 type = "text"
 title = "EdgeCast Final Audit Prompt"
 description = "Read-only audit instructions covering calibration adjustment factors and settlement/ERA5 matching pipeline."
+
+[[outputs]]
+id = "ZxPCnE_3aSqLUQpgRRDzO"
+uri = "file://edgecast_final_audit.md"
+type = "text"
+title = "EdgeCast Final Read-Only Audit"
+description = "Calibration adjustment factors + settlement/ERA5 matching pipeline audit. Includes final priority table, DB queries needed, and smallest fix set for Forward Test B."
