@@ -16,6 +16,7 @@ import StrategyAuditPage from '@/pages/strategy-audit';
 import StrategyComparisonPage from '@/pages/strategy-comparison';
 import PerformancePage from '@/pages/performance';
 import V21AuditPage from '@/pages/v21-audit';
+import AuditValidationPage from '@/pages/audit-validation';
 
 import Layout from '@/components/layout';
 
@@ -101,6 +102,7 @@ function ProtectedRoutes() {
             <Route path="/strategy-comparison" component={StrategyComparisonPage} />
             <Route path="/v21-audit" component={V21AuditPage} />
             <Route path="/strategy-audit" component={StrategyAuditPage} />
+            <Route path="/audit-validation" component={AuditValidationPage} />
             <Route path="/health" component={HealthPage} />
             <Route path="/jobs" component={JobsPage} />
             <Route path="/errors" component={ErrorsPage} />

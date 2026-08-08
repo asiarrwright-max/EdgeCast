@@ -1,0 +1,225 @@
+Add a new read-only dashboard tab called:
+
+Audit & Validation
+
+Goal:
+Create one permanent place in EdgeCast where we can see the current model/audit findings, Forward Test B blockers, and validation status without relying on screenshots or chat history.
+
+Do not change model logic, eligibility logic, calibration logic, settlement logic, or production trading behavior in this task.
+
+====================================
+1. ADD NAVIGATION TAB
+====================================
+
+Add “Audit & Validation” to the main navigation.
+
+This page should be mobile-first and easy to scan.
+
+====================================
+2. CURRENT VALIDATION STATUS
+====================================
+
+At the top, show:
+
+Current phase:
+Preparing Forward Test B
+
+Model status:
+Corrections required before new clean forward test
+
+Real-money readiness:
+Not ready for real money
+
+Add compact counters:
+
+- Critical findings
+- High findings
+- Moderate findings
+- Forward Test B blockers
+- Confirmed findings
+- Suspected findings
+- Resolved findings
+
+====================================
+3. FORWARD TEST B BLOCKERS
+====================================
+
+Create a section titled:
+
+Forward Test B — Must Fix
+
+Include these current items:
+
+1. NWS integer threshold rounding
+Severity: CRITICAL
+Status: Confirmed
+Must fix: Yes
+Finding:
+Integer threshold probability formulas do not account for NWS integer rounding. Approximate probability impact identified in audit: ~5.7 percentage points in representative cases.
+Required action:
+Apply settlement-aware ±0.5°F boundary handling for integer thresholds.
+Do not apply this correction to half-integer thresholds.
+
+2. NWS range contract rounding
+Severity: CRITICAL
+Status: Confirmed
+Must fix: Yes
+Finding:
+Range probability calculations currently use raw lower/upper bounds instead of settlement-aware lower-0.5 / upper+0.5 boundaries. Representative impact estimated around ~11 percentage points.
+Required action:
+Use settlement-aware integration bounds.
+
+3. ERA5 local-date extraction
+Severity: CRITICAL
+Status: Suspected — DB verification required
+Must fix: Yes if confirmed
+Finding:
+target_settlement_date may be derived from a UTC close/expiration timestamp and sliced as a UTC calendar date. This may cause CDT/MDT/PDT markets to be verified against the following local day.
+Required action:
+Run DB verification. If confirmed, convert UTC timestamp to settlement-station local timezone before extracting the verification date.
+
+4. Hourly sigma floor
+Severity: HIGH
+Status: Confirmed
+Must fix: Yes
+Finding:
+Hourly contracts can use the daily sigma floor instead of the intended hourly sigma behavior.
+Required action:
+Pass hourly=True for hourly_threshold contracts in V2.1/V2.2 logic.
+
+5. Station verification eligibility
+Severity: HIGH
+Status: Confirmed
+Must fix: Yes
+Finding:
+get_verified_station can return an unverified station object, and V2.2/V3 paper-trading eligibility does not consistently check .verified.
+Required action:
+Fix verification behavior and enforce verified stations before OFFICIAL eligibility.
+
+6. Philadelphia / San Antonio coordinates
+Severity: HIGH
+Status: Confirmed
+Must fix: Yes
+Finding:
+Forecast coordinates require correction to align with intended settlement stations.
+Required action:
+Correct SERIES_TO_CITY coordinates before those cities participate in Forward Test B.
+
+7. Calibration reset for corrected strategy
+Severity: HIGH
+Status: Confirmed structural issue
+Must fix: Yes
+Finding:
+V2.1/V2.2 look up calibration rows under strategy_version="v2.0", but no calibration write mechanism exists in the current codebase. Existing rows, if any, have unknown provenance and will become invalid after settlement-rounding corrections.
+Required action:
+Audit existing rows, do not inherit them, and start corrected strategy as v2.3 with calibration bypassed (factor 1.0) until clean corrected-version outcomes are available.
+
+8. New Forward Test start boundary
+Severity: HIGH
+Status: Required
+Must fix: Yes
+Finding:
+Old and corrected model results must not be mixed.
+Required action:
+After corrected model deployment, set a new FORWARD_TEST_START timestamp and clearly label all prior data as Baseline Forward Test A.
+
+====================================
+4. DATABASE VERIFICATION REQUIRED
+====================================
+
+Create a section titled:
+
+Final DB Checks Before Implementation
+
+Show these as unresolved checks:
+
+A. calibration_adjustments contents
+Need to determine:
+- whether any usable rows exist
+- whether V2.2 currently receives a factor other than 1.0
+- provenance and dates of rows
+
+B. target_settlement_date local-date alignment
+Need to compare for every current OFFICIAL trade:
+- stored target settlement date
+- UTC close date
+- station-local close date
+- date used by ERA5 verification
+
+C. WeatherLocation vs SERIES_TO_CITY coordinates
+Need to compare active city coordinates and identify whether forecast and ERA5 verification may use different grid cells.
+
+Status for each:
+Pending DB verification
+
+====================================
+5. IMPORTANT NON-BLOCKING FINDINGS
+====================================
+
+Create a section titled:
+
+Important, But Not Required Before Forward Test B
+
+Include:
+
+- GFS / model-run cycle awareness
+  Finding: fresh Kalshi quote does not guarantee fresh underlying NWP model run.
+
+- True multi-model weighted consensus
+  Finding: current forecast path relies primarily on one Open-Meteo call/default blend rather than an explicitly controlled weighted set of independent forecast models.
+
+- ERA5 diagnostic rounding
+  Finding: raw continuous ERA5 values are compared directly with integer settlement thresholds, inflating ERA5_KALSHI_DISAGREE near ±0.5°F boundaries.
+
+- Error-stat source separation
+  Finding: forecast error statistics currently mix GHCND, ERA5, and legacy observations rather than separating sigma/bias estimates by source.
+
+- Calibration write/refit mechanism
+  Finding: no persistent code path currently populates calibration_adjustments.
+  Note: required before future calibration is actually refit, but not required to begin uncalibrated V2.3 Forward Test B.
+
+- LAX comment cleanup
+  Low priority documentation issue only.
+
+====================================
+6. AUDITED PIPELINE
+====================================
+
+Create a checklist section titled:
+
+Forecast → Settlement Chain Audit Coverage
+
+Mark these as Audited:
+
+- Forecast source / model labeling
+- Model run age / release timing
+- Station alignment
+- NWS settlement rounding
+- Probability formulas
+- Forecast-to-contract translation
+- Recent loss autopsy
+- Eligibility / known bugs
+- Calibration architecture
+- Kalshi settlement fetch/storage
+- ERA5 verification fetch/storage
+- Settlement parser / contract type handling
+
+Show:
+
+Remaining code blind spots:
+None known
+
+Remaining data verification:
+3 DB checks listed above
+
+====================================
+7. EARLY FORWARD TEST A FINDINGS
+====================================
+
+Add a compact historical section labeled:
+
+Baseline Forward Test A — Early Findings
+
+Show:
+
+- 16 settled observations in latest
