@@ -112,3 +112,10 @@ uri = "file://edgecast_forward_test_diagnostics.zip"
 type = "unspecified"
 title = "All 12 Diagnostic CSVs (zip)"
 description = "edgecast_calibration_summary, loss_autopsy, performance_by_*, settlement_integrity_audit, false_confidence_losses, and the two earlier audit files"
+
+[[outputs]]
+id = "Ci-Rmg4mFPp-KC440OWU7"
+uri = "file://edgecast_mechanics_audit.md"
+type = "text"
+title = "EdgeCast Mechanics Audit"
+description = "Read-only end-to-end audit of the forecast-to-settlement pipeline — 9 sections covering forecast sources, model run timing, station alignment, rounding math, loss autopsy, known bugs, priority rankings, and finish-line recommendations."
