@@ -6,6 +6,13 @@
  * No API calls — all content is sourced from the completed read-only audit.
  */
 import { ReactNode } from "react";
+import { useState } from "react";
+import {
+  useGetAuditCheckResults,
+  triggerAuditDbChecks,
+  type AuditCheckResultItem,
+  type AuditCheckStatus,
+} from "@workspace/api-client-react";
 import {
   ShieldCheck,
   ShieldAlert,
@@ -16,6 +23,9 @@ import {
   Database,
   Clock,
   XCircle,
+  ChevronDown,
+  ChevronUp,
+  RefreshCw,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -40,6 +50,170 @@ interface DbCheck {
   label: string;
   needs: string[];
   status: DbCheckStatus;
+}
+
+// ---------------------------------------------------------------------------
+// Live DB check status badge
+// ---------------------------------------------------------------------------
+
+function LiveStatusBadge({ status }: { status: AuditCheckStatus }) {
+  if (status === "CLEARED") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+        <CheckCircle2 className="h-3 w-3" /> CLEARED
+      </span>
+    );
+  }
+  if (status === "FIX_REQUIRED") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-destructive/15 text-destructive border border-destructive/30">
+        <XCircle className="h-3 w-3" /> FIX REQUIRED
+      </span>
+    );
+  }
+  if (status === "CONFIRMED") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-500/10 text-emerald-500 border border-emerald-500/25">
+        <CheckCircle2 className="h-3 w-3" /> CONFIRMED
+      </span>
+    );
+  }
+  if (status === "RESOLVED") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-primary/15 text-primary border border-primary/30">
+        <CheckCircle2 className="h-3 w-3" /> RESOLVED
+      </span>
+    );
+  }
+  // PENDING
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-orange-500/10 text-orange-400 border border-orange-500/25">
+      <Clock className="h-3 w-3" /> PENDING
+    </span>
+  );
+}
+
+function LiveCheckCard({ item }: { item: AuditCheckResultItem }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const checkedLabel = item.checkedAt
+    ? new Date(item.checkedAt).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
+
+  return (
+    <div className="border border-border rounded-md p-4 space-y-3">
+      <div className="flex flex-wrap items-start gap-2">
+        <div className="flex-1 min-w-0 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold">{item.checkName}</span>
+            <LiveStatusBadge status={item.status} />
+          </div>
+          {checkedLabel && (
+            <div className="text-[11px] text-muted-foreground font-mono flex items-center gap-1">
+              <Clock className="h-3 w-3" /> Checked: {checkedLabel}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="text-sm text-muted-foreground leading-relaxed">
+        {item.summary}
+      </div>
+
+      {item.actionRequired && (
+        <div className="flex items-center gap-1.5 text-[11px] font-mono text-destructive">
+          <XCircle className="h-3 w-3" />
+          Action required before Forward Test B
+        </div>
+      )}
+      {item.status === "CLEARED" && (
+        <div className="flex items-center gap-1.5 text-[11px] font-mono text-emerald-400">
+          <CheckCircle2 className="h-3 w-3" />
+          No action required
+        </div>
+      )}
+
+      {item.details && (
+        <div>
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {expanded ? "Hide details" : "Show details"}
+          </button>
+          {expanded && (
+            <pre className="mt-2 p-3 rounded bg-muted/20 border border-border text-[11px] font-mono text-muted-foreground whitespace-pre-wrap leading-relaxed overflow-x-auto">
+              {item.details}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LiveDbChecksSection() {
+  const { data, isLoading, isError, refetch, isFetching } =
+    useGetAuditCheckResults();
+  const [triggering, setTriggering] = useState(false);
+
+  const handleRunChecks = async () => {
+    setTriggering(true);
+    try {
+      await triggerAuditDbChecks();
+      await refetch();
+    } catch {
+      // silently continue — errors visible in details
+    } finally {
+      setTriggering(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Database className="h-4 w-4 text-orange-400" />
+          <h2 className="text-sm font-semibold">Final DB Checks Before Implementation</h2>
+          <div className="ml-auto flex items-center gap-2">
+            {(isFetching || triggering) && (
+              <RefreshCw className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
+            )}
+            <button
+              onClick={handleRunChecks}
+              disabled={triggering || isFetching}
+              className="text-[11px] font-mono text-muted-foreground hover:text-foreground disabled:opacity-40 transition-colors flex items-center gap-1 px-2 py-1 border border-border rounded"
+            >
+              <RefreshCw className="h-3 w-3" />
+              Re-run checks
+            </button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardBody className="space-y-3">
+        {isLoading && (
+          <div className="text-sm text-muted-foreground py-4 text-center">
+            Loading check results…
+          </div>
+        )}
+        {isError && (
+          <div className="text-sm text-destructive py-4 text-center">
+            Failed to load check results. Server may be starting up.
+          </div>
+        )}
+        {!isLoading && !isError && data?.results.map((item) => (
+          <LiveCheckCard key={item.checkKey} item={item} />
+        ))}
+      </CardBody>
+    </Card>
+  );
 }
 
 interface NonBlocker {
@@ -626,7 +800,7 @@ export default function AuditValidationPage() {
 
       <ValidationStatus />
       <BlockersSection />
-      <DbChecksSection />
+      <LiveDbChecksSection />
       <NonBlockersSection />
       <ChainCoverageSection />
       <BaselineSection />

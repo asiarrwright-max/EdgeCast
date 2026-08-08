@@ -18,12 +18,13 @@ from collections import defaultdict
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import ForecastErrorStats, ForecastVerification, KalshiMarket, PaperTrade, PredictionSnapshot
+from app.models import AuditCheckResult, ForecastErrorStats, ForecastVerification, KalshiMarket, PaperTrade, PredictionSnapshot
+from app.services.audit_checks import run_all_audit_checks
 
 router = APIRouter(tags=["audit"])
 
@@ -1102,4 +1103,98 @@ async def v2_city_detail(
             }
             for t in v2_rows
         ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Audit Check Results — GET (latest per check_key) and POST (trigger run)
+# ---------------------------------------------------------------------------
+
+# The three check keys that the system tracks, in display order.
+_KNOWN_CHECK_KEYS: list[tuple[str, str, str]] = [
+    ("db_calibration_contents",  "Calibration Adjustments Contents",               "calibration"),
+    ("db_date_alignment",        "Target Settlement Date Local-Date Alignment",     "era5_verification"),
+    ("db_coord_alignment",       "WeatherLocation vs Settlement-Station Coordinates", "coordinates"),
+]
+
+
+def _row_to_dict(r: AuditCheckResult) -> dict:
+    return {
+        "checkKey":       r.check_key,
+        "checkName":      r.check_name,
+        "category":       r.category,
+        "status":         r.status,
+        "severity":       r.severity,
+        "summary":        r.summary,
+        "details":        r.details,
+        "actionRequired": r.action_required,
+        "checkedAt":      r.checked_at.isoformat() if r.checked_at else None,
+        "source":         r.source,
+        "metadataJson":   r.metadata_json,
+    }
+
+
+def _pending_stub(key: str, name: str, category: str) -> dict:
+    return {
+        "checkKey":       key,
+        "checkName":      name,
+        "category":       category,
+        "status":         "PENDING",
+        "severity":       None,
+        "summary":        "DB verification has not yet run for this check.",
+        "details":        None,
+        "actionRequired": False,
+        "checkedAt":      None,
+        "source":         None,
+        "metadataJson":   None,
+    }
+
+
+@router.get("/audit/check-results")
+async def get_audit_check_results(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Return the latest audit check result for each known check_key.
+    If a check has never run, return a PENDING stub so the UI always
+    shows all three checks.
+    Read-only. No data is modified.
+    """
+    rows = (await db.execute(
+        select(AuditCheckResult).order_by(
+            AuditCheckResult.check_key, desc(AuditCheckResult.checked_at)
+        )
+    )).scalars().all()
+
+    # Keep only the newest row per check_key
+    latest: dict[str, AuditCheckResult] = {}
+    for r in rows:
+        if r.check_key not in latest:
+            latest[r.check_key] = r
+
+    results = []
+    for key, name, category in _KNOWN_CHECK_KEYS:
+        if key in latest:
+            results.append(_row_to_dict(latest[key]))
+        else:
+            results.append(_pending_stub(key, name, category))
+
+    return {"results": results}
+
+
+@router.post("/audit/run-db-checks")
+async def trigger_audit_db_checks(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Manually trigger the three read-only DB verification checks.
+    Stores one new result row per check.  Does NOT modify any trading,
+    calibration, or historical data.
+    """
+    written = await run_all_audit_checks(db)
+    return {
+        "ran": len(written),
+        "results": [_row_to_dict(r) for r in written],
     }

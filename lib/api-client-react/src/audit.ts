@@ -467,3 +467,56 @@ export function useGetV2CityDetail(
     ...options,
   }) as UseQueryResult<CityDetailResult, unknown>;
 }
+
+// ---------------------------------------------------------------------------
+// Audit Check Results — dynamic DB verification status
+// ---------------------------------------------------------------------------
+
+export type AuditCheckStatus =
+  | "PENDING"
+  | "CONFIRMED"
+  | "CLEARED"
+  | "FIX_REQUIRED"
+  | "RESOLVED";
+
+export interface AuditCheckResultItem {
+  checkKey: string;
+  checkName: string;
+  category: string;
+  status: AuditCheckStatus;
+  severity: "CRITICAL" | "HIGH" | "MODERATE" | "LOW" | null;
+  summary: string;
+  details: string | null;
+  actionRequired: boolean;
+  checkedAt: string | null;
+  source: string | null;
+  metadataJson: Record<string, unknown> | null;
+}
+
+export interface AuditCheckResultsResponse {
+  results: AuditCheckResultItem[];
+}
+
+export const getAuditCheckResults = (
+  options?: Parameters<typeof customFetch>[1]
+): Promise<AuditCheckResultsResponse> =>
+  customFetch<AuditCheckResultsResponse>("/api/audit/check-results", {
+    ...options,
+    method: "GET",
+  });
+
+export const triggerAuditDbChecks = (
+  options?: Parameters<typeof customFetch>[1]
+): Promise<{ ran: number; results: AuditCheckResultItem[] }> =>
+  customFetch("/api/audit/run-db-checks", { ...options, method: "POST" });
+
+export function useGetAuditCheckResults(
+  options?: UseQueryOptions<AuditCheckResultsResponse, unknown, AuditCheckResultsResponse>
+): UseQueryResult<AuditCheckResultsResponse, unknown> {
+  return useQuery({
+    queryKey: ["/api/audit/check-results"],
+    queryFn: ({ signal }) => getAuditCheckResults({ signal }),
+    staleTime: 60_000,
+    ...options,
+  }) as UseQueryResult<AuditCheckResultsResponse, unknown>;
+}

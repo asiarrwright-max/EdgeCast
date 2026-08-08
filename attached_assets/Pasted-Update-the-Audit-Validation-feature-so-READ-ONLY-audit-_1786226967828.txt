@@ -1,0 +1,111 @@
+Update the Audit & Validation feature so READ-ONLY audit results can be published to the tab dynamically.
+
+Do not change model logic, trading logic, eligibility rules, settlement logic, or calibration behavior in this task.
+
+Goal:
+A completed audit should be able to store its findings, and the Audit & Validation page should display those findings automatically.
+
+1. ADD AUDIT RESULT STORAGE
+
+Create a simple persistent audit-results structure for validation checks.
+
+Each result should support:
+
+- check_key
+- check_name
+- category
+- status
+- severity
+- summary
+- details
+- action_required
+- checked_at
+- source
+- metadata_json if needed
+
+Allowed statuses should include:
+
+- PENDING
+- CONFIRMED
+- CLEARED
+- FIX_REQUIRED
+- RESOLVED
+
+Do not alter historical paper-trade data.
+
+2. ADD READ API
+
+Add a read-only endpoint for the Audit & Validation page to retrieve the latest result for each audit check.
+
+The page must not depend only on hard-coded React constants for current DB verification status.
+
+3. PUBLISH THESE THREE CURRENT DB CHECKS
+
+Run the previously requested READ-ONLY DB verification and publish the results for:
+
+A. calibration_adjustments contents
+B. target_settlement_date local-date alignment
+C. WeatherLocation vs SERIES_TO_CITY coordinates
+
+Store enough detail that the Audit & Validation tab can answer:
+
+- Is V2.2 calibration currently active?
+- Is the ERA5 UTC/local-date bug confirmed?
+- Are verification and forecasting coordinates materially mismatched?
+- Does any result change the Forward Test B fix list?
+
+4. UI BEHAVIOR
+
+Under “Final DB Checks Before Implementation,” display:
+
+- status badge
+- checked timestamp
+- short result summary
+- whether action is required
+- expandable details
+
+Example:
+
+Target settlement date alignment
+Status: FIX REQUIRED
+Checked: Aug 8, 2026
+Result: 9 of 15 OFFICIAL trades used a UTC calendar date that differed from the station-local settlement date.
+Action: Fix local-date extraction before Forward Test B.
+
+If a check has never run, show:
+Pending DB verification
+
+5. KEEP AUDIT FINDINGS SEPARATE FROM FIX STATUS
+
+Do not automatically mark a blocker Resolved just because an audit ran.
+
+A blocker should only be marked Resolved after:
+- the corresponding code fix is implemented,
+- tests pass,
+- and the fix is explicitly verified.
+
+6. SAFETY
+
+This task is audit/storage/UI only.
+
+Do not:
+- change trade selection
+- change probabilities
+- change stake sizing
+- enable real-money trading
+- delete calibration rows
+- modify historical trades
+- change FORWARD_TEST_START
+
+7. TESTS
+
+Add tests for:
+- storing audit results
+- latest-result retrieval
+- status rendering
+- pending fallback
+- multiple runs of the same check selecting the newest result
+- no mutation of trading/model data
+
+Push to replit-work only.
+Do not merge to main yet.

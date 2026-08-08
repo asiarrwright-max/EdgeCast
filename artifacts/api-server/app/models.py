@@ -12,6 +12,41 @@ from app.database import Base
 import app.models_v3  # noqa: F401, E402
 
 # ---------------------------------------------------------------------------
+# Audit Check Results — read-only findings store
+# ---------------------------------------------------------------------------
+
+
+class AuditCheckResult(Base):
+    """
+    One row per audit-check run.  The latest row per check_key is the
+    current status.  Older rows are retained as history.
+
+    Allowed statuses:
+        PENDING        — check has never run or result is stale
+        CONFIRMED      — finding is confirmed (issue exists or was documented)
+        CLEARED        — check ran and found no issue
+        FIX_REQUIRED   — check found an actionable problem
+        RESOLVED       — issue existed and has since been fixed and verified
+    """
+    __tablename__ = "audit_check_results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    check_key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    check_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    category: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    severity: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    action_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    source: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+# ---------------------------------------------------------------------------
 # Strategy v2 — Forecast Verification & Error Statistics
 # ---------------------------------------------------------------------------
 

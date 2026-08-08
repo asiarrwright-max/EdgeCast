@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db
 from app.scheduler import start_scheduler, shutdown_scheduler
+from app.services.audit_checks import run_all_audit_checks
+import app.database as _db_module
 from app.routers import audit, health, auth, dashboard, markets, weather, jobs, errors, analysis, paper_trades, analytics, v21_analytics
 from app.routers import v3_analytics  # V3: additive router import
 from app.routers import v22_analytics         # V2.2: isolated parallel challenger
@@ -23,6 +25,16 @@ async def lifespan(app: FastAPI):
     logger.info("EdgeCast starting up…")
     await init_db()
     await start_scheduler()
+    # Run read-only audit DB checks on startup so the Audit & Validation
+    # tab shows current results immediately. Failures are logged but never
+    # block startup or affect trading logic.
+    try:
+        async with _db_module.AsyncSessionLocal() as db:
+            await run_all_audit_checks(db)
+            await db.commit()
+        logger.info("Startup audit checks complete.")
+    except Exception as exc:
+        logger.warning("Startup audit checks failed (non-fatal): %s", exc)
     yield
     logger.info("EdgeCast shutting down…")
     await shutdown_scheduler()
