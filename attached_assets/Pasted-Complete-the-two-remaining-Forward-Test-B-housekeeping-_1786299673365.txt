@@ -1,0 +1,119 @@
+Complete the two remaining Forward Test B housekeeping items.
+
+Do not change model logic, trading logic, eligibility rules, probability math, stake sizing, calibration behavior, or FORWARD_TEST_START_B.
+
+====================================
+1. FIX TASK #65 — SCOPE DATE-ALIGNMENT AUDIT TO FTB
+====================================
+
+The live Audit & Validation tab currently shows the Target Settlement Date check as FIX_REQUIRED because it still sees known historical Forward Test A data.
+
+Forward Test B is active from:
+
+FORWARD_TEST_START_B = 2026-08-09T00:15:12Z
+
+Update the db_date_alignment audit check so current health is based only on trades at or after FORWARD_TEST_START_B.
+
+Requirements:
+
+- Historical Forward Test A date mismatches must remain visible as historical findings if useful.
+- They must NOT cause the current Forward Test B audit status to show FIX_REQUIRED.
+- The live FTB audit result should answer:
+  “Are any Forward Test B trades being verified against the wrong local settlement date?”
+
+Expected behavior right now:
+- If there are no FTB date mismatches, status should be CLEARED.
+- If there are zero eligible FTB trades yet, use an appropriate neutral/cleared result with a clear summary rather than treating old FTA defects as current failures.
+- Preserve the historical LA mismatch record; do not delete or rewrite it.
+
+Update the Audit & Validation UI so it clearly distinguishes:
+- Current Forward Test B health
+- Historical Forward Test A findings
+
+Add regression tests proving:
+- an FTA mismatch before 2026-08-09T00:15:12Z does not fail the FTB check
+- an FTB mismatch after the boundary does fail it
+- historical findings are not deleted
+
+====================================
+2. RESTORE GITHUB SYNC
+====================================
+
+The Forward Test B activation changes were committed locally but the previous GitHub push failed due to expired credentials.
+
+Restore GitHub synchronization using Replit’s normal managed GitHub credentials/workflow.
+
+Do NOT create or request a personal access token from me.
+
+Ensure the following are pushed to GitHub:
+
+- reviewed Forward Test B correction package
+- directional LTE/GTE rounding correction
+- activation change with FORWARD_TEST_START_B = 2026-08-09T00:15:12Z
+- Forward Test B phase/UI changes
+- Task #65 audit-scope fix from this task
+
+Use the existing repository:
+
+asiarrwright-max/EdgeCast
+
+Keep the normal branch workflow coherent:
+- main should reflect the production Forward Test B activation
+- replit-work should not contain accidental divergent/unmerged production changes
+
+Do not force-push over unrelated history.
+
+====================================
+3. VALIDATE
+====================================
+
+Run:
+
+pytest tests/ -q
+
+Run normal frontend/type checks.
+
+Then verify production after publishing the Task #65 fix:
+
+- /api/healthz returns 200
+- Audit & Validation loads
+- db_date_alignment now reflects FTB-era health
+- historical FTA mismatch is still documented separately
+- FORWARD_TEST_START_B remains exactly 2026-08-09T00:15:12Z
+- FTB trade counts/history are unchanged except for legitimate new trades
+- real-money readiness remains Not ready for real money
+- no historical trades are altered
+
+====================================
+4. COMMIT / PUSH / PUBLISH
+====================================
+
+Commit and push the housekeeping fix.
+
+Merge as needed so GitHub main matches the production code.
+
+Publish the updated production build.
+
+Do not change the Forward Test B start timestamp.
+
+====================================
+5. FINAL REPORT
+====================================
+
+Return:
+
+TASK #65 STATUS:
+DB_DATE_ALIGNMENT LIVE STATUS:
+HISTORICAL FTA FINDING PRESERVED: YES/NO
+TESTS:
+FRONTEND/TYPECHECK:
+GITHUB MAIN SHA:
+REPLIT-WORK SHA:
+GITHUB SYNC RESTORED: YES/NO
+PRODUCTION BUILD ID:
+FORWARD_TEST_START_B:
+PRODUCTION HEALTH:
+FTB COUNTS:
+REAL-MONEY READINESS:
+ANY ERRORS:
+HOUSEKEEPING COMPLETE: YES/NO
