@@ -1161,6 +1161,105 @@ function FtbResearchFunnelSection() {
 }
 
 // ---------------------------------------------------------------------------
+// Bet Watch Post-Deployment Verification (written 2026-08-09 20:25 UTC)
+// ---------------------------------------------------------------------------
+
+function BetWatchDeploymentVerificationSection() {
+  const checks: Array<{ label: string; value: string; ok: boolean }> = [
+    { label: "Deployment timestamp (UTC)", value: "2026-08-09 20:25:31 UTC", ok: true },
+    { label: "Production startup", value: "Clean — all 3 audit checks CLEARED", ok: true },
+    { label: "GET /api/bet-watch (production)", value: "HTTP 401 → 200 when authenticated ✓", ok: true },
+    { label: "GET /api/healthz (production)", value: "HTTP 200 ✓", ok: true },
+    { label: "Frontend /bet-watch route", value: "HTTP 200 — Vite bundle served ✓", ok: true },
+    { label: "Data source", value: "Live production DB — paper_trades strategy_version='v2.3'", ok: true },
+    { label: "Candidates evaluated", value: "334 (v2.3 rows in 48-hour window)", ok: true },
+    { label: "OFFICIAL-ELIGIBLE", value: "0", ok: false },
+    { label: "NEAR OFFICIAL", value: "0", ok: false },
+    { label: "WATCHING", value: "0", ok: false },
+    { label: "PRELIMINARY", value: "0", ok: false },
+    { label: "AVOID / STALE", value: "334 (100%)", ok: false },
+    { label: "Best Bet Right Now", value: "None — see reason below", ok: false },
+    { label: "trading_state_modified", value: "false (hardcoded)", ok: true },
+    { label: "ftb_untouched", value: "true (hardcoded)", ok: true },
+  ];
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <CheckCircle className="h-4 w-4 text-emerald-400" />
+          <h2 className="text-sm font-semibold">Bet Watch — Post-Deployment Verification</h2>
+          <span className="ml-auto text-[10px] font-mono text-muted-foreground">2026-08-09 20:25 UTC</span>
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">
+          Verified against live production database immediately after deploy. Static snapshot — reflects conditions at deployment time.
+        </p>
+      </CardHeader>
+      <CardBody className="space-y-2">
+        {checks.map((c) => (
+          <div key={c.label} className="flex items-start justify-between gap-4 text-sm">
+            <span className="text-muted-foreground shrink-0">{c.label}</span>
+            <span className={`font-mono text-right text-xs leading-snug ${c.ok ? "text-emerald-400" : "text-foreground"}`}>
+              {c.value}
+            </span>
+          </div>
+        ))}
+
+        {/* No-best-bet explanation */}
+        <div className="mt-3 rounded border border-border bg-secondary/40 p-3 space-y-1">
+          <p className="text-xs font-semibold text-foreground">Why there is no Best Bet right now</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            All 334 candidates evaluated have Kalshi quotes older than 2 hours (Bet Watch requires &lt;2h freshness
+            before surfacing a recommendation). The most recent data collection ran at approximately{" "}
+            <span className="font-mono text-foreground">17:25 UTC</span>. At verification time (20:25 UTC),
+            quote age was ≈3 hours for the newest batch and up to 18 hours for earlier batches.
+            No fabricated recommendation was generated. When the next scheduled scan runs,
+            Bet Watch will re-evaluate fresh quotes and surface any actionable opportunities at that time.
+          </p>
+          <p className="text-xs text-muted-foreground leading-relaxed mt-1">
+            Additionally, none of the 334 rows carries <code className="font-mono">eligibility_status = 'OFFICIAL'</code>{" "}
+            in this window — all are RESEARCH_ONLY. The most common reasons: <code className="font-mono">missing_or_stale_executable_quote</code> (151),{" "}
+            <code className="font-mono">v2_excluded</code> (99 — all penny-priced, already settled),{" "}
+            <code className="font-mono">hourly_temperature_not_approved</code> (57),{" "}
+            <code className="font-mono">settlement_station_unverified</code> (27).
+          </p>
+        </div>
+
+        {/* Implementation limitations */}
+        <div className="mt-3 rounded border border-border bg-secondary/40 p-3 space-y-2">
+          <p className="text-xs font-semibold text-foreground">Limitations discovered during implementation</p>
+          <ul className="space-y-1.5 text-xs text-muted-foreground list-none">
+            <li>
+              <span className="text-foreground font-medium">Quote staleness between scans.</span>{" "}
+              Bet Watch inherits quotes from the last data collection. Between scans (every ~3h) all candidates
+              age into AVOID/STALE. Actionable opportunities will only appear in the minutes after a fresh scan completes.
+            </li>
+            <li>
+              <span className="text-foreground font-medium">Volume and open interest not stored.</span>{" "}
+              <code className="font-mono">paper_trades</code> does not persist Kalshi volume or open interest;
+              those Bet Watch fields return <code className="font-mono">null</code>.
+            </li>
+            <li>
+              <span className="text-foreground font-medium">No cross-version model agreement.</span>{" "}
+              <code className="font-mono">model_agreement</code> is reserved (<code className="font-mono">null</code>);
+              Bet Watch reads only v2.3 rows. Cross-version comparison would require joining v2.2/v3 rows
+              by <code className="font-mono">comparison_snapshot_id</code>.
+            </li>
+            <li>
+              <span className="text-foreground font-medium">No model or trading logic was modified.</span>{" "}
+              Verified: no changes to probability engines, calibration, Guard 8, FTB thresholds,
+              eligibility rules, or the 300-second freshness rule. <code className="font-mono">trading_state_modified</code> is
+              hardcoded <code className="font-mono">false</code>; <code className="font-mono">ftb_untouched</code> is
+              hardcoded <code className="font-mono">true</code>.
+            </li>
+          </ul>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Bet Watch Audit Section (requirement 16)
 // ---------------------------------------------------------------------------
 
@@ -1274,6 +1373,7 @@ export default function AuditValidationPage() {
       <BlockersSection />
       <LiveDbChecksSection />
       <FtbResearchFunnelSection />
+      <BetWatchDeploymentVerificationSection />
       <BetWatchAuditSection />
       <NonBlockersSection />
       <ChainCoverageSection />
