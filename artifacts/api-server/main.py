@@ -14,6 +14,7 @@ from app.routers import v22_analytics         # V2.2: isolated parallel challeng
 from app.routers import strategy_comparison  # Unified cross-strategy comparison
 from app.routers import bet_watch             # Bet Watch — read-only decision support
 from app.routers import city_study            # City Specialization Study — read-only analytics
+from app.routers import verified_city_study   # Verified City Specialization — read-only
 
 logging.basicConfig(
     level=logging.INFO,
@@ -75,3 +76,4 @@ app.include_router(v22_analytics.router, prefix="/api")         # V2.2: parallel
 app.include_router(strategy_comparison.router, prefix="/api")   # Unified comparison
 app.include_router(bet_watch.router, prefix="/api")              # Bet Watch — read-only
 app.include_router(city_study.router, prefix="/api")             # City Study — read-only analytics
+app.include_router(verified_city_study.router, prefix="/api")    # Verified City Study — read-only

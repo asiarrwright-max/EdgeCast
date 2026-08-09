@@ -20,6 +20,7 @@ import {
   useGetBetWatch,
 } from "@workspace/api-client-react";
 import { CitySpecializationStudySection } from "./city-study-section";
+import { VerifiedCitySpecializationSection } from "./verified-city-section";
 import {
   ShieldCheck,
   ShieldAlert,
@@ -1513,6 +1514,7 @@ export default function AuditValidationPage() {
       <BetWatchDeploymentVerificationSection />
       <BetWatchAuditSection />
       <CityStudyCompletionSection />
+      <VerifiedCitySpecializationSection />
       <CitySpecializationStudySection />
       <NonBlockersSection />
       <ChainCoverageSection />

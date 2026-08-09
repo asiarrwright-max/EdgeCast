@@ -10,5 +10,6 @@ export * from "./v3-analytics";
 export * from "./strategy-comparison";
 export * from "./bet-watch";
 export * from "./city-study";
+export * from "./verified-city-study";
 export { setBaseUrl, setAuthTokenGetter } from "./custom-fetch";
 export type { AuthTokenGetter } from "./custom-fetch";

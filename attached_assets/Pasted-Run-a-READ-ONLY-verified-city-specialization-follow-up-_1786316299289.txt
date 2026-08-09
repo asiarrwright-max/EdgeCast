@@ -1,0 +1,185 @@
+Run a READ-ONLY verified-city specialization follow-up.
+
+Do not change model logic.
+Do not change Forward Test B.
+Do not change Bet Watch ranking yet.
+Do not change station verification flags until authoritative evidence is found.
+Do not change trading eligibility rules.
+
+Goal:
+Create the final specialization shortlist using ONLY cities whose Kalshi settlement station and settlement source are authoritatively verified.
+
+====================================
+1. VERIFY HIGHEST-RANKED UNVERIFIED CITIES
+====================================
+
+Prioritize these cities from the City Specialization Study:
+
+1. Houston
+2. Oklahoma City
+3. Dallas
+4. Minneapolis
+5. Miami
+
+For each city:
+
+- identify the active/recent Kalshi weather series/ticker
+- inspect authoritative Kalshi market rules / rules_primary / rules_secondary
+- confirm the exact settlement location/station
+- confirm the settlement data source is NWS-compatible
+- confirm the climate product/location used for settlement
+- compare against EdgeCast’s existing SETTLEMENT_STATIONS mapping
+- compare coordinates
+- compare timezone
+- report VERIFIED / NOT VERIFIED / CONFLICT / NO AUTHORITATIVE EVIDENCE
+
+Do not infer verification from airport code alone.
+
+Only authoritative Kalshi/CFTC contract documentation counts as verification.
+
+====================================
+2. UPDATE VERIFIED FLAG ONLY WHEN PROVEN
+====================================
+
+If authoritative evidence exactly confirms the existing EdgeCast station mapping:
+
+- update verified=True
+- preserve the evidence/source citation in the station config
+- do not change coordinates unless the authoritative settlement station differs from the current mapping
+
+If evidence conflicts:
+- do NOT mark verified
+- report the conflict
+- do not allow the city into the specialization shortlist
+
+If evidence is unavailable:
+- leave verified=False
+
+====================================
+3. VERIFIED-CITY RERANK
+====================================
+
+After verification, rerun the City Specialization Study using ONLY:
+
+- verified=True
+- nws_settlement=True
+
+Do not include unverified cities in the final ranking, even if they have strong historical metrics.
+
+Show:
+
+- rank
+- city
+- specialization score
+- settled sample
+- win rate
+- forecast MAE
+- quote/liquidity quality
+- FTB-era opportunity count
+- estimated clean OFFICIAL opportunities/week
+- confidence
+
+====================================
+4. FINAL 3-CITY SET
+====================================
+
+Choose the best 3-city specialization set using VERIFIED cities only.
+
+Prioritize:
+
+1. forecast accuracy
+2. trading/calibration quality
+3. sample size
+4. quote availability
+5. enough independent opportunities to validate
+
+Do not choose a city simply to fill three slots.
+
+If only two cities meet the quality bar, say:
+
+“Use 2 verified cities for now.”
+
+====================================
+5. BET WATCH RECOMMENDATION
+====================================
+
+Do not change Bet Watch yet.
+
+Instead report what Bet Watch SHOULD eventually prioritize if we adopt verified-city specialization:
+
+- primary cities
+- whether non-specialized cities should still appear as informational WATCHING only
+- whether “Best Bet Right Now” should be restricted to the verified specialization set
+
+My preference:
+Only verified specialization cities should be eligible for the primary “Best Bet Right Now” recommendation.
+
+Do not implement that behavior in this task.
+
+====================================
+6. AUDIT & VALIDATION
+====================================
+
+Publish a persistent section to Audit & Validation called:
+
+“Verified City Specialization”
+
+Show:
+
+- verification evidence/status for each city checked
+- cities newly verified
+- any conflicts
+- final verified-only ranking
+- recommended 2- or 3-city set
+- expected validation pace
+- plain-English conclusion
+
+At the top answer:
+
+“Which verified cities should EdgeCast specialize in?”
+
+====================================
+7. TESTS
+====================================
+
+Add tests proving:
+
+- unverified cities cannot appear in the verified specialization shortlist
+- non-NWS cities cannot appear
+- verification status changes only when authoritative evidence is present
+- conflicts do not silently overwrite station mappings
+- city ranking remains deterministic
+- no paper trades or FTB state are modified
+
+Run:
+pytest tests/ -q
+
+and normal frontend/type checks.
+
+====================================
+8. COMMIT / PUBLISH
+====================================
+
+This task may update settlement-station verification metadata ONLY when authoritative evidence confirms it.
+
+Do not alter forecasting/trading logic.
+
+Commit and push.
+Merge to main if tests pass.
+Publish the updated Audit & Validation section.
+
+Return:
+
+CITIES CHECKED:
+NEWLY VERIFIED:
+STILL UNVERIFIED:
+CONFLICTS:
+VERIFIED-ONLY RANKING:
+FINAL SPECIALIZATION SET:
+ESTIMATED OPPORTUNITIES/WEEK:
+TESTS:
+FRONTEND/TYPECHECK:
+COMMIT SHA:
+PRODUCTION BUILD ID:
+AUDIT SECTION LIVE: YES/NO
+MODEL/TRADING LOGIC CHANGED: YES/NO
