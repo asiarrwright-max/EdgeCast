@@ -28,6 +28,8 @@ from app.services.kalshi import SERIES_TO_CITY
 logger = logging.getLogger(__name__)
 
 FORWARD_TEST_START = datetime(2026, 8, 4, 22, 21, 44, tzinfo=timezone.utc)
+# FTB boundary — date-alignment check scope: only FTB trades determine the live status.
+FORWARD_TEST_START_B = datetime(2026, 8, 9, 0, 15, 12, tzinfo=timezone.utc)
 COORD_MISMATCH_THRESHOLD_MILES = 1.0
 
 # ---------------------------------------------------------------------------
@@ -191,23 +193,17 @@ async def _run_calibration_check(db: AsyncSession) -> AuditCheckResult:
 
 
 # ---------------------------------------------------------------------------
-# Check B — target_settlement_date UTC vs local-date alignment
+# Check B — target_settlement_date UTC vs local-date alignment (FTB-scoped)
 # ---------------------------------------------------------------------------
 
-async def _run_date_alignment_check(db: AsyncSession) -> AuditCheckResult:
-    rows = (await db.execute(
-        text(
-            "SELECT market_ticker, city, target_settlement_date, "
-            "settlement_timezone, eligibility_status "
-            "FROM paper_trades "
-            "WHERE eligibility_status = 'OFFICIAL' "
-            "  AND created_at >= :fts "
-            "ORDER BY created_at",
-        ),
-        {"fts": FORWARD_TEST_START},
-    )).fetchall()
-
-    total = len(rows)
+def _audit_date_alignment_rows(rows: list) -> tuple[
+    list[dict[str, Any]], int, int, list[str]
+]:
+    """
+    Classify a list of DB rows for the date-alignment check.
+    Returns (mismatches, date_only_count, no_tz_count, parse_errors).
+    Pure function — no DB I/O; safe to call from tests with synthetic rows.
+    """
     mismatches: list[dict[str, Any]] = []
     date_only_count = 0
     no_tz_count = 0
@@ -248,79 +244,154 @@ async def _run_date_alignment_check(db: AsyncSession) -> AuditCheckResult:
                 "local_date": local_date,
                 "timezone": tz_name,
                 "off_by_days": (
-                    (
-                        datetime.fromisoformat(date_str) -
-                        datetime.fromisoformat(local_date)
-                    ).days
-                ),
+                    datetime.fromisoformat(date_str) -
+                    datetime.fromisoformat(local_date)
+                ).days,
             })
 
-    checkable = total - date_only_count - no_tz_count - len(parse_errors)
-    mismatch_count = len(mismatches)
+    return mismatches, date_only_count, no_tz_count, parse_errors
 
+
+async def _run_date_alignment_check(db: AsyncSession) -> AuditCheckResult:
+    """
+    Check target_settlement_date UTC-vs-local alignment, split by era:
+    - FTB trades (created_at >= FORWARD_TEST_START_B) → determines the live status.
+    - FTA trades (FORWARD_TEST_START ≤ created_at < FORWARD_TEST_START_B) → preserved
+      in details as historical findings; do NOT affect the current status.
+    """
+    # --- Forward Test B trades (status-determining) ---
+    ftb_rows = (await db.execute(
+        text(
+            "SELECT market_ticker, city, target_settlement_date, "
+            "settlement_timezone, eligibility_status "
+            "FROM paper_trades "
+            "WHERE eligibility_status = 'OFFICIAL' "
+            "  AND created_at >= :ftsb "
+            "ORDER BY created_at",
+        ),
+        {"ftsb": FORWARD_TEST_START_B},
+    )).fetchall()
+
+    # --- Forward Test A trades (historical record only) ---
+    fta_rows = (await db.execute(
+        text(
+            "SELECT market_ticker, city, target_settlement_date, "
+            "settlement_timezone, eligibility_status "
+            "FROM paper_trades "
+            "WHERE eligibility_status = 'OFFICIAL' "
+            "  AND created_at >= :fts "
+            "  AND created_at < :ftsb "
+            "ORDER BY created_at",
+        ),
+        {"fts": FORWARD_TEST_START, "ftsb": FORWARD_TEST_START_B},
+    )).fetchall()
+
+    # Classify each era
+    ftb_mismatches, ftb_date_only, ftb_no_tz, ftb_parse_errors = \
+        _audit_date_alignment_rows(ftb_rows)
+    fta_mismatches, _fta_date_only, _fta_no_tz, _fta_parse_errors = \
+        _audit_date_alignment_rows(fta_rows)
+
+    ftb_total = len(ftb_rows)
+    ftb_checkable = ftb_total - ftb_date_only - ftb_no_tz - len(ftb_parse_errors)
+    ftb_mismatch_count = len(ftb_mismatches)
+    fta_total = len(fta_rows)
+    fta_mismatch_count = len(fta_mismatches)
+
+    # --- Status: FTB trades only ---
+    if ftb_mismatch_count > 0:
+        status, action_required = "FIX_REQUIRED", True
+        summary = (
+            f"Forward Test B: {ftb_mismatch_count} of {ftb_total} OFFICIAL trades used "
+            f"a UTC calendar date instead of the station-local settlement date. "
+            f"ERA5 verification for these trades is from the wrong day."
+        )
+    elif ftb_total == 0:
+        status, action_required = "CLEARED", False
+        summary = (
+            "Forward Test B: No OFFICIAL trades yet (FTB started 2026-08-09). "
+            "Check will update as trades accumulate. "
+            f"({fta_total} historical FTA trade(s) are excluded from FTB health.)"
+        )
+    elif ftb_date_only == ftb_total:
+        status, action_required = "CLEARED", False
+        summary = (
+            f"Forward Test B: All {ftb_total} OFFICIAL trades store "
+            f"target_settlement_date as a date-only string — UTC/local mismatch "
+            f"cannot occur with this format."
+        )
+    else:
+        status, action_required = "CLEARED", False
+        summary = (
+            f"Forward Test B: Checked {ftb_checkable} of {ftb_total} OFFICIAL trades. "
+            f"No UTC/local date mismatches detected."
+        )
+
+    # --- Detail lines ---
     detail_lines = [
-        f"OFFICIAL forward-test trades examined: {total}",
-        f"  Date-only strings (no time component — no UTC issue possible): {date_only_count}",
-        f"  Checkable (full UTC timestamps with known timezone): {checkable}",
-        f"  No timezone available (skipped): {no_tz_count}",
-        f"  Parse errors: {len(parse_errors)}",
-        f"  UTC date ≠ local station date (mismatches): {mismatch_count}",
+        "━━━ FORWARD TEST B — current health (determines status) ━━━",
+        f"OFFICIAL FTB trades (created ≥ 2026-08-09T00:15:12Z): {ftb_total}",
+        f"  Date-only strings (no UTC/local issue possible): {ftb_date_only}",
+        f"  Checkable (UTC timestamps with known timezone): {ftb_checkable}",
+        f"  No timezone available (skipped): {ftb_no_tz}",
+        f"  Parse errors: {len(ftb_parse_errors)}",
+        f"  UTC date ≠ local station date (mismatches): {ftb_mismatch_count}",
     ]
-    if mismatches:
-        detail_lines.append("\nMismatched trades:")
-        for m in mismatches:
+    if ftb_mismatches:
+        detail_lines.append("\nFTB mismatched trades:")
+        for m in ftb_mismatches:
             detail_lines.append(
                 f"  {m['ticker']} ({m['city']}): "
-                f"UTC date used = {m['utc_date_used']}, "
+                f"UTC date = {m['utc_date_used']}, "
                 f"correct local date = {m['local_date']} "
                 f"(off by {m['off_by_days']} day(s), tz={m['timezone']})"
             )
         detail_lines.append(
             "\nImpact: ERA5/GHCND verification for these trades fetched "
-            "temperatures from the wrong day. σ/bias statistics fed back "
-            "into the probability engine are corrupted for these cities/dates."
+            "temperatures from the wrong day."
         )
-    elif date_only_count == total:
+    elif ftb_total == 0:
         detail_lines.append(
-            "\ntarget_settlement_date is stored as a date-only string (no time component). "
-            "The UTC/local mismatch cannot occur with this storage format. "
-            "The suspected issue is NOT present."
+            "\nNo FTB trades yet. Fix #3 (forecast_verifier._local_settlement_date) "
+            "is in place. Status remains CLEARED as trades accumulate."
         )
     else:
         detail_lines.append(
-            "\nAll checkable trades use the correct local settlement date. "
-            "No UTC/local mismatch detected."
+            "\nAll checkable FTB trades use the correct local settlement date. "
+            "Fix #3 (ERA5 local-date extraction) is working correctly."
         )
+    if ftb_parse_errors:
+        detail_lines.append(f"\nFTB parse errors: {'; '.join(ftb_parse_errors)}")
 
-    if parse_errors:
-        detail_lines.append(f"\nParse errors: {'; '.join(parse_errors)}")
-
-    if mismatch_count > 0:
-        status, action_required = "FIX_REQUIRED", True
-        summary = (
-            f"{mismatch_count} of {total} OFFICIAL trades used a UTC calendar date "
-            f"that differed from the station-local settlement date. "
-            f"ERA5 verification data for these trades is from the wrong day."
+    # Historical FTA section
+    detail_lines.extend([
+        "",
+        "━━━ FORWARD TEST A — historical findings (informational only) ━━━",
+        f"OFFICIAL FTA trades (2026-08-04 – 2026-08-09T00:15:11Z): {fta_total}",
+        f"  UTC date ≠ local station date: {fta_mismatch_count}",
+    ])
+    if fta_mismatches:
+        detail_lines.append(
+            f"\n  {fta_mismatch_count} FTA trade(s) used a UTC calendar date instead of "
+            "the station-local date. This is the confirmed Fix #3 bug. "
+            "Historical FTA records are preserved and NOT altered."
         )
-    elif date_only_count == total:
-        status, action_required = "CLEARED", False
-        summary = (
-            f"All {total} OFFICIAL trades store target_settlement_date as a date-only "
-            f"string. The UTC/local mismatch issue does not apply to this storage format."
-        )
-    elif total == 0:
-        status, action_required = "CLEARED", False
-        summary = "No OFFICIAL forward-test trades found. Check will re-run as trades accumulate."
+        detail_lines.append("\nFTA mismatched trades:")
+        for m in fta_mismatches:
+            detail_lines.append(
+                f"  {m['ticker']} ({m['city']}): "
+                f"UTC date = {m['utc_date_used']}, "
+                f"correct local date = {m['local_date']} "
+                f"(tz={m['timezone']})"
+            )
+    elif fta_total > 0:
+        detail_lines.append("\n  No UTC/local mismatches found in FTA trades.")
     else:
-        status, action_required = "CLEARED", False
-        summary = (
-            f"Checked {checkable} of {total} OFFICIAL trades. "
-            f"No UTC/local date mismatches detected."
-        )
+        detail_lines.append("\n  No FTA OFFICIAL trades found.")
 
     return AuditCheckResult(
         check_key="db_date_alignment",
-        check_name="Target Settlement Date Local-Date Alignment",
+        check_name="Target Settlement Date — FTB Local-Date Health",
         category="era5_verification",
         status=status,
         severity="CRITICAL",
@@ -330,13 +401,15 @@ async def _run_date_alignment_check(db: AsyncSession) -> AuditCheckResult:
         checked_at=datetime.now(timezone.utc),
         source="audit_checks_service",
         metadata_json={
-            "total_official_trades": total,
-            "date_only_count": date_only_count,
-            "checkable_count": checkable,
-            "no_tz_count": no_tz_count,
-            "mismatch_count": mismatch_count,
-            "parse_error_count": len(parse_errors),
-            "mismatches": mismatches,
+            "ftb_total": ftb_total,
+            "ftb_date_only_count": ftb_date_only,
+            "ftb_checkable_count": ftb_checkable,
+            "ftb_no_tz_count": ftb_no_tz,
+            "ftb_mismatch_count": ftb_mismatch_count,
+            "ftb_mismatches": ftb_mismatches,
+            "fta_total": fta_total,
+            "fta_mismatch_count": fta_mismatch_count,
+            "fta_mismatches": fta_mismatches,
         },
     )
 

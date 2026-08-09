@@ -262,51 +262,62 @@ class TestRunAllAuditChecks:
     @pytest.mark.asyncio
     async def test_date_mismatch_detected(self):
         from app.services.audit_checks import _run_date_alignment_check
-        db = _make_mock_db()
-
-        # Simulate a Dallas trade whose UTC close time crosses midnight CDT
-        # 2026-08-07T03:00:00+00:00 = 2026-08-06 22:00 CDT → local date = 2026-08-06
-        # but [:10] gives "2026-08-07" → mismatch!
+        # Simulate a Dallas FTB trade whose UTC close time crosses midnight CDT
+        # 2026-08-10T03:00:00+00:00 = 2026-08-09 22:00 CDT → local date = 2026-08-09
+        # but [:10] gives "2026-08-10" → mismatch!
         mismatch_row = MagicMock()
-        mismatch_row.market_ticker = "KXHIGHTDAL-26AUG06-T95"
+        mismatch_row.market_ticker = "KXHIGHTDAL-26AUG10-T95"
         mismatch_row.city = "Dallas"
-        mismatch_row.target_settlement_date = "2026-08-07T03:00:00+00:00"
+        mismatch_row.target_settlement_date = "2026-08-10T03:00:00+00:00"
         mismatch_row.settlement_timezone = "America/Chicago"
         mismatch_row.eligibility_status = "OFFICIAL"
 
-        fetch = MagicMock()
-        fetch.fetchall.return_value = [mismatch_row]
-        db.execute.return_value = fetch
+        # FTB query (call 1) returns the mismatch row; FTA query (call 2) returns empty
+        def _make_fetch(rows):
+            f = MagicMock()
+            f.fetchall.return_value = rows
+            f.scalars.return_value.all.return_value = []
+            return f
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.flush = AsyncMock()
+        db.execute.side_effect = [_make_fetch([mismatch_row]), _make_fetch([])]
 
         result = await _run_date_alignment_check(db)
         assert result.status == "FIX_REQUIRED"
         assert result.action_required is True
         meta = result.metadata_json
-        assert meta["mismatch_count"] == 1
-        assert meta["mismatches"][0]["utc_date_used"] == "2026-08-07"
-        assert meta["mismatches"][0]["local_date"] == "2026-08-06"
+        assert meta["ftb_mismatch_count"] == 1
+        assert meta["ftb_mismatches"][0]["utc_date_used"] == "2026-08-10"
+        assert meta["ftb_mismatches"][0]["local_date"] == "2026-08-09"
 
     @pytest.mark.asyncio
     async def test_date_only_strings_produce_cleared(self):
         from app.services.audit_checks import _run_date_alignment_check
-        db = _make_mock_db()
-
         row = MagicMock()
-        row.market_ticker = "KXHIGHTDAL-26AUG06-T95"
+        row.market_ticker = "KXHIGHTDAL-26AUG10-T95"
         row.city = "Dallas"
-        row.target_settlement_date = "2026-08-06"  # date-only, no time component
+        row.target_settlement_date = "2026-08-10"  # date-only, no time component
         row.settlement_timezone = "America/Chicago"
         row.eligibility_status = "OFFICIAL"
 
-        fetch = MagicMock()
-        fetch.fetchall.return_value = [row]
-        db.execute.return_value = fetch
+        def _make_fetch(rows):
+            f = MagicMock()
+            f.fetchall.return_value = rows
+            f.scalars.return_value.all.return_value = []
+            return f
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.flush = AsyncMock()
+        db.execute.side_effect = [_make_fetch([row]), _make_fetch([])]
 
         result = await _run_date_alignment_check(db)
         assert result.status == "CLEARED"
         assert result.action_required is False
-        assert result.metadata_json["date_only_count"] == 1
-        assert result.metadata_json["mismatch_count"] == 0
+        assert result.metadata_json["ftb_date_only_count"] == 1
+        assert result.metadata_json["ftb_mismatch_count"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -419,3 +430,223 @@ class TestGetCheckResults:
         # Newest row (id=3, status=FIX_REQUIRED, checked_at hour=2) should win
         assert results["db_date_alignment"]["status"] == "FIX_REQUIRED"
         assert results["db_date_alignment"]["summary"] == "run 2"
+
+
+# ---------------------------------------------------------------------------
+# Regression tests — FTB-scoped date-alignment check (Task #65)
+# ---------------------------------------------------------------------------
+
+def _make_row(
+    ticker: str,
+    city: str,
+    target_settlement_date: str,
+    settlement_timezone: str = "America/Los_Angeles",
+    eligibility_status: str = "OFFICIAL",
+) -> MagicMock:
+    """Minimal mock row matching the columns selected by _run_date_alignment_check."""
+    r = MagicMock()
+    r.market_ticker = ticker
+    r.city = city
+    r.target_settlement_date = target_settlement_date
+    r.settlement_timezone = settlement_timezone
+    r.eligibility_status = eligibility_status
+    return r
+
+
+def _make_two_call_db(ftb_rows: list, fta_rows: list) -> AsyncMock:
+    """
+    Return a mock DB session where the first execute() call returns ftb_rows
+    and the second returns fta_rows (matching _run_date_alignment_check call order).
+    """
+    def _fetch_result(rows):
+        result = MagicMock()
+        result.fetchall.return_value = rows
+        result.scalars.return_value.all.return_value = []
+        return result
+
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.flush = AsyncMock()
+    db.execute.side_effect = [
+        _fetch_result(ftb_rows),   # first call: FTB query
+        _fetch_result(fta_rows),   # second call: FTA query
+    ]
+    return db
+
+
+class TestAuditDateAlignmentRows:
+    """Unit tests for the pure _audit_date_alignment_rows helper."""
+
+    def test_date_only_string_not_flagged(self):
+        from app.services.audit_checks import _audit_date_alignment_rows
+        row = _make_row("T1", "Los Angeles", "2026-08-09")  # no 'T' → date-only
+        mismatches, date_only, no_tz, errors = _audit_date_alignment_rows([row])
+        assert mismatches == []
+        assert date_only == 1
+        assert no_tz == 0
+        assert errors == []
+
+    def test_utc_mismatch_flagged(self):
+        from app.services.audit_checks import _audit_date_alignment_rows
+        # LA: UTC 2026-08-08T04:54:08Z → local PDT date is 2026-08-07
+        # raw[:10] = "2026-08-08" ≠ local "2026-08-07" → mismatch
+        row = _make_row(
+            "LA-TMAX-2026-08-08",
+            "Los Angeles",
+            "2026-08-08T04:54:08+00:00",
+            "America/Los_Angeles",
+        )
+        mismatches, date_only, no_tz, errors = _audit_date_alignment_rows([row])
+        assert len(mismatches) == 1
+        assert mismatches[0]["utc_date_used"] == "2026-08-08"
+        assert mismatches[0]["local_date"] == "2026-08-07"
+        assert mismatches[0]["off_by_days"] == 1
+
+    def test_matching_date_not_flagged(self):
+        from app.services.audit_checks import _audit_date_alignment_rows
+        # UTC noon in LA timezone → same calendar date
+        row = _make_row(
+            "OK-TMAX-2026-08-09",
+            "Oklahoma City",
+            "2026-08-09T18:00:00+00:00",
+            "America/Chicago",
+        )
+        mismatches, date_only, no_tz, errors = _audit_date_alignment_rows([row])
+        assert mismatches == []
+        assert date_only == 0
+
+
+class TestDateAlignmentFTBBoundary:
+    """
+    Core regression: FTA mismatches must not affect FTB check status.
+    """
+
+    @pytest.mark.asyncio
+    async def test_fta_mismatch_does_not_fail_ftb_check(self):
+        """
+        A UTC/local mismatch on an FTA trade (before FORWARD_TEST_START_B)
+        must NOT cause the db_date_alignment check to return FIX_REQUIRED.
+        """
+        from app.services.audit_checks import _run_date_alignment_check
+        # Historical LA mismatch — FTA trade
+        fta_row = _make_row(
+            "LA-TMAX-2026-08-08",
+            "Los Angeles",
+            "2026-08-08T04:54:08+00:00",
+            "America/Los_Angeles",
+        )
+        db = _make_two_call_db(ftb_rows=[], fta_rows=[fta_row])
+        result = await _run_date_alignment_check(db)
+
+        assert result.status == "CLEARED", (
+            f"FTA mismatch must not fail FTB status. Got: {result.status}\n{result.summary}"
+        )
+        assert not result.action_required
+
+    @pytest.mark.asyncio
+    async def test_ftb_mismatch_fails_check(self):
+        """
+        A UTC/local mismatch on an FTB trade (created at or after FORWARD_TEST_START_B)
+        MUST cause the db_date_alignment check to return FIX_REQUIRED.
+        """
+        from app.services.audit_checks import _run_date_alignment_check
+        ftb_row = _make_row(
+            "LA-TMAX-2026-08-10",
+            "Los Angeles",
+            "2026-08-10T04:00:00+00:00",  # UTC Aug 10, local PDT = Aug 9 → mismatch
+            "America/Los_Angeles",
+        )
+        db = _make_two_call_db(ftb_rows=[ftb_row], fta_rows=[])
+        result = await _run_date_alignment_check(db)
+
+        assert result.status == "FIX_REQUIRED", (
+            f"FTB mismatch must fail status. Got: {result.status}\n{result.summary}"
+        )
+        assert result.action_required
+
+    @pytest.mark.asyncio
+    async def test_historical_fta_findings_preserved_in_details(self):
+        """
+        Even when FTB status is CLEARED, the details must include
+        the historical FTA mismatch record.
+        """
+        from app.services.audit_checks import _run_date_alignment_check
+        fta_row = _make_row(
+            "LA-TMAX-2026-08-08",
+            "Los Angeles",
+            "2026-08-08T04:54:08+00:00",
+            "America/Los_Angeles",
+        )
+        db = _make_two_call_db(ftb_rows=[], fta_rows=[fta_row])
+        result = await _run_date_alignment_check(db)
+
+        assert result.status == "CLEARED"
+        assert "FORWARD TEST A" in result.details, (
+            "Historical FTA section must appear in details even when FTB is CLEARED."
+        )
+        assert "LA-TMAX-2026-08-08" in result.details, (
+            "The specific FTA mismatch ticker must appear in the details."
+        )
+        assert result.metadata_json["fta_mismatch_count"] == 1
+        assert result.metadata_json["ftb_mismatch_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_no_ftb_trades_yet_is_cleared(self):
+        """Zero FTB trades → CLEARED (not FIX_REQUIRED), with informational summary."""
+        from app.services.audit_checks import _run_date_alignment_check
+        db = _make_two_call_db(ftb_rows=[], fta_rows=[])
+        result = await _run_date_alignment_check(db)
+        assert result.status == "CLEARED"
+        assert not result.action_required
+        assert "No OFFICIAL trades yet" in result.summary or "accumulate" in result.summary
+
+    @pytest.mark.asyncio
+    async def test_clean_ftb_trade_is_cleared(self):
+        """An FTB trade with matching UTC and local date → CLEARED."""
+        from app.services.audit_checks import _run_date_alignment_check
+        # UTC noon in Chicago timezone → same calendar date
+        ftb_row = _make_row(
+            "OKC-TMAX-2026-08-10",
+            "Oklahoma City",
+            "2026-08-10T18:00:00+00:00",
+            "America/Chicago",
+        )
+        db = _make_two_call_db(ftb_rows=[ftb_row], fta_rows=[])
+        result = await _run_date_alignment_check(db)
+        assert result.status == "CLEARED"
+        assert result.metadata_json["ftb_mismatch_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_metadata_exposes_both_eras(self):
+        """metadata_json must include both FTB and FTA counts."""
+        from app.services.audit_checks import _run_date_alignment_check
+        fta_row = _make_row(
+            "LA-FTA",
+            "Los Angeles",
+            "2026-08-08T04:54:08+00:00",
+            "America/Los_Angeles",
+        )
+        ftb_row = _make_row(
+            "OKC-FTB",
+            "Oklahoma City",
+            "2026-08-10T18:00:00+00:00",
+            "America/Chicago",
+        )
+        db = _make_two_call_db(ftb_rows=[ftb_row], fta_rows=[fta_row])
+        result = await _run_date_alignment_check(db)
+
+        md = result.metadata_json
+        assert "ftb_total" in md
+        assert "fta_total" in md
+        assert md["ftb_total"] == 1
+        assert md["fta_total"] == 1
+
+    @pytest.mark.asyncio
+    async def test_check_name_reflects_ftb_scope(self):
+        """check_name must indicate FTB scope so the UI label is unambiguous."""
+        from app.services.audit_checks import _run_date_alignment_check
+        db = _make_two_call_db(ftb_rows=[], fta_rows=[])
+        result = await _run_date_alignment_check(db)
+        assert "FTB" in result.check_name or "Forward Test B" in result.check_name, (
+            f"check_name should reference FTB scope. Got: {result.check_name!r}"
+        )
