@@ -1,0 +1,162 @@
+Run a READ-ONLY analysis to determine whether increasing EdgeCast collection frequency would materially accelerate Forward Test B.
+
+Do not change the scheduler yet.
+Do not change model logic, eligibility rules, quote freshness, close-time rules, correlation rules, probability thresholds, stake sizing, or FORWARD_TEST_START_B.
+
+Goal:
+Measure how many additional UNIQUE OFFICIAL Forward Test B opportunities we would likely capture by scanning more frequently, versus simply re-evaluating the same markets more often.
+
+Forward Test B start:
+2026-08-09T00:15:12Z
+
+====================================
+1. CURRENT COLLECTION CADENCE
+====================================
+
+Report:
+- current scheduled scan frequency
+- actual collection run timestamps since FTB start
+- average hours between successful collection runs
+- failed or skipped runs
+- average markets evaluated per run
+
+====================================
+2. UNIQUE MARKET OPPORTUNITY ANALYSIS
+====================================
+
+For every Kalshi weather market evaluated since FTB start, reconstruct whether it could have become OFFICIAL at any point between scheduled scans.
+
+Compare these hypothetical cadences:
+
+- current cadence
+- every 2 hours
+- every 1 hour
+
+For each cadence report:
+
+- total evaluations
+- unique market tickers evaluated
+- unique market+direction OFFICIAL decisions
+- unique city/date weather events represented
+- additional UNIQUE OFFICIAL trades versus current cadence
+- additional independent city/date events versus current cadence
+
+Do not count repeated scans of the same market/direction as new evidence.
+
+Respect the existing duplicate and correlated-outcome rules.
+
+====================================
+3. MISSED-OPPORTUNITY ANALYSIS
+====================================
+
+Identify markets that were RESEARCH_ONLY or not eligible on one run but could plausibly have become OFFICIAL before the next scheduled run because of:
+
+- stale/missing executable quote becoming fresh
+- ask price movement
+- forecast/probability change
+- market becoming newly discovered
+- another timing-related eligibility condition
+
+For each missed opportunity show:
+
+- ticker
+- city
+- target date
+- direction
+- original reason for exclusion
+- approximate time it would have first become eligible
+- whether an hourly scan would likely have captured it
+- whether a 2-hour scan would likely have captured it
+
+Do not fabricate intermediate market prices or forecasts if they were not recorded.
+If historical snapshots are insufficient to know, mark it UNKNOWN.
+
+====================================
+4. DAILY MARKET BOTTLENECK
+====================================
+
+Determine whether Forward Test B is primarily limited by:
+
+A. scan frequency
+B. number of distinct Kalshi weather markets available
+C. current eligibility strictness
+D. correlated-outcome limits
+E. verified city/station coverage
+F. some other bottleneck
+
+Quantify this as much as the stored data allows.
+
+Specifically answer:
+
+- How many distinct city/date weather events are available to EdgeCast per day?
+- How many currently produce at least one OFFICIAL trade?
+- How many are rejected solely because we missed the usable quote/timing window?
+- How many are rejected for reasons that scanning more frequently would NOT solve?
+
+====================================
+5. CITY / MARKET COVERAGE
+====================================
+
+Report all current verified cities/series that are eligible for FTB.
+
+Then identify additional Kalshi weather cities/series that EdgeCast currently sees but does not use for OFFICIAL trading.
+
+For each additional city, state whether the blocker is:
+
+- settlement station not verified
+- coordinates not verified
+- parser unsupported
+- no forecast mapping
+- no Kalshi series mapping
+- insufficient error data
+- other
+
+Do not add any new cities yet.
+
+====================================
+6. ESTIMATED EFFECT ON TIME TO 50
+====================================
+
+Using actual FTB collection data so far, estimate:
+
+CURRENT CADENCE:
+- expected OFFICIAL settled trades/day
+- estimated days to 10 settled
+- estimated days to 25 settled
+- estimated days to 50 settled
+
+2-HOUR CADENCE:
+same estimates
+
+1-HOUR CADENCE:
+same estimates
+
+Use ranges, not false precision.
+
+Also estimate the effect of adding more VERIFIED city/date events separately from changing scan frequency.
+
+====================================
+7. RECOMMENDATION
+====================================
+
+Answer:
+
+1. Would hourly scanning materially accelerate the number of UNIQUE clean FTB trades?
+2. Would 2-hour scanning capture most of the same benefit with less load?
+3. Is expanding verified city/market coverage likely to help more than increasing scan frequency?
+4. What is the safest single change if our goal is reaching 50 settled trades faster without weakening the experiment?
+5. Would any proposed change compromise comparability of Forward Test B? Explain.
+
+Return findings only.
+
+Do not change code.
+Do not change scheduler.
+Do not publish.
+Do not merge.
+Do not alter historical or current trades.
+
+If useful, publish the findings into the Audit & Validation tab under a new section:
+
+“Forward Test B — Collection Pace Analysis”
+
+so the results remain visible for future review.
