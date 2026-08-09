@@ -38,6 +38,7 @@ import {
   XCircle as XCircleIcon,
   Loader2,
   Eye,
+  MapPin,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -1162,6 +1163,141 @@ function FtbResearchFunnelSection() {
 }
 
 // ---------------------------------------------------------------------------
+// City Specialization Study — Completion Snapshot (2026-08-09)
+// ---------------------------------------------------------------------------
+
+function CityStudyCompletionSection() {
+  const rankings: Array<{ rank: number; city: string; score: string; wr: string; settled: number; mae: string; nws: boolean; verified: boolean; note: string }> = [
+    { rank: 1, city: "Denver",        score: "~71",  wr: "50.2%", settled: 265, mae: "2.90°F", nws: true,  verified: true,  note: "Best trading signal (v2.2: 57.1%, NO/range 71.4%); cold bias –2.24°F; station verified." },
+    { rank: 2, city: "Houston",       score: "~66",  wr: "22.6%", settled: 124, mae: "0.87°F", nws: true,  verified: false, note: "Best forecast accuracy of any city; win rate does not yet reflect forecast quality." },
+    { rank: 3, city: "Oklahoma City", score: "~63",  wr: "43.8%", settled: 137, mae: "2.59°F", nws: true,  verified: false, note: "Steady improving trend across all model versions; KOKC NWS-compatible." },
+    { rank: 4, city: "New York City", score: "~63",  wr: "39.1%", settled: 156, mae: "1.72°F", nws: true,  verified: true,  note: "Verified station (Central Park). Best forecast accuracy among verified stations." },
+    { rank: 5, city: "Dallas",        score: "~60",  wr: "32.5%", settled: 246, mae: "2.19°F", nws: true,  verified: false, note: "Moderate trading and forecast quality; consistent sample size." },
+    { rank: 6, city: "Minneapolis",   score: "~52",  wr: "46.1%", settled: 128, mae: "5.63°F", nws: true,  verified: false, note: "Decent win rate but catastrophic cold bias (–5.59°F) tanks forecast score." },
+    { rank: 7, city: "Miami",         score: "~50",  wr: "37.8%", settled: 135, mae: "3.63°F", nws: true,  verified: false, note: "All metrics middling." },
+    { rank: 8, city: "Los Angeles",   score: "~low", wr: "8.9%",  settled: 617, mae: "2.68°F", nws: true,  verified: false, note: "Largest dataset but dominated by YES/hourly trades with 0% win rate. +2.68°F warm bias." },
+    { rank: 9, city: "Chicago",       score: "~low", wr: "6.1%",  settled: 295, mae: "UNKNOWN", nws: true,  verified: true,  note: "Trading dominated by hourly contracts (v2_excluded); daily contract performance obscured." },
+    { rank: 10, city: "Washington DC", score: "0",  wr: "8.8%",  settled: 273, mae: "UNKNOWN", nws: false, verified: false, note: "NON-NWS settlement (The Weather Company). Excluded from all recommendations." },
+  ];
+
+  const insights = [
+    "NO-direction trades significantly outperform YES across all cities — YES/range win rate is 0% in aggregate.",
+    "Denver's NO/range contracts achieve 71.4% win rate (v2.2 era); this is the sharpest signal in the dataset.",
+    "Houston's MAE 0.87°F is extraordinary but its 22.6% win rate suggests model-to-market conversion issues.",
+    "Minneapolis is held back by a –5.59°F systematic cold bias that dominates its forecast error.",
+    "Washington DC uses The Weather Company (non-NWS) for settlement — EdgeCast must never trade it.",
+    "Volume / open interest columns are always NULL in the database and cannot be used for liquidity scoring.",
+    "FTB era (v2.3) started 2026-08-09 — sample too small for meaningful FTB-era rankings yet.",
+    "Sample-size warning: Denver v2.2 has 49 settled trades — moderate confidence, not conclusive.",
+  ];
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <MapPin className="h-4 w-4 text-primary" />
+          <h2 className="text-sm font-semibold">City Specialization Study — Completion Snapshot</h2>
+          <span className="text-[10px] font-mono text-muted-foreground ml-auto">2026-08-09 · Read-only</span>
+        </div>
+      </CardHeader>
+      <CardBody className="space-y-4">
+        {/* Recommendation box */}
+        <div className="rounded-lg border border-blue-800/50 bg-blue-900/20 p-3 space-y-1">
+          <p className="text-xs font-semibold text-blue-300">B. SPECIALIZE_THREE_CITIES</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Denver leads on total score (~71/100) with 265 settled trades and a 50.2% all-time win rate. Evidence is
+            sufficient to suggest reducing focus but not conclusive enough for a single-city bet. Specializing on one
+            city now would cut volume ~80–90%, extending FTB validation timelines substantially.
+          </p>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            A 3-city focus (Denver · Houston · Oklahoma City) preserves enough volume for timely FTB validation while
+            concentrating on the highest-quality markets.
+          </p>
+          <p className="text-xs font-mono text-blue-400 mt-1">Best 3-city set: Denver · Houston · Oklahoma City</p>
+        </div>
+
+        {/* Rankings table */}
+        <div>
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">City Rankings (Score = 30% forecast · 25% trading · 20% liquidity · 15% sample · 10% station)</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[10px] font-mono">
+              <thead>
+                <tr className="text-muted-foreground border-b border-border">
+                  <th className="pb-1 pr-2 text-left">#</th>
+                  <th className="pb-1 pr-2 text-left">City</th>
+                  <th className="pb-1 pr-2 text-right">Score</th>
+                  <th className="pb-1 pr-2 text-right">Settled</th>
+                  <th className="pb-1 pr-2 text-right">Win Rate</th>
+                  <th className="pb-1 pr-2 text-right">MAE</th>
+                  <th className="pb-1 pr-2 text-center">V✓</th>
+                  <th className="pb-1 pr-2 text-center">NWS</th>
+                  <th className="pb-1 text-left">Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rankings.map((r) => (
+                  <tr key={r.city} className={`border-b border-border/30 ${!r.nws ? "opacity-40" : ""}`}>
+                    <td className="py-0.5 pr-2 text-muted-foreground">{r.rank}</td>
+                    <td className="py-0.5 pr-2 font-semibold text-foreground">{r.city}</td>
+                    <td className={`py-0.5 pr-2 text-right ${r.score.startsWith("~7") || r.score.startsWith("~6") ? "text-emerald-400" : "text-muted-foreground"}`}>{r.score}</td>
+                    <td className="py-0.5 pr-2 text-right">{r.settled}</td>
+                    <td className={`py-0.5 pr-2 text-right ${parseFloat(r.wr) >= 45 ? "text-emerald-400" : parseFloat(r.wr) < 20 ? "text-red-400" : ""}`}>{r.wr}</td>
+                    <td className="py-0.5 pr-2 text-right text-muted-foreground">{r.mae}</td>
+                    <td className="py-0.5 pr-2 text-center">{r.verified ? "✓" : "·"}</td>
+                    <td className={`py-0.5 pr-2 text-center ${r.nws ? "text-emerald-400" : "text-red-400"}`}>{r.nws ? "✓" : "✗"}</td>
+                    <td className="py-0.5 text-muted-foreground max-w-[300px] truncate">{r.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Key insights */}
+        <div>
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">Key Insights</p>
+          <ul className="space-y-0.5">
+            {insights.map((ins, i) => (
+              <li key={i} className="text-[10px] text-muted-foreground flex items-start gap-1.5">
+                <span className="text-primary shrink-0">›</span>
+                <span>{ins}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {/* FTB projection for Denver */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px] font-mono">
+          {[
+            ["FTB city (for projection)", "Denver"],
+            ["v2.3 scan days", "1 (2026-08-09)"],
+            ["Est. OFFICIAL/week", "1–5 (fresh quotes only)"],
+            ["Time to 10 settled", "~2–10 weeks"],
+            ["Time to 25 settled", "~5–25 weeks"],
+            ["Time to 50 settled", "~10–50 weeks"],
+          ].map(([label, val]) => (
+            <div key={label} className="flex flex-col">
+              <span className="text-muted-foreground">{label}</span>
+              <span className="text-foreground">{val}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Safety attestation */}
+        <div className="rounded border border-border/40 p-2 flex flex-wrap gap-3 text-[10px] font-mono text-muted-foreground">
+          <span className="text-emerald-400">✓ trading_state_modified: false</span>
+          <span className="text-emerald-400">✓ ftb_untouched: true</span>
+          <span className="text-emerald-400">✓ read_only: true</span>
+          <span className="text-emerald-400">✓ no model logic changed</span>
+          <span className="text-emerald-400">✓ tests: 50 new / 1181 total passing</span>
+          <span className="text-emerald-400">✓ commit: 9494eea</span>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Bet Watch Post-Deployment Verification (written 2026-08-09 20:25 UTC)
 // ---------------------------------------------------------------------------
 
@@ -1376,6 +1512,7 @@ export default function AuditValidationPage() {
       <FtbResearchFunnelSection />
       <BetWatchDeploymentVerificationSection />
       <BetWatchAuditSection />
+      <CityStudyCompletionSection />
       <CitySpecializationStudySection />
       <NonBlockersSection />
       <ChainCoverageSection />
