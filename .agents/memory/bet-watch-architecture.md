@@ -43,5 +43,17 @@ kalshi_price=None check prevents fabricating a recommendation from missing price
 - Audit section: `BetWatchAuditSection` in `artifacts/edgecast/src/pages/audit-validation.tsx`
 - Router registered in `artifacts/api-server/main.py`
 
+## City specialization filter (display-only, never touches FTB)
+`SPECIALIZATION_CITIES = {Denver, New York City, Oklahoma City}`.
+Applied in `_row_to_candidate` *after* `_watch_status`:
+- Non-focus cities with status != AVOID/STALE → capped to WATCHING
+- AVOID/STALE rows stay AVOID/STALE (no upgrade)
+- `best_opportunity` loop requires `specialization_city=True`
+- `ftb_eligible` field on the candidate still reflects actual DB status (cap is display-only)
+- Response carries `specialization_cities` list + `specialization_note` string
+- Frontend: city focus banner, Star badge on focus rows, "Outside specialization set" label
+
+**Why:** best-bet recommendations restricted to verified cities with proven win rates until others qualify.
+
 ## Safety guarantees (always in response)
 `trading_state_modified: false` and `ftb_untouched: true` — hardcoded, never computed.
