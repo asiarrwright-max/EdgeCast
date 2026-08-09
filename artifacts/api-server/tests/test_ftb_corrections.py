@@ -831,20 +831,24 @@ class TestStrategyVersion:
 class TestForwardTestBConstants:
     """
     FORWARD_TEST_START_B and FORWARD_TEST_PHASE_B must exist in paper_trades.py.
-    FORWARD_TEST_START_B must be None until explicitly activated.
+    After activation, FORWARD_TEST_START_B must be the exact UTC deployment timestamp.
     """
 
-    def test_forward_test_start_b_exists_and_is_none(self):
+    def test_forward_test_start_b_is_activated(self):
         from app.routers.paper_trades import FORWARD_TEST_START_B
-        assert FORWARD_TEST_START_B is None, (
-            "FORWARD_TEST_START_B must be None until corrections are verified and deployed. "
+        assert FORWARD_TEST_START_B is not None, (
+            "FORWARD_TEST_START_B must be set to the deployment timestamp after corrections "
+            "are verified. Got None — Forward Test B has not been activated."
+        )
+        assert FORWARD_TEST_START_B == datetime(2026, 8, 9, 0, 15, 12, tzinfo=timezone.utc), (
+            f"FORWARD_TEST_START_B must be exactly the Publish #1 completion timestamp. "
             f"Got: {FORWARD_TEST_START_B!r}"
         )
 
     def test_forward_test_phase_b_text(self):
         from app.routers.paper_trades import FORWARD_TEST_PHASE_B
-        assert "Preparing" in FORWARD_TEST_PHASE_B, (
-            f"FORWARD_TEST_PHASE_B should indicate preparation, got: {FORWARD_TEST_PHASE_B!r}"
+        assert "active" in FORWARD_TEST_PHASE_B.lower(), (
+            f"FORWARD_TEST_PHASE_B should indicate active state, got: {FORWARD_TEST_PHASE_B!r}"
         )
 
     def test_forward_test_a_start_unchanged(self):
