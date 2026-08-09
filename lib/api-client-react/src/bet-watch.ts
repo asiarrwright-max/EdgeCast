@@ -59,6 +59,8 @@ export interface BetWatchCandidate {
   what_to_watch: string;
   changed_since_previous_scan: string[];
   evaluated_at: string | null;
+  // Specialization
+  specialization_city: boolean;
 }
 
 export interface BetWatchSummary {
@@ -82,6 +84,9 @@ export interface BetWatchResult {
   best_opportunity: BetWatchCandidate | null;
   candidates: BetWatchCandidate[];
   all_candidate_count: number;
+  // Specialization
+  specialization_cities: string[];
+  specialization_note: string;
 }
 
 // ---------------------------------------------------------------------------

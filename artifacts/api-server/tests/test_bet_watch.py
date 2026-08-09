@@ -44,6 +44,7 @@ from app.routers.bet_watch import (
     _what_to_watch,
     _why_this_bet,
     get_bet_watch,
+    SPECIALIZATION_CITIES,
 )
 
 
@@ -526,8 +527,9 @@ class TestApiUiAgreement:
 
     @pytest.mark.asyncio
     async def test_recommendation_text_matches_best_opportunity_city(self):
+        # Must use a specialization city — non-focus cities cannot be best_opportunity
         row = _make_row(
-            city="Dallas",
+            city="Denver",
             eligibility_status="OFFICIAL",
             side_market_price=0.45,
             edge_pct_points=15.0,
@@ -541,7 +543,7 @@ class TestApiUiAgreement:
         db.execute = AsyncMock(return_value=execute_result)
 
         result = await get_bet_watch(db=db, _user={"sub": "u"})
-        assert "Dallas" in result["recommendation"]
+        assert "Denver" in result["recommendation"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -617,6 +619,217 @@ class TestNoFabricationWhenEmpty:
 # ═══════════════════════════════════════════════════════════════════════════
 # Additional unit tests for helpers
 # ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 10 — City specialization filter
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestSpecializationFilter:
+    """
+    Requirement 10: only Denver, New York City, and Oklahoma City can be
+    surfaced as Best Bet Right Now.  All other cities are capped to WATCHING
+    in the display layer (never AVOID/STALE promotion — those stay AVOID/STALE).
+    No FTB eligibility changes.
+    """
+
+    # ── specialization_city field ───────────────────────────────────────────
+
+    def test_specialization_city_true_for_denver(self):
+        row = _make_row(city="Denver", eligibility_status="OFFICIAL")
+        cand = _row_to_candidate(row, age_now=30.0)
+        assert cand["specialization_city"] is True
+
+    def test_specialization_city_true_for_nyc(self):
+        row = _make_row(city="New York City", eligibility_status="OFFICIAL")
+        cand = _row_to_candidate(row, age_now=30.0)
+        assert cand["specialization_city"] is True
+
+    def test_specialization_city_true_for_okc(self):
+        row = _make_row(city="Oklahoma City", eligibility_status="OFFICIAL")
+        cand = _row_to_candidate(row, age_now=30.0)
+        assert cand["specialization_city"] is True
+
+    def test_specialization_city_false_for_dallas(self):
+        row = _make_row(city="Dallas", eligibility_status="OFFICIAL")
+        cand = _row_to_candidate(row, age_now=30.0)
+        assert cand["specialization_city"] is False
+
+    def test_specialization_city_false_for_houston(self):
+        row = _make_row(city="Houston", eligibility_status="OFFICIAL")
+        cand = _row_to_candidate(row, age_now=30.0)
+        assert cand["specialization_city"] is False
+
+    # ── non-focus city status cap ───────────────────────────────────────────
+
+    def test_official_non_focus_city_capped_to_watching(self):
+        """An OFFICIAL row from a non-focus city must show WATCHING, not OFFICIAL-ELIGIBLE."""
+        row = _make_row(city="Dallas", eligibility_status="OFFICIAL")
+        cand = _row_to_candidate(row, age_now=30.0)
+        assert cand["watch_status"] == "WATCHING"
+
+    def test_near_official_non_focus_city_capped_to_watching(self):
+        row = _make_row(
+            city="Houston",
+            eligibility_status="RESEARCH_ONLY",
+            eligibility_reason="correlated_outcome_limit",
+        )
+        cand = _row_to_candidate(row, age_now=30.0)
+        assert cand["watch_status"] == "WATCHING"
+
+    def test_avoid_stale_non_focus_city_stays_avoid_stale(self):
+        """AVOID/STALE must not be upgraded to WATCHING by the specialization cap."""
+        row = _make_row(
+            city="Houston",
+            eligibility_status="RESEARCH_ONLY",
+            eligibility_reason="v2_excluded",
+            side_market_price=0.01,
+        )
+        cand = _row_to_candidate(row, age_now=30.0)
+        assert cand["watch_status"] == "AVOID / STALE"
+
+    def test_specialization_city_preserves_official_eligible(self):
+        row = _make_row(city="Denver", eligibility_status="OFFICIAL")
+        cand = _row_to_candidate(row, age_now=30.0)
+        assert cand["watch_status"] == "OFFICIAL-ELIGIBLE"
+
+    def test_ftb_eligibility_unchanged_for_non_focus_city(self):
+        """Specialization cap is display-only; ftb_eligible must reflect actual DB status."""
+        row = _make_row(city="Dallas", eligibility_status="OFFICIAL")
+        cand = _row_to_candidate(row, age_now=30.0)
+        assert cand["ftb_eligible"] is True          # DB status = OFFICIAL
+        assert cand["watch_status"] == "WATCHING"    # display capped
+
+    # ── best_opportunity selection ──────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_non_focus_city_never_best_opportunity(self):
+        """A non-focus city that otherwise qualifies must not be best_opportunity."""
+        row = _make_row(
+            city="Dallas",
+            eligibility_status="OFFICIAL",
+            side_market_price=0.45,
+            edge_pct_points=20.0,
+            is_executable=True,
+        )
+        db = AsyncMock()
+        sm = MagicMock(); sm.all.return_value = [row]
+        er = MagicMock(); er.scalars.return_value = sm
+        db.execute = AsyncMock(return_value=er)
+
+        result = await get_bet_watch(db=db, _user={"sub": "u"})
+        assert result["best_opportunity"] is None
+
+    @pytest.mark.asyncio
+    async def test_focus_city_can_be_best_opportunity(self):
+        """A focus city that passes all quality gates must be surfaced as best_opportunity."""
+        row = _make_row(
+            city="Denver",
+            eligibility_status="OFFICIAL",
+            side_market_price=0.45,
+            edge_pct_points=20.0,
+            is_executable=True,
+        )
+        db = AsyncMock()
+        sm = MagicMock(); sm.all.return_value = [row]
+        er = MagicMock(); er.scalars.return_value = sm
+        db.execute = AsyncMock(return_value=er)
+
+        result = await get_bet_watch(db=db, _user={"sub": "u"})
+        assert result["best_opportunity"] is not None
+        assert result["best_opportunity"]["city"] == "Denver"
+
+    @pytest.mark.asyncio
+    async def test_focus_city_wins_over_non_focus_city(self):
+        """When a non-focus OFFICIAL row and a focus OFFICIAL row exist,
+        the focus city must be best_opportunity."""
+        now = _now()
+        non_focus = _make_row(
+            city="Dallas",
+            market_ticker="KXHIGHTDAL-26AUG10-T105",
+            eligibility_status="OFFICIAL",
+            edge_pct_points=25.0,
+            side_market_price=0.40,
+            is_executable=True,
+            quote_timestamp=now - timedelta(seconds=30),
+        )
+        focus = _make_row(
+            city="Denver",
+            market_ticker="KXHIGHTDEN-26AUG10-T95",
+            eligibility_status="OFFICIAL",
+            edge_pct_points=18.0,
+            side_market_price=0.45,
+            is_executable=True,
+            quote_timestamp=now - timedelta(seconds=30),
+        )
+        db = AsyncMock()
+        sm = MagicMock(); sm.all.return_value = [non_focus, focus]
+        er = MagicMock(); er.scalars.return_value = sm
+        db.execute = AsyncMock(return_value=er)
+
+        result = await get_bet_watch(db=db, _user={"sub": "u"})
+        best = result["best_opportunity"]
+        assert best is not None
+        assert best["city"] == "Denver"
+
+    # ── response fields ─────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_response_includes_specialization_cities(self):
+        db = AsyncMock()
+        sm = MagicMock(); sm.all.return_value = []
+        er = MagicMock(); er.scalars.return_value = sm
+        db.execute = AsyncMock(return_value=er)
+
+        result = await get_bet_watch(db=db, _user={"sub": "u"})
+        cities = result["specialization_cities"]
+        assert set(cities) == {"Denver", "New York City", "Oklahoma City"}
+
+    @pytest.mark.asyncio
+    async def test_response_includes_specialization_note(self):
+        db = AsyncMock()
+        sm = MagicMock(); sm.all.return_value = []
+        er = MagicMock(); er.scalars.return_value = sm
+        db.execute = AsyncMock(return_value=er)
+
+        result = await get_bet_watch(db=db, _user={"sub": "u"})
+        assert "specialization_note" in result
+        assert "Denver" in result["specialization_note"]
+
+    # ── safety: specialization cap never writes ─────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_specialization_cap_does_not_write_to_db(self):
+        row = _make_row(city="Houston", eligibility_status="OFFICIAL")
+        db = AsyncMock()
+        sm = MagicMock(); sm.all.return_value = [row]
+        er = MagicMock(); er.scalars.return_value = sm
+        db.execute = AsyncMock(return_value=er)
+
+        await get_bet_watch(db=db, _user={"sub": "u"})
+        db.add.assert_not_called()
+        db.commit.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_trading_state_modified_false_with_specialization(self):
+        row = _make_row(city="Dallas", eligibility_status="OFFICIAL")
+        db = AsyncMock()
+        sm = MagicMock(); sm.all.return_value = [row]
+        er = MagicMock(); er.scalars.return_value = sm
+        db.execute = AsyncMock(return_value=er)
+
+        result = await get_bet_watch(db=db, _user={"sub": "u"})
+        assert result["trading_state_modified"] is False
+
+    # ── SPECIALIZATION_CITIES constant integrity ────────────────────────────
+
+    def test_specialization_set_contains_exactly_three_cities(self):
+        assert len(SPECIALIZATION_CITIES) == 3
+
+    def test_specialization_set_members(self):
+        assert "Denver" in SPECIALIZATION_CITIES
+        assert "New York City" in SPECIALIZATION_CITIES
+        assert "Oklahoma City" in SPECIALIZATION_CITIES
+
 
 class TestWatchStatusMapping:
     """Watch status assignment covers all defined reason codes."""

@@ -33,6 +33,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["bet-watch"])
 
 # ---------------------------------------------------------------------------
+# City specialization — read-only display filter.
+# Does NOT affect FTB eligibility, paper_trades rows, or model logic.
+# Non-focus cities still appear in the ranked list as WATCHING so users
+# can monitor them, but they are never surfaced as "Best Bet Right Now".
+# ---------------------------------------------------------------------------
+
+SPECIALIZATION_CITIES: frozenset[str] = frozenset({
+    "Denver",
+    "New York City",
+    "Oklahoma City",
+})
+
+_SPECIALIZATION_NOTE = (
+    "Best Bet Right Now is restricted to the three verified specialization cities "
+    "(Denver · New York City · Oklahoma City). Other verified cities appear as "
+    "WATCHING so you can monitor signal quality, but they are excluded from the "
+    "Best Bet recommendation until they meet the win-rate threshold."
+)
+
+# ---------------------------------------------------------------------------
 # Module constants — read-only.  None of these change FTB behaviour.
 # ---------------------------------------------------------------------------
 
@@ -448,6 +468,15 @@ def _changed_since_creation(row: PaperTrade, age_now: float | None) -> list[str]
 
 def _row_to_candidate(row: PaperTrade, age_now: float | None) -> dict[str, Any]:
     status = _watch_status(row, age_now)
+
+    # Specialization cap — display-only; never touches FTB or eligibility_status.
+    # Non-focus cities remain visible as WATCHING so signal can be monitored,
+    # but they cannot surface as "Best Bet Right Now".
+    city_name = row.city or ""
+    in_specialization = city_name in SPECIALIZATION_CITIES
+    if status != "AVOID / STALE" and not in_specialization:
+        status = "WATCHING"
+
     composite_score = _score(row, age_now, status)
     ticker_info = _parse_ticker(row.market_ticker or "")
     forecast = _extract_forecast(row.decision_explanation)
@@ -509,6 +538,8 @@ def _row_to_candidate(row: PaperTrade, age_now: float | None) -> dict[str, Any]:
     return {
         # Ranking
         "rank": 0,              # filled by caller
+        # Specialization
+        "specialization_city": in_specialization,
         "_score": composite_score,
         # Identity
         "city": city,
@@ -713,13 +744,16 @@ async def get_bet_watch(
     for c in candidates_raw:
         c.pop("_score", None)
 
-    # Best opportunity = highest-ranked non-AVOID/STALE candidate with real edge
+    # Best opportunity = highest-ranked non-AVOID/STALE specialization-city candidate
+    # with real edge and a known price.  Non-focus cities are intentionally excluded
+    # from this selection — they remain visible as WATCHING in the ranked list.
     best: dict | None = None
     for c in candidates_raw:
         if (
             c["watch_status"] != "AVOID / STALE"
             and c["edge"] >= _MIN_INTERESTING_EDGE_PP
             and c["kalshi_price"] is not None   # never fabricate from a missing price
+            and c.get("specialization_city", False)  # only focus cities as best bet
         ):
             best = c
             break
@@ -738,9 +772,12 @@ async def get_bet_watch(
         "summary": summary,
         "recommendation": recommendation,
         "wait_message": wait_msg,
-        # Best opportunity
+        # Best opportunity (specialization cities only)
         "best_opportunity": best,
         # Ranked list
         "candidates": top_n,
         "all_candidate_count": len(candidates_raw),
+        # Specialization
+        "specialization_cities": sorted(SPECIALIZATION_CITIES),
+        "specialization_note": _SPECIALIZATION_NOTE,
     }

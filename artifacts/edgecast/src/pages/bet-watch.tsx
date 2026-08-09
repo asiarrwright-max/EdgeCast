@@ -10,6 +10,7 @@ import {
   MinusCircle,
   Info,
   Activity,
+  Star,
 } from "lucide-react";
 import { useGetBetWatch } from "@workspace/api-client-react";
 import type { BetWatchCandidate } from "@workspace/api-client-react";
@@ -130,6 +131,16 @@ function CandidateCard({
           {isBest && (
             <p className="text-xs font-mono font-bold text-primary uppercase tracking-widest">
               ★ Best Bet Right Now
+            </p>
+          )}
+          {c.specialization_city && !isBest && (
+            <p className="text-xs font-mono text-yellow-400 flex items-center gap-1">
+              <Star className="h-3 w-3" /> Focus city
+            </p>
+          )}
+          {!c.specialization_city && (
+            <p className="text-xs font-mono text-muted-foreground">
+              Outside specialization set — WATCHING only
             </p>
           )}
           <div className="flex flex-wrap items-center gap-2">
@@ -372,7 +383,12 @@ function OpportunityRow({ c }: { c: BetWatchCandidate }) {
         </span>
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-foreground truncate">{c.city}</p>
+        <div className="flex items-center gap-1.5">
+          <p className="text-sm font-medium text-foreground truncate">{c.city}</p>
+          {c.specialization_city && (
+            <Star className="h-3 w-3 text-yellow-400 shrink-0" />
+          )}
+        </div>
         <p className="text-xs text-muted-foreground font-mono truncate">{c.ticker}</p>
       </div>
       <div className="flex items-center gap-4 text-right shrink-0">
@@ -474,6 +490,19 @@ export default function BetWatchPage() {
 
       {data && (
         <>
+          {/* ── City focus banner ─────────────────────────────────────── */}
+          {data.specialization_cities.length > 0 && (
+            <div className="rounded-lg border border-yellow-700/40 bg-yellow-900/10 p-3 flex items-start gap-2">
+              <Star className="h-4 w-4 text-yellow-400 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <p className="text-xs font-mono font-semibold text-yellow-400">
+                  Focus cities: {data.specialization_cities.join(" · ")}
+                </p>
+                <p className="text-xs text-muted-foreground">{data.specialization_note}</p>
+              </div>
+            </div>
+          )}
+
           {/* ── Today's summary ───────────────────────────────────────── */}
           <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
             <div className="flex items-start gap-3">
