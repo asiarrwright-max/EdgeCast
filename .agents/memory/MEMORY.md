@@ -24,3 +24,4 @@
 - [guard3-market-close-timestamp](guard3-market-close-timestamp.md) — Guard 3 uses Kalshi market close_time (≤120 min → RESEARCH_ONLY); target_settlement_date_str is Guard 2 only.
 - [best-bet-selected-side](best-bet-selected-side.md) — selectedSideMarketProbability = selectedSideAsk = side_market_price (executable ask); never 1−yes_prob; helper _selected_side_values() is testable.
 - [union-all-order-by](union-all-order-by.md) — PostgreSQL rejects ORDER BY expressions on UNION ALL; wrap in subquery and order by a named alias column.
+- [forward-test-b-activated](forward-test-b-activated.md) — FORWARD_TEST_START_B=2026-08-09T00:15:12Z; all 8 FTB correction blockers Resolved; strategy v2.3 live; db_date_alignment FIX_REQUIRED in prod is expected (historical FTA trades only).
