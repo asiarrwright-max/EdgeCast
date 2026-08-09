@@ -17,6 +17,7 @@ import {
   type FtbCityRow,
   type FtbSafeAction,
   type FtbFunnelStep,
+  useGetBetWatch,
 } from "@workspace/api-client-react";
 import {
   ShieldCheck,
@@ -35,6 +36,7 @@ import {
   CheckCircle,
   XCircle as XCircleIcon,
   Loader2,
+  Eye,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -1159,6 +1161,99 @@ function FtbResearchFunnelSection() {
 }
 
 // ---------------------------------------------------------------------------
+// Bet Watch Audit Section (requirement 16)
+// ---------------------------------------------------------------------------
+
+function BetWatchAuditSection() {
+  const { data, isLoading, isError } = useGetBetWatch();
+
+  const rows: Array<{ label: string; value: string; ok?: boolean }> = data
+    ? [
+        {
+          label: "Bet Watch API",
+          value: "Healthy",
+          ok: true,
+        },
+        {
+          label: "Last successful calculation",
+          value: new Date(data.generated_at).toLocaleString(),
+          ok: true,
+        },
+        {
+          label: "Candidates evaluated",
+          value: String(data.all_candidate_count),
+        },
+        {
+          label: "Actionable candidates",
+          value: String(data.summary.actionable),
+          ok: data.summary.actionable > 0,
+        },
+        {
+          label: "Preliminary candidates",
+          value: String(data.summary.preliminary),
+        },
+        {
+          label: "Current best-bet ticker",
+          value: data.summary.best_ticker ?? "None",
+          ok: data.summary.best_ticker !== null,
+        },
+        {
+          label: "Trading state modified",
+          value: data.trading_state_modified ? "YES ⚠" : "NO",
+          ok: !data.trading_state_modified,
+        },
+        {
+          label: "Forward Test B untouched",
+          value: data.ftb_untouched ? "YES" : "NO ⚠",
+          ok: data.ftb_untouched,
+        },
+      ]
+    : [];
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Eye className="h-4 w-4 text-primary" />
+          <h2 className="text-sm font-semibold">Bet Watch Monitoring</h2>
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">
+          Read-only status of the Bet Watch decision-support layer. Trading state must always show NO.
+        </p>
+      </CardHeader>
+      <CardBody className="space-y-2">
+        {isLoading && (
+          <div className="text-sm text-muted-foreground py-4 text-center">
+            Loading Bet Watch status…
+          </div>
+        )}
+        {isError && (
+          <div className="text-sm text-destructive py-4 text-center">
+            Bet Watch API unavailable. Server may be starting up.
+          </div>
+        )}
+        {!isLoading && !isError && rows.map((row) => (
+          <div key={row.label} className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">{row.label}</span>
+            <span
+              className={`font-mono font-medium ${
+                row.ok === true
+                  ? "text-emerald-400"
+                  : row.ok === false
+                  ? "text-destructive"
+                  : "text-foreground"
+              }`}
+            >
+              {row.value}
+            </span>
+          </div>
+        ))}
+      </CardBody>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -1179,6 +1274,7 @@ export default function AuditValidationPage() {
       <BlockersSection />
       <LiveDbChecksSection />
       <FtbResearchFunnelSection />
+      <BetWatchAuditSection />
       <NonBlockersSection />
       <ChainCoverageSection />
       <BaselineSection />

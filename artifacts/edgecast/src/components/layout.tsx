@@ -1,9 +1,10 @@
 import { ReactNode, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { Activity, BarChart2, Briefcase, AlertTriangle, FlaskConical, LogOut, Menu, X, Heart, TrendingUp, LineChart, TestTube, GitCompare, ShieldCheck } from "lucide-react";
+import { Activity, BarChart2, Briefcase, AlertTriangle, FlaskConical, LogOut, Menu, X, Heart, TrendingUp, LineChart, TestTube, GitCompare, ShieldCheck, Eye } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 
 const navItems = [
+  { href: "/bet-watch", label: "Bet Watch", icon: Eye },
   { href: "/dashboard", label: "Dashboard", icon: BarChart2 },
   { href: "/markets", label: "Markets", icon: Briefcase },
   { href: "/paper-trading", label: "Paper Trading", icon: TrendingUp },

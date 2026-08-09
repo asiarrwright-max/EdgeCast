@@ -17,6 +17,7 @@ import StrategyComparisonPage from '@/pages/strategy-comparison';
 import PerformancePage from '@/pages/performance';
 import V21AuditPage from '@/pages/v21-audit';
 import AuditValidationPage from '@/pages/audit-validation';
+import BetWatchPage from '@/pages/bet-watch';
 
 import Layout from '@/components/layout';
 
@@ -93,6 +94,7 @@ function ProtectedRoutes() {
       <Layout>
         <PageErrorBoundary>
           <Switch>
+            <Route path="/bet-watch" component={BetWatchPage} />
             <Route path="/dashboard" component={DashboardPage} />
             <Route path="/markets" component={MarketsPage} />
             <Route path="/markets/:ticker" component={MarketDetailPage} />

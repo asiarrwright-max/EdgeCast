@@ -1,0 +1,417 @@
+Build a new standalone tab in EdgeCast called:
+
+BET WATCH
+
+PURPOSE
+Bet Watch is a decision-support layer for me as a human user.
+
+I want EdgeCast to tell me, in normal language, which Kalshi weather contracts look most attractive RIGHT NOW based on the best information EdgeCast currently has, even when those opportunities have not yet passed every requirement necessary to become an OFFICIAL Forward Test B paper trade.
+
+This is NOT permission for EdgeCast to place real trades.
+
+This is NOT a modification to Forward Test B.
+
+Do not change any forecasting models, calibration, probability calculations, eligibility rules, Guard 8, freshness requirements, paper-trading logic, stake sizing, Forward Test B timestamps, or existing audit behavior.
+
+Bet Watch must be observational/read-only with respect to the existing trading system.
+
+==================================================
+1. CREATE A SEPARATE BET WATCH TAB
+==================================================
+
+Add “Bet Watch” as its own top-level navigation destination.
+
+Do NOT put this inside Mission Control, Audit & Validation, or another existing page.
+
+Design it mobile-first.
+
+The page should answer one question immediately:
+
+“What does EdgeCast think is the best Kalshi weather bet I could consider right now?”
+
+Do not make me interpret engineering terminology to answer that question.
+
+==================================================
+2. TOP CARD: BEST BET RIGHT NOW
+==================================================
+
+At the top of Bet Watch, create a prominent card:
+
+BEST BET RIGHT NOW
+
+If EdgeCast currently sees an attractive opportunity, show:
+
+- City
+- Kalshi contract / ticker
+- Contract question in plain English
+- YES or NO
+- Current Kalshi ask price
+- EdgeCast estimated probability
+- Estimated edge
+- Model/version producing the estimate
+- Forecast temperature / relevant weather value
+- Contract threshold or range
+- Market settlement date
+- Time remaining before market close/settlement when available
+- Quote age / last market update
+- Data freshness
+- Confidence level
+- Why EdgeCast likes it
+- What could make the recommendation change
+- Whether it currently qualifies as an OFFICIAL FTB trade
+
+Most importantly, include a plain-English recommendation such as:
+
+“EdgeCast’s best preliminary opportunity right now is YES on Chicago reaching 88°F or higher. Kalshi is pricing YES at 41¢ while EdgeCast estimates the probability at 57%, giving it an estimated 16 percentage-point edge.”
+
+That is illustrative only. Use REAL LIVE DATA.
+
+Never fabricate a recommendation if no qualifying live opportunity exists.
+
+If nothing is attractive, explicitly say:
+
+“EdgeCast does not see a bet worth taking right now.”
+
+==================================================
+3. PRELIMINARY BETS VS OFFICIAL TRADES
+==================================================
+
+Bet Watch must deliberately allow me to see promising opportunities BEFORE they become OFFICIAL Forward Test B trades.
+
+Create clear statuses such as:
+
+WATCHING
+PRELIMINARY
+NEAR OFFICIAL
+OFFICIAL-ELIGIBLE
+AVOID / STALE
+
+For every candidate, show exactly why it has its current status.
+
+Example:
+
+PRELIMINARY
+
+“EdgeCast sees a strong model/market disagreement, but this quote is currently too old to satisfy the 300-second OFFICIAL Forward Test B freshness rule.”
+
+This distinction is extremely important.
+
+A candidate failing an FTB eligibility guard does NOT automatically mean it is a bad prediction.
+
+Bet Watch should tell me whether the failure is related to:
+
+- stale quote
+- no valid ask
+- insufficient liquidity
+- missing market data
+- station verification
+- settlement integrity
+- model confidence
+- insufficient edge
+- other eligibility rule
+
+Translate these into normal language.
+
+==================================================
+4. DO NOT WEAKEN FORWARD TEST B
+==================================================
+
+Bet Watch must consume existing data without modifying Forward Test B.
+
+In particular:
+
+DO NOT change the 300-second freshness threshold.
+
+DO NOT change FTB eligibility rules.
+
+DO NOT turn PRELIMINARY recommendations into OFFICIAL trades.
+
+DO NOT write Bet Watch selections into the OFFICIAL paper-trade population unless the existing trading engine independently qualifies them.
+
+Forward Test B must remain statistically comparable from beginning to end.
+
+==================================================
+5. LIVE KALSHI MARKET AWARENESS
+==================================================
+
+Bet Watch should use the freshest Kalshi market information EdgeCast has available.
+
+Where supported by the existing Kalshi integration, display:
+
+- current YES bid/ask
+- current NO bid/ask
+- last price
+- quote timestamp
+- quote age
+- volume
+- open interest
+- market status
+- close time
+- settlement time/date
+
+Do NOT assume every Kalshi weather contract closes hourly.
+
+Use the actual market/contract metadata when available.
+
+If close-time information is unavailable, say so rather than inventing it.
+
+==================================================
+6. RANK OPPORTUNITIES
+==================================================
+
+Below Best Bet Right Now, add:
+
+TOP OPPORTUNITIES RIGHT NOW
+
+Rank the best current weather-market opportunities.
+
+Do not rank solely by raw model edge.
+
+The ranking should consider the information already available to EdgeCast, including:
+
+- estimated model edge
+- probability confidence
+- market liquidity
+- quote freshness
+- model/data freshness
+- station verification
+- settlement integrity
+- contract type
+- forecast uncertainty
+- proximity to threshold
+- time until market close
+- whether multiple EdgeCast model versions agree
+
+Prefer opportunities that are actually actionable over giant theoretical edges in dead or stale markets.
+
+Show approximately the top 5 opportunities by default.
+
+==================================================
+7. PLAIN-ENGLISH “WHY THIS BET?”
+==================================================
+
+Every recommendation needs a short explanation understandable without knowing EdgeCast internals.
+
+Example:
+
+WHY EDGECAST LIKES THIS
+
+“The latest forecast puts Dallas near 101°F. Kalshi is pricing the chance of exceeding 100°F substantially lower than EdgeCast’s model. The market is active and the quote is fresh, so this is currently one of the cleaner disagreements EdgeCast sees.”
+
+Also show:
+
+WHAT TO WATCH
+
+Example:
+
+“The forecast is close to the contract boundary, so a 1°F forecast shift could materially change this recommendation.”
+
+Do not overstate certainty.
+
+==================================================
+8. SHOW ME WHEN TO WAIT
+==================================================
+
+Bet Watch should be capable of recommending WAIT.
+
+Examples:
+
+“Good signal, bad market right now. Wait for a fresh Kalshi quote.”
+
+“EdgeCast likes YES, but liquidity is too thin right now.”
+
+“Promising opportunity, but the forecast is too close to the threshold.”
+
+“Strong disagreement, but the underlying market data is stale.”
+
+“Nothing compelling right now.”
+
+A WAIT recommendation is preferable to forcing a bet.
+
+==================================================
+9. BEST MODEL / VERSION
+==================================================
+
+Use the strongest currently available EdgeCast prediction for Bet Watch.
+
+Where V2.2, V2.3, and V3 predictions coexist, do not blindly prefer the newest version merely because it is newer.
+
+Expose:
+
+- primary probability
+- model/version used
+- whether other model versions agree
+- meaningful disagreement between versions
+
+If appropriate, use model agreement as an additional confidence signal.
+
+Do NOT alter the underlying models as part of this task.
+
+==================================================
+10. FTB RELATIONSHIP
+==================================================
+
+For each Bet Watch opportunity show:
+
+FTB STATUS
+
+Examples:
+
+“OFFICIAL eligible”
+
+“Would qualify except quote is 11 minutes old.”
+
+“Research-only: no valid Kalshi ask.”
+
+“Not eligible: station has not been verified.”
+
+This gives me visibility into opportunities EdgeCast sees even when Forward Test B correctly rejects them.
+
+==================================================
+11. RECENT CHANGES
+==================================================
+
+Add a section:
+
+WHAT CHANGED?
+
+Show meaningful changes since the prior scan, such as:
+
+- new best bet
+- edge increased/decreased materially
+- forecast moved
+- Kalshi price moved
+- quote became fresh/stale
+- candidate became OFFICIAL-eligible
+- candidate lost eligibility
+- candidate disappeared
+- new market became attractive
+
+Keep this concise and human-readable.
+
+==================================================
+12. TODAY'S BET WATCH SUMMARY
+==================================================
+
+Near the top show a compact summary such as:
+
+“Right now EdgeCast sees 2 attractive opportunities, 1 near-OFFICIAL candidate, and 4 markets worth watching. The strongest current signal is NO on [contract].”
+
+Again, use real data.
+
+==================================================
+13. SAFETY / DATA INTEGRITY
+==================================================
+
+Bet Watch must never:
+
+- fabricate Kalshi prices
+- substitute stale prices without labeling them
+- silently use missing data
+- treat RESEARCH_ONLY as OFFICIAL
+- alter FTB records
+- modify historical trades
+- change model/calibration parameters
+- change Guard 8
+- change the 300-second threshold
+- place a real Kalshi trade
+
+If data is unavailable, display UNKNOWN.
+
+==================================================
+14. DATA/API
+==================================================
+
+Create a read-only API endpoint for Bet Watch so its output can be independently inspected.
+
+Suggested endpoint:
+
+GET /api/bet-watch
+
+Return structured JSON containing at minimum:
+
+generated_at
+best_opportunity
+recommendation
+candidates
+rank
+city
+ticker
+side
+kalshi_price
+model_probability
+edge
+model_version
+model_agreement
+forecast_value
+contract_boundary
+quote_timestamp
+quote_age_seconds
+market_close
+volume
+open_interest
+liquidity_status
+data_freshness
+ftb_status
+failed_ftb_guards
+confidence
+why_this_bet
+what_to_watch
+changed_since_previous_scan
+
+Use existing EdgeCast data sources whenever possible rather than creating duplicate prediction logic.
+
+==================================================
+15. TESTING
+==================================================
+
+Add tests proving:
+
+1. Bet Watch does not mutate paper trades.
+2. Bet Watch does not alter Forward Test B eligibility.
+3. PRELIMINARY candidates cannot become OFFICIAL merely because Bet Watch recommends them.
+4. stale quotes are clearly labeled.
+5. missing prices cannot generate a BUY/YES/NO recommendation.
+6. ranking is deterministic for identical inputs.
+7. FTB status accurately reflects existing eligibility logic.
+8. the API and UI agree on the best opportunity.
+9. no recommendation is fabricated when no actionable candidates exist.
+
+Run the complete existing test suite plus the new tests.
+
+==================================================
+16. AUDITABILITY
+==================================================
+
+Add a small Bet Watch section to Audit & Validation showing:
+
+- Bet Watch API healthy
+- last successful calculation
+- candidates evaluated
+- actionable candidates
+- preliminary candidates
+- current best-bet ticker
+- whether Bet Watch has modified any trading state (must always be NO)
+
+This is monitoring only.
+
+==================================================
+17. DO NOT PUBLISH YET
+==================================================
+
+Implement and test everything first.
+
+Do not change the production deployment until you report back to me with:
+
+- files changed
+- API created
+- screenshots/description of the UI
+- example output using current data
+- test results
+- confirmation that trading/model logic was not modified
+- confirmation that Forward Test B remains untouched
+- any limitations you discovered
+
+Also WRITE THE IMPLEMENTATION RESULTS AND CURRENT LIVE/DEV BET WATCH OUTPUT TO THE AUDIT & VALIDATION TAB so the results can be inspected there without relying on screenshots or chat history.
+
+Then stop and wait for me to approve publishing.
