@@ -19,6 +19,7 @@ import {
   type FtbFunnelStep,
   useGetBetWatch,
 } from "@workspace/api-client-react";
+import { CitySpecializationStudySection } from "./city-study-section";
 import {
   ShieldCheck,
   ShieldAlert,
@@ -1375,6 +1376,7 @@ export default function AuditValidationPage() {
       <FtbResearchFunnelSection />
       <BetWatchDeploymentVerificationSection />
       <BetWatchAuditSection />
+      <CitySpecializationStudySection />
       <NonBlockersSection />
       <ChainCoverageSection />
       <BaselineSection />

@@ -1,0 +1,339 @@
+Run a READ-ONLY city-by-city accuracy and suitability study for EdgeCast, then publish the findings into the existing Audit & Validation tab so they remain visible for later review.
+
+Do not change model logic.
+Do not change probability formulas.
+Do not change calibration.
+Do not change Forward Test B.
+Do not change eligibility rules.
+Do not change scheduler cadence.
+Do not change station verification status.
+Do not change Bet Watch behavior.
+Do not alter or relabel any historical trades.
+
+GOAL
+
+Determine whether EdgeCast would likely become more accurate and more practically useful if we specialized on ONE city, and identify the strongest single-city candidate based on actual historical data.
+
+Use all relevant persisted historical data available in EdgeCast, including settled paper trades, forecast verification/error data, settlement-station metadata, quote/liquidity history, model version results, and market availability.
+
+====================================
+1. CITY-BY-CITY PERFORMANCE TABLE
+====================================
+
+For every city with enough data to analyze, report:
+
+- city
+- settlement station
+- station verified: yes/no
+- NWS-compatible settlement: yes/no
+- total historical settled trades
+- OFFICIAL settled trades
+- RESEARCH_ONLY settled trades
+- wins
+- losses
+- win rate
+- average predicted probability
+- calibration gap
+- Brier score if available
+- realized P&L
+- ROI
+- average estimated edge at entry
+- median estimated edge at entry
+- YES performance
+- NO performance
+- high-temp performance
+- low-temp performance
+- range-contract performance
+- threshold-contract performance
+- average forecast error
+- forecast error bias
+- forecast error sigma
+- number of forecast-verification observations
+- % of opportunities with usable Kalshi ask
+- % rejected for stale/missing quote
+- % rejected for station verification
+- % rejected for liquidity/price floor
+- unique market days observed
+- unique market tickers
+- approximate opportunities per day
+
+If a metric cannot be computed from stored data, show UNKNOWN rather than guessing.
+
+====================================
+2. SAMPLE-SIZE QUALITY
+====================================
+
+Classify each city’s evidence strength:
+
+VERY LOW
+LOW
+MODERATE
+GOOD
+STRONG
+
+Base this on actual sample size and data completeness.
+
+Do not rank a city highly just because it has a good win rate on a tiny sample.
+
+Explicitly flag:
+- cities with fewer than 10 settled observations
+- cities with fewer than 30 forecast-verification observations
+- cities where one or two trades dominate P&L
+- cities with materially imbalanced YES/NO exposure
+
+====================================
+3. FORECAST ACCURACY
+====================================
+
+For each city, evaluate forecast quality separately from trading performance.
+
+Report:
+
+- mean absolute temperature error
+- median absolute error
+- signed bias
+- RMSE if available
+- sigma / dispersion
+- % within ±1°F
+- % within ±2°F
+- % within ±3°F
+- performance by lead time:
+  - <6h
+  - 6–12h
+  - 12–24h
+  - 24–48h
+  - 48h+
+
+If possible, separate forecast-error statistics by source label so GHCND/NWS, ERA5, and legacy sources are not mixed incorrectly.
+
+====================================
+4. MARKET QUALITY / LIQUIDITY
+====================================
+
+For each city, measure how usable the Kalshi market tends to be.
+
+Report:
+
+- % scans with valid ask
+- % scans with fresh ask ≤300 sec
+- % scans with no usable quote
+- average available quantity if stored
+- median available quantity if stored
+- average time from usable signal to close
+- number of distinct market days with at least one actionable quote
+
+If volume/open interest are not stored, say so.
+
+Identify cities where model accuracy may be good but the market is too illiquid to be useful.
+
+====================================
+5. MODEL CONSISTENCY
+====================================
+
+Compare available model versions by city where possible.
+
+For each city, report:
+
+- V2.2 performance
+- V2.3 performance
+- V3 performance
+- whether versions generally agree on direction
+- whether one version materially outperforms others
+- whether differences are large enough to be meaningful given sample size
+
+Do not assume newest = best.
+
+If cross-version pairing is not available, say so.
+
+====================================
+6. CITY SPECIALIZATION SCORE
+====================================
+
+Build a transparent SINGLE-CITY SUITABILITY SCORE.
+
+Do not use a black-box score.
+
+Show the component weights.
+
+Suggested categories:
+
+- forecast accuracy: 30%
+- historical calibration/trading quality: 25%
+- market liquidity/quote availability: 20%
+- sample size/data quality: 15%
+- settlement/station integrity: 10%
+
+You may adjust weights slightly if the data clearly justifies it, but document them.
+
+For each city show:
+- component scores
+- total score
+- confidence in score
+
+====================================
+7. BEST SINGLE CITY
+====================================
+
+Answer plainly:
+
+“If EdgeCast specialized on exactly one city today, which city should it be?”
+
+Return:
+- #1 city
+- #2 backup
+- #3 backup
+
+For the #1 city explain in normal language:
+
+- why it is the strongest candidate
+- what EdgeCast does well there
+- what remains uncertain
+- whether enough evidence exists to justify actual specialization now
+- whether focusing on that city could plausibly improve accuracy
+- whether it would reduce trade volume too much
+- how long validation would likely take using only that city
+
+Do not overstate certainty.
+
+====================================
+8. BEST 3-CITY ALTERNATIVE
+====================================
+
+Also answer:
+
+“If one city is too restrictive, what are the best three cities to specialize on?”
+
+Choose a 3-city set that balances:
+- accuracy
+- data quality
+- liquidity
+- settlement integrity
+- enough independent opportunities
+
+Explain why the 3-city set may be better or worse than single-city specialization.
+
+====================================
+9. CURRENT FTB IMPACT
+====================================
+
+Do NOT change Forward Test B.
+
+Instead report:
+
+- how many current FTB-era v2.3 evaluations came from the #1 city
+- how many would have been OFFICIAL/RESEARCH_ONLY
+- top rejection reasons for that city
+- expected clean opportunities per week if FTB were one-city only
+- estimated time to 10 settled
+- estimated time to 25 settled
+- estimated time to 50 settled
+
+Use ranges, not false precision.
+
+====================================
+10. RECOMMENDATION
+====================================
+
+End with one of these conclusions:
+
+A. SPECIALIZE ON ONE CITY NOW
+B. SPECIALIZE ON THREE CITIES
+C. KEEP MULTI-CITY FOR NOW
+D. NOT ENOUGH DATA YET
+
+Explain why.
+
+The recommendation should prioritize:
+1. actual accuracy
+2. ability to validate
+3. practical Kalshi usability
+
+Not maximum trade count alone.
+
+====================================
+11. AUDIT & VALIDATION OUTPUT
+====================================
+
+Add a new persistent section to Audit & Validation called:
+
+“City Specialization Study”
+
+It must read from persisted/live data where possible, not hardcoded summary numbers.
+
+Show:
+
+- generated_at
+- cities analyzed
+- top single-city candidate
+- top 3-city set
+- recommendation
+- city ranking table
+- forecast accuracy table
+- market-quality table
+- specialization score breakdown
+- sample-size warnings
+- plain-English conclusion
+
+At the very top include a normal-language summary:
+
+“Should EdgeCast focus on one city?”
+
+and answer it directly.
+
+====================================
+12. TESTING
+====================================
+
+Add tests proving:
+
+- study is read-only
+- no paper trades are changed
+- FTB state is unchanged
+- city totals reconcile
+- sample-size warnings are correct
+- score calculation is deterministic
+- cities with tiny samples cannot rank first purely from win rate
+- unverified/non-NWS stations are penalized appropriately
+- missing metrics return UNKNOWN/null rather than fabricated values
+
+Run:
+
+pytest tests/ -q
+
+and normal frontend/type checks.
+
+====================================
+13. COMMIT / PUBLISH
+====================================
+
+This is analytics/UI only.
+
+Commit the study.
+Push to GitHub.
+Merge to main if tests pass.
+Publish the updated Audit & Validation tab.
+
+Do not change the model or trading system.
+
+====================================
+14. FINAL REPORT
+====================================
+
+Return:
+
+CITIES ANALYZED:
+BEST SINGLE CITY:
+SECOND:
+THIRD:
+BEST 3-CITY SET:
+RECOMMENDATION:
+TOP REASONS:
+SAMPLE-SIZE WARNINGS:
+ESTIMATED ONE-CITY FTB PACE:
+TESTS:
+FRONTEND/TYPECHECK:
+COMMIT SHA:
+PRODUCTION BUILD ID:
+AUDIT SECTION LIVE: YES/NO
+MODEL/TRADING LOGIC CHANGED: YES/NO
+ANY ERRORS:

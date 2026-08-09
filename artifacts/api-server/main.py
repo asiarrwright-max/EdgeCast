@@ -13,6 +13,7 @@ from app.routers import v3_analytics  # V3: additive router import
 from app.routers import v22_analytics         # V2.2: isolated parallel challenger
 from app.routers import strategy_comparison  # Unified cross-strategy comparison
 from app.routers import bet_watch             # Bet Watch — read-only decision support
+from app.routers import city_study            # City Specialization Study — read-only analytics
 
 logging.basicConfig(
     level=logging.INFO,
@@ -73,3 +74,4 @@ app.include_router(v3_analytics.router, prefix="/api")   # V3: additive router r
 app.include_router(v22_analytics.router, prefix="/api")         # V2.2: parallel challenger
 app.include_router(strategy_comparison.router, prefix="/api")   # Unified comparison
 app.include_router(bet_watch.router, prefix="/api")              # Bet Watch — read-only
+app.include_router(city_study.router, prefix="/api")             # City Study — read-only analytics
