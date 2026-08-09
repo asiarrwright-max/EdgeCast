@@ -33,7 +33,7 @@ import {
 // ---------------------------------------------------------------------------
 
 type Severity = "CRITICAL" | "HIGH" | "MODERATE" | "LOW";
-type FindingStatus = "Confirmed" | "Suspected" | "Required" | "Confirmed structural issue" | "Fix Implemented";
+type FindingStatus = "Confirmed" | "Suspected" | "Required" | "Confirmed structural issue" | "Fix Implemented" | "Resolved";
 type DbCheckStatus = "Pending DB verification";
 
 interface Blocker {
@@ -235,7 +235,7 @@ const BLOCKERS: Blocker[] = [
     id: 1,
     title: "NWS integer threshold rounding",
     severity: "CRITICAL",
-    status: "Fix Implemented",
+    status: "Resolved",
     mustFix: "Yes",
     finding:
       "Integer threshold probability formulas did not account for NWS integer rounding. Approximate probability impact: ~5.7 percentage points in representative cases.",
@@ -246,7 +246,7 @@ const BLOCKERS: Blocker[] = [
     id: 2,
     title: "NWS range contract rounding",
     severity: "CRITICAL",
-    status: "Fix Implemented",
+    status: "Resolved",
     mustFix: "Yes",
     finding:
       "Range probability calculations used raw lower/upper bounds instead of settlement-aware lower−0.5 / upper+0.5 boundaries. Representative impact ~11 percentage points.",
@@ -257,7 +257,7 @@ const BLOCKERS: Blocker[] = [
     id: 3,
     title: "ERA5 local-date extraction",
     severity: "CRITICAL",
-    status: "Fix Implemented",
+    status: "Resolved",
     mustFix: "Yes",
     finding:
       "DB Check B confirmed: target_settlement_date stored as UTC ISO timestamp was sliced as UTC calendar date. LA trade 2026-08-08T04:54:08Z produced UTC date 2026-08-08 but correct local PDT date was 2026-08-07.",
@@ -268,7 +268,7 @@ const BLOCKERS: Blocker[] = [
     id: 4,
     title: "Hourly sigma floor",
     severity: "HIGH",
-    status: "Fix Implemented",
+    status: "Resolved",
     mustFix: "Yes",
     finding:
       "Hourly contracts used the daily sigma floor (3.5°F) instead of the intended hourly floor (2.0°F) because hourly=True was not passed to _sigma_v2().",
@@ -279,7 +279,7 @@ const BLOCKERS: Blocker[] = [
     id: 5,
     title: "Station verification eligibility",
     severity: "HIGH",
-    status: "Fix Implemented",
+    status: "Resolved",
     mustFix: "Yes",
     finding:
       "get_verified_station() had a bug: the else branch returned the unverified station instead of None, making the function's name misleading. V2.2/V3 already passed station_verified to assess_trade_eligibility (which correctly stamps RESEARCH_ONLY for unverified stations).",
@@ -290,7 +290,7 @@ const BLOCKERS: Blocker[] = [
     id: 6,
     title: "Philadelphia / San Antonio coordinates",
     severity: "HIGH",
-    status: "Fix Implemented",
+    status: "Resolved",
     mustFix: "Yes",
     finding:
       "SERIES_TO_CITY used city-centre coordinates for Philadelphia (39.9526, -75.1652) and San Antonio (29.4241, -98.4936) instead of the KPHL and KSAT settlement station coordinates.",
@@ -301,7 +301,7 @@ const BLOCKERS: Blocker[] = [
     id: 7,
     title: "Calibration reset for corrected strategy",
     severity: "HIGH",
-    status: "Fix Implemented",
+    status: "Resolved",
     mustFix: "Yes",
     finding:
       'V2.2 looked up calibration rows under strategy_version="v2.0". After corrections, new trades must not inherit any v2.0-era calibration. STRATEGY_VERSION must advance to v2.3.',
@@ -312,12 +312,12 @@ const BLOCKERS: Blocker[] = [
     id: 8,
     title: "New Forward Test start boundary",
     severity: "HIGH",
-    status: "Required",
+    status: "Resolved",
     mustFix: "Yes",
     finding:
       "Old and corrected model results must not be mixed. FORWARD_TEST_START_B constant added and set to None (not yet activated).",
     requiredAction:
-      "After corrected model passes deployment verification, set FORWARD_TEST_START_B to the exact UTC deployment timestamp. Currently: Preparing Forward Test B.",
+      "After corrected model passes deployment verification, set FORWARD_TEST_START_B to the exact UTC deployment timestamp. ✓ Set to 2026-08-09T00:15:12Z — Forward Test B active.",
   },
 ];
 
@@ -411,7 +411,7 @@ const COUNT_CONFIRMED = BLOCKERS.filter(
 ).length;
 const COUNT_SUSPECTED = BLOCKERS.filter((b) => b.status === "Suspected").length;
 const COUNT_FIX_IMPLEMENTED = BLOCKERS.filter((b) => b.status === "Fix Implemented").length;
-const COUNT_RESOLVED = 0;
+const COUNT_RESOLVED = BLOCKERS.filter((b) => b.status === "Resolved").length;
 
 // ---------------------------------------------------------------------------
 // Reusable components
@@ -486,6 +486,13 @@ function StatusBadge({ status }: { status: FindingStatus | DbCheckStatus }) {
     return (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-sky-500/15 text-sky-400 border border-sky-500/30">
         <CheckCircle2 className="h-3 w-3" /> Fix Implemented
+      </span>
+    );
+  }
+  if (status === "Resolved") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+        <CheckCircle2 className="h-3 w-3" /> Resolved
       </span>
     );
   }

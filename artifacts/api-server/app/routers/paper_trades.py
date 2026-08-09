@@ -72,8 +72,8 @@ FORWARD_TEST_SETTLED_TARGET = 50
 # Forward Test B — set after corrections are deployed and runtime-verified.
 # None = "Preparing Forward Test B" (not yet activated).
 # Must be set to the exact UTC deployment timestamp of the correction commit.
-FORWARD_TEST_START_B: datetime | None = None
-FORWARD_TEST_PHASE_B = "Preparing Forward Test B"
+FORWARD_TEST_START_B: datetime | None = datetime(2026, 8, 9, 0, 15, 12, tzinfo=timezone.utc)
+FORWARD_TEST_PHASE_B = "Forward Test B active"
 
 # Set to True only after an explicit manual review of ROI, calibration,
 # strategy stability, and drawdown — never flip automatically.
