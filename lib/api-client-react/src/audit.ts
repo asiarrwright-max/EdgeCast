@@ -510,6 +510,91 @@ export const triggerAuditDbChecks = (
 ): Promise<{ ran: number; results: AuditCheckResultItem[] }> =>
   customFetch("/api/audit/run-db-checks", { ...options, method: "POST" });
 
+// ---------------------------------------------------------------------------
+// FTB Research Funnel
+// ---------------------------------------------------------------------------
+
+export interface FtbRejectionRow {
+  reason: string;
+  count: number;
+  pctOfTotal: number;
+  uniqueTickers: number;
+  cityDates: number;
+  fixable: boolean;
+  fixableNotes: string;
+}
+
+export interface FtbFunnelStep {
+  gate: string;
+  remaining: number;
+  dropped: number;
+}
+
+export interface FtbCityRow {
+  city: string;
+  total: number;
+  uniqueTickers: number;
+  uniqueDates: number;
+  officialCount: number;
+  topReason: string;
+  stationVerified: boolean;
+  potentiallyFixable: boolean;
+  estimatedRecoverable: number;
+}
+
+export interface FtbSafeAction {
+  action: string;
+  affectedCities: string[];
+  estimatedOpportunities: number;
+  confidence: "HIGH" | "MEDIUM" | "LOW";
+  effort: "Low" | "Medium" | "High";
+  riskToComparability: "None" | "Low" | "Moderate";
+  requiresExternalVerification: boolean;
+  notes: string;
+}
+
+export interface FtbResearchFunnelResult {
+  ftbBoundary: string;
+  strategy: string;
+  summary: {
+    total: number;
+    official: number;
+    researchOnly: number;
+  };
+  narrative: string;
+  rejections: FtbRejectionRow[];
+  funnel: FtbFunnelStep[];
+  cities: FtbCityRow[];
+  liquidity: {
+    noPriceAboveFloor: number;
+    staleQuoteWithAsk: number;
+    totalLiquidityBlocked: number;
+    pctLiquidityBlocked: number;
+    interpretation: string;
+  };
+  safeActions: FtbSafeAction[];
+  generatedAt: string;
+}
+
+export const getFtbResearchFunnel = (
+  options?: Parameters<typeof customFetch>[1]
+): Promise<FtbResearchFunnelResult> =>
+  customFetch<FtbResearchFunnelResult>("/api/audit/ftb-research-funnel", {
+    ...options,
+    method: "GET",
+  });
+
+export function useGetFtbResearchFunnel(
+  options?: UseQueryOptions<FtbResearchFunnelResult, unknown, FtbResearchFunnelResult>
+): UseQueryResult<FtbResearchFunnelResult, unknown> {
+  return useQuery({
+    queryKey: ["/api/audit/ftb-research-funnel"],
+    queryFn: ({ signal }) => getFtbResearchFunnel({ signal }),
+    staleTime: 5 * 60_000,
+    ...options,
+  }) as UseQueryResult<FtbResearchFunnelResult, unknown>;
+}
+
 export function useGetAuditCheckResults(
   options?: UseQueryOptions<AuditCheckResultsResponse, unknown, AuditCheckResultsResponse>
 ): UseQueryResult<AuditCheckResultsResponse, unknown> {

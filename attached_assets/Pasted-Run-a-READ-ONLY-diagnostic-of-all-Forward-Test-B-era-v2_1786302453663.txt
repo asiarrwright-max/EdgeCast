@@ -1,0 +1,253 @@
+Run a READ-ONLY diagnostic of all Forward Test B-era v2.3 paper trades that are currently RESEARCH_ONLY, and write the findings into the existing Audit & Validation tab so they remain visible for later review.
+
+Do not change model logic.
+Do not change eligibility thresholds.
+Do not change quote freshness.
+Do not change market-close rules.
+Do not change correlation rules.
+Do not change station-verification rules.
+Do not change FORWARD_TEST_START_B.
+Do not promote any trade to OFFICIAL.
+Do not publish any model changes.
+
+Forward Test B boundary:
+2026-08-09T00:15:12Z
+
+Current known state:
+- FTB OFFICIAL trades: 0
+- v2.3 FTB-era paper trades: ~334
+- these are currently RESEARCH_ONLY
+
+====================================
+1. BUILD A COMPLETE REJECTION BREAKDOWN
+====================================
+
+Analyze every v2.3 trade created at or after FORWARD_TEST_START_B.
+
+For all RESEARCH_ONLY trades, report the exact primary rejection reason.
+
+Group and count by reason, including at minimum:
+
+- missing executable ask
+- stale quote
+- no valid selected-side ask
+- quote age >300 sec
+- market close <=120 minutes
+- station not verified
+- unsupported/non-NWS settlement source
+- hourly contract not approved
+- correlated outcome
+- entry price floor
+- extreme probability/edge guard
+- parser/contract unsupported
+- missing forecast mapping
+- missing city/series mapping
+- duplicate market/direction
+- any other eligibility rule
+
+Show:
+- count
+- % of all v2.3 FTB-era trades
+- unique tickers affected
+- unique city/date events affected
+
+Do not lump unknown reasons together if a more precise stored reason is available.
+
+====================================
+2. IDENTIFY FIXABLE VS NON-FIXABLE REJECTIONS
+====================================
+
+Classify each rejection category into:
+
+A. Potentially recoverable WITHOUT weakening FTB rules
+Examples:
+- unverified station that could be authoritatively verified
+- missing mapping that can be correctly added
+- supported Kalshi series not yet mapped
+- parser gap for an otherwise valid known contract structure
+
+B. Not recoverable by engineering changes without altering the experiment
+Examples:
+- no liquidity / no ask
+- stale quote at the time
+- price floor
+- close-time guard
+- correlation exclusion
+- weak edge
+- market genuinely unsupported
+
+For each category, explain why.
+
+====================================
+3. CITY-LEVEL OPPORTUNITY ANALYSIS
+====================================
+
+For each city seen in FTB-era v2.3 data, report:
+
+- total trades evaluated
+- RESEARCH_ONLY count
+- top rejection reasons
+- whether station is verified
+- whether coordinates are verified
+- whether Kalshi settlement source is NWS-compatible
+- whether parser/mapping is complete
+- whether this city could become OFFICIAL with a documentation/mapping fix only
+
+Rank cities by:
+“Estimated number of additional unique OFFICIAL opportunities if verified/fixed without changing any rules.”
+
+Pay special attention to:
+- Philadelphia
+- Detroit
+- Portland
+- Kansas City
+- St. Louis
+- Atlanta
+and any other unverified city present in the data.
+
+Do not guess opportunity counts if historical data cannot support them.
+Use UNKNOWN where needed.
+
+====================================
+4. LIQUIDITY BOTTLENECK
+====================================
+
+Quantify how much of the RESEARCH_ONLY population is fundamentally caused by liquidity/quote availability.
+
+Report separately:
+
+- missing ask
+- zero/invalid ask
+- stale ask
+- quote present but unusable
+- market had a valid quote at some other recorded scan
+- market never had a usable recorded quote
+
+Answer:
+“What percentage of FTB RESEARCH_ONLY trades could not have become OFFICIAL regardless of station verification because no usable quote existed?”
+
+====================================
+5. RULE-BY-RULE FUNNEL
+====================================
+
+Create a funnel showing how many v2.3 FTB-era evaluations survive each major gate:
+
+1. market discovered
+2. parser supported
+3. city/series mapped
+4. NWS-compatible settlement
+5. verified settlement station
+6. fresh executable quote
+7. >120 min before close
+8. price/edge eligibility
+9. correlation/duplicate checks
+10. OFFICIAL
+
+Use the actual order in the eligibility engine if different.
+
+Show count remaining after each gate.
+
+====================================
+6. HIGHEST-LEVERAGE SAFE ACTIONS
+====================================
+
+Rank the top 5 actions that could create more OFFICIAL FTB opportunities WITHOUT changing any FTB rule.
+
+For each action show:
+
+- action
+- affected cities/markets
+- estimated additional unique opportunities
+- confidence in estimate
+- engineering effort: Low / Medium / High
+- risk to FTB comparability: None / Low / Moderate
+- whether it requires external authoritative verification
+
+Examples could include:
+- verify Philadelphia settlement station from Kalshi rules
+- add missing series mapping
+- fix parser for a supported contract structure
+
+Do NOT recommend lowering thresholds.
+
+====================================
+7. AUDIT TAB OUTPUT
+====================================
+
+Add a new persistent section to Audit & Validation called:
+
+“Forward Test B — RESEARCH_ONLY Funnel”
+
+It should include:
+
+- FTB boundary timestamp
+- total v2.3 FTB-era trades
+- OFFICIAL count
+- RESEARCH_ONLY count
+- rejection reason table
+- city opportunity ranking
+- liquidity percentage
+- rule-by-rule funnel
+- top 5 safe acceleration actions
+- generated_at timestamp
+
+Also add a plain-English summary at the top, for example:
+
+“Why are there no OFFICIAL FTB trades yet?”
+
+Then answer that in normal language based on the actual data.
+
+Important:
+This section must read from persisted/live data, not hardcoded numbers.
+
+====================================
+8. VALIDATION
+====================================
+
+Add tests proving:
+
+- only trades at/after FORWARD_TEST_START_B are counted
+- only v2.3 trades are included
+- FTA trades are excluded
+- OFFICIAL vs RESEARCH_ONLY counts reconcile
+- rejection totals reconcile to RESEARCH_ONLY total
+- city totals reconcile
+- no trade state is modified by this analysis
+
+Run:
+pytest tests/ -q
+and normal frontend/type checks.
+
+====================================
+9. COMMIT / PUBLISH
+====================================
+
+This is an analytics/UI-only task.
+
+Commit the audit feature.
+Push it to GitHub.
+Merge to main if tests pass.
+Publish so the live Audit & Validation tab shows the new section.
+
+Do not modify any trading/model behavior.
+
+====================================
+10. FINAL REPORT
+====================================
+
+Return:
+
+FTB V2.3 TOTAL:
+FTB OFFICIAL:
+FTB RESEARCH_ONLY:
+TOP 10 REJECTION REASONS:
+% LIQUIDITY-RELATED:
+TOP CITY OPPORTUNITIES:
+TOP 5 SAFE ACTIONS:
+TESTS:
+FRONTEND/TYPECHECK:
+COMMIT SHA:
+PRODUCTION BUILD ID:
+AUDIT SECTION LIVE: YES/NO
+MODEL/TRADING LOGIC CHANGED: YES/NO
+ANY ERRORS:

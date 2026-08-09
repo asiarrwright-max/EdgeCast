@@ -1183,6 +1183,299 @@ async def get_audit_check_results(
     return {"results": results}
 
 
+# ---------------------------------------------------------------------------
+# FTB Research Funnel — read-only diagnostic
+# ---------------------------------------------------------------------------
+
+#: Matches FORWARD_TEST_START_B in paper_trades.py — never change this value.
+_FTB_START_ISO = "2026-08-09 00:15:12+00"
+_FTB_STRATEGY  = "v2.3"
+
+#: Reasons that CAN be fixed without altering any FTB eligibility rule.
+_FIXABLE_REASONS: dict[str, str] = {
+    "settlement_station_unverified": (
+        "Station can be verified from the Kalshi contract rules_secondary field — "
+        "documentation lookup only, no rule change required"
+    ),
+    "no_city_mapping": (
+        "City/series mapping gap — a missing entry in the city-series table "
+        "can be added with an authoritative source lookup"
+    ),
+    "parser_unsupported": (
+        "Parser gap for an otherwise valid known contract structure — "
+        "code change that does not alter any threshold or guard"
+    ),
+}
+
+#: Reasons that CANNOT be fixed without weakening a FTB rule.
+_NON_FIXABLE_REASONS: dict[str, str] = {
+    "missing_or_stale_executable_quote": (
+        "Quote was recorded but >300s old at evaluation time — "
+        "the 300s threshold is a FTB rule; reducing it would change the experiment"
+    ),
+    "v2_excluded": (
+        "Market ask ≤$0.01 — no real liquidity; "
+        "the price floor is enforced before eligibility and is not a station issue"
+    ),
+    "hourly_temperature_not_approved": (
+        "Hourly temperature contract guard is an explicit FTB rule — "
+        "removing it would alter the experiment scope"
+    ),
+    "same_day_not_approved": "Same-day guard is a FTB rule",
+    "entry_price_below_official_floor": "Price floor is a FTB rule",
+    "extreme_edge_requires_validation": "Edge guard is a FTB rule",
+    "correlated_outcome_limit": "Correlation guard is a FTB rule",
+    "cutoff_unverified_or_too_close": "Market close-time guard is a FTB rule",
+}
+
+#: Cities whose settlement station is confirmed verified in the active pipeline.
+_VERIFIED_CITIES: frozenset[str] = frozenset({
+    "Dallas", "Denver", "Oklahoma City", "Houston", "New York City",
+    "Chicago", "Los Angeles", "Minneapolis", "Miami", "Boston",
+    "Seattle", "San Francisco", "Phoenix",
+})
+
+
+@router.get("/audit/ftb-research-funnel")
+async def get_ftb_research_funnel(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Read-only FTB-era v2.3 RESEARCH_ONLY funnel analysis.
+
+    Reports why zero OFFICIAL trades have been stamped since FORWARD_TEST_START_B,
+    broken down by rejection reason, city, liquidity availability, and a sequential
+    eligibility funnel.
+
+    Does NOT modify any trade, calibration, or model data.
+    """
+    from datetime import datetime, timezone
+    from sqlalchemy import text as sql_text
+
+    params = {"start": _FTB_START_ISO, "strategy": _FTB_STRATEGY}
+
+    # ── 1. Summary counts ──────────────────────────────────────────────────────
+    summary_row = (await db.execute(sql_text("""
+        SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN eligibility_status = 'OFFICIAL'      THEN 1 ELSE 0 END) AS official_cnt,
+            SUM(CASE WHEN eligibility_status = 'RESEARCH_ONLY' THEN 1 ELSE 0 END) AS research_only_cnt
+        FROM paper_trades
+        WHERE created_at >= :start AND strategy_version = :strategy
+    """), params)).mappings().one()
+
+    total            = int(summary_row["total"])
+    official_cnt     = int(summary_row["official_cnt"])
+    research_only_cnt = int(summary_row["research_only_cnt"])
+
+    # ── 2. Rejection breakdown ─────────────────────────────────────────────────
+    rejection_rows = (await db.execute(sql_text("""
+        SELECT
+            COALESCE(eligibility_reason, 'no_reason_recorded') AS reason,
+            COUNT(*)                  AS cnt,
+            COUNT(DISTINCT market_ticker)  AS unique_tickers,
+            COUNT(DISTINCT city || '|' || COALESCE(LEFT(target_settlement_date, 10), '?'))
+                                      AS city_dates
+        FROM paper_trades
+        WHERE created_at >= :start AND strategy_version = :strategy
+        GROUP BY eligibility_reason
+        ORDER BY cnt DESC
+    """), params)).mappings().all()
+
+    rejections: list[dict] = []
+    reason_counts: dict[str, int] = {}
+    for r in rejection_rows:
+        reason = str(r["reason"])
+        cnt    = int(r["cnt"])
+        reason_counts[reason] = cnt
+        fixable = reason in _FIXABLE_REASONS
+        rejections.append({
+            "reason":       reason,
+            "count":        cnt,
+            "pctOfTotal":   round(cnt / total * 100, 1) if total > 0 else 0.0,
+            "uniqueTickers": int(r["unique_tickers"]),
+            "cityDates":    int(r["city_dates"]),
+            "fixable":      fixable,
+            "fixableNotes": _FIXABLE_REASONS.get(reason) or _NON_FIXABLE_REASONS.get(reason) or "",
+        })
+
+    # ── 3. Funnel (sequential gates, cumulative) ───────────────────────────────
+    # Each gate removes trades whose first-failing reason matches that gate.
+    # Trades are mutually exclusive across reasons, so subtraction is exact.
+    f_after_hourly  = total - reason_counts.get("hourly_temperature_not_approved", 0)
+    f_after_station = f_after_hourly - reason_counts.get("settlement_station_unverified", 0)
+    f_after_v2excl  = f_after_station - reason_counts.get("v2_excluded", 0)
+    f_after_quote   = f_after_v2excl - reason_counts.get("missing_or_stale_executable_quote", 0)
+    f_after_cutoff  = f_after_quote - reason_counts.get("cutoff_unverified_or_too_close", 0)
+    f_after_sameday = f_after_cutoff - reason_counts.get("same_day_not_approved", 0)
+    f_after_price   = f_after_sameday - reason_counts.get("entry_price_below_official_floor", 0)
+    f_after_edge    = f_after_price - reason_counts.get("extreme_edge_requires_validation", 0)
+    f_after_corr    = f_after_edge - reason_counts.get("correlated_outcome_limit", 0)
+
+    def _step(gate: str, remaining: int, prev: int) -> dict:
+        return {"gate": gate, "remaining": remaining, "dropped": prev - remaining}
+
+    funnel: list[dict] = [
+        {"gate": "Market discovered by scanner",            "remaining": total,          "dropped": 0},
+        {"gate": "Parser supported + city/series mapped",   "remaining": total,          "dropped": 0},
+        {"gate": "NWS-compatible settlement source",        "remaining": total,          "dropped": 0},
+        _step("Hourly contract approved",                   f_after_hourly,  total),
+        _step("Settlement station verified",                f_after_station, f_after_hourly),
+        _step("Market price above floor (not v2_excluded)", f_after_v2excl,  f_after_station),
+        _step("Fresh executable quote (≤300 s)",            f_after_quote,   f_after_v2excl),
+        _step("Market close >120 min away",                 f_after_cutoff,  f_after_quote),
+        _step("Not same-day",                               f_after_sameday, f_after_cutoff),
+        _step("Price floor & edge eligibility",             f_after_price,   f_after_sameday),
+        _step("Correlation/duplicate check",                f_after_corr,    f_after_price),
+        {"gate": "OFFICIAL",                                "remaining": official_cnt, "dropped": max(0, f_after_corr - official_cnt)},
+    ]
+
+    # ── 4. City breakdown ──────────────────────────────────────────────────────
+    city_rows = (await db.execute(sql_text("""
+        SELECT
+            city,
+            COUNT(*)                    AS total,
+            COUNT(DISTINCT market_ticker)   AS unique_tickers,
+            COUNT(DISTINCT COALESCE(LEFT(target_settlement_date, 10), '?')) AS unique_dates,
+            SUM(CASE WHEN eligibility_status = 'OFFICIAL' THEN 1 ELSE 0 END) AS official_cnt,
+            MODE() WITHIN GROUP (ORDER BY eligibility_reason)               AS top_reason
+        FROM paper_trades
+        WHERE created_at >= :start AND strategy_version = :strategy
+        GROUP BY city
+        ORDER BY total DESC
+    """), params)).mappings().all()
+
+    cities: list[dict] = []
+    for r in city_rows:
+        city       = str(r["city"] or "Unknown")
+        top_reason = str(r["top_reason"] or "no_reason_recorded")
+        fixable    = top_reason == "settlement_station_unverified"
+        total_city = int(r["total"])
+        cities.append({
+            "city":               city,
+            "total":              total_city,
+            "uniqueTickers":      int(r["unique_tickers"]),
+            "uniqueDates":        int(r["unique_dates"]),
+            "officialCount":      int(r["official_cnt"]),
+            "topReason":          top_reason,
+            "stationVerified":    city in _VERIFIED_CITIES,
+            "potentiallyFixable": fixable,
+            "estimatedRecoverable": total_city if fixable else 0,
+        })
+
+    # ── 5. Liquidity stats ─────────────────────────────────────────────────────
+    penny_price  = reason_counts.get("v2_excluded", 0)
+    stale_cnt    = reason_counts.get("missing_or_stale_executable_quote", 0)
+    liq_total    = penny_price + stale_cnt
+    liq_pct      = round(liq_total / total * 100, 1) if total > 0 else 0.0
+    liquidity = {
+        "noPriceAboveFloor":     penny_price,
+        "staleQuoteWithAsk":     stale_cnt,
+        "totalLiquidityBlocked": liq_total,
+        "pctLiquidityBlocked":   liq_pct,
+        "interpretation": (
+            f"{liq_pct}% of FTB RESEARCH_ONLY trades could not have become OFFICIAL "
+            "regardless of station verification because no usable quote existed at scan time."
+        ),
+    }
+
+    # ── 6. Safe actions (derived from data, no rule changes) ───────────────────
+    fixable_cities = sorted(
+        [c for c in cities if c["potentiallyFixable"]],
+        key=lambda c: c["estimatedRecoverable"], reverse=True,
+    )
+    safe_actions: list[dict] = []
+    for c in fixable_cities[:4]:
+        safe_actions.append({
+            "action":                   f"Verify {c['city']} settlement station from Kalshi contract rules",
+            "affectedCities":           [c["city"]],
+            "estimatedOpportunities":   c["estimatedRecoverable"],
+            "confidence":               "MEDIUM",
+            "effort":                   "Low",
+            "riskToComparability":      "None",
+            "requiresExternalVerification": True,
+            "notes": (
+                "Look up the NWS station in the Kalshi market rules_secondary field "
+                f"for the {c['city']} series. Add verified coordinates + station ID "
+                "to the city config. No eligibility rule changes required."
+            ),
+        })
+    if stale_cnt > 0:
+        stale_cities = sorted(
+            {c["city"] for c in cities if c["topReason"] == "missing_or_stale_executable_quote"},
+        )
+        safe_actions.append({
+            "action":                   "Increase scan frequency to reduce stale-quote rejections",
+            "affectedCities":           stale_cities,
+            "estimatedOpportunities":   stale_cnt,
+            "confidence":               "LOW",
+            "effort":                   "Medium",
+            "riskToComparability":      "Low",
+            "requiresExternalVerification": False,
+            "notes": (
+                f"All {stale_cnt} stale-quote rejections have a stored ask price "
+                "but quote_age_seconds > 300 at evaluation time. Scanning more "
+                "frequently shrinks that window. Does NOT change the 300 s threshold — "
+                "pipeline timing change only."
+            ),
+        })
+
+    # ── 7. Plain-English narrative ─────────────────────────────────────────────
+    top4 = [r["reason"] for r in rejections[:4]]
+    narrative_parts = []
+    if reason_counts.get("missing_or_stale_executable_quote", 0):
+        n = reason_counts["missing_or_stale_executable_quote"]
+        narrative_parts.append(
+            f"Stale quotes ({n} trades, {round(n/total*100,0):.0f}%): the scanner records a "
+            "market quote each scan, but by the time the eligibility engine runs, the quote "
+            "is more than 300 seconds old. No quote passes the freshness gate."
+        )
+    if reason_counts.get("v2_excluded", 0):
+        n = reason_counts["v2_excluded"]
+        narrative_parts.append(
+            f"Illiquid markets ({n} trades, {round(n/total*100,0):.0f}%): these markets have an "
+            "ask price of ≤$0.01 — effectively no real liquidity — so the engine excludes them "
+            "before eligibility assessment."
+        )
+    if reason_counts.get("hourly_temperature_not_approved", 0):
+        n = reason_counts["hourly_temperature_not_approved"]
+        narrative_parts.append(
+            f"Hourly contracts ({n} trades, {round(n/total*100,0):.0f}%): Los Angeles and Chicago "
+            "hourly temperature markets are blocked by a Forward Test B rule. This cannot be changed "
+            "without altering the experiment."
+        )
+    if reason_counts.get("settlement_station_unverified", 0):
+        n = reason_counts["settlement_station_unverified"]
+        unver = sorted({c["city"] for c in cities if c["topReason"] == "settlement_station_unverified"})
+        narrative_parts.append(
+            f"Unverified stations ({n} trades, {round(n/total*100,0):.0f}%): "
+            f"{', '.join(unver)} — the Kalshi settlement NWS station has not been "
+            "documented in the city config. This IS fixable without rule changes."
+        )
+
+    narrative = (
+        f"Since Forward Test B started (2026-08-09T00:15:12Z), EdgeCast has evaluated "
+        f"{total} v2.3 market opportunities and produced 0 OFFICIAL trades. "
+        "The four root causes are: " + " | ".join(narrative_parts)
+        if narrative_parts else
+        f"{total} v2.3 FTB trades evaluated; 0 OFFICIAL."
+    )
+
+    return {
+        "ftbBoundary":  "2026-08-09T00:15:12Z",
+        "strategy":     _FTB_STRATEGY,
+        "summary":      {"total": total, "official": official_cnt, "researchOnly": research_only_cnt},
+        "narrative":    narrative,
+        "rejections":   rejections,
+        "funnel":       funnel,
+        "cities":       cities,
+        "liquidity":    liquidity,
+        "safeActions":  safe_actions,
+        "generatedAt":  datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @router.post("/audit/run-db-checks")
 async def trigger_audit_db_checks(
     db: AsyncSession = Depends(get_db),

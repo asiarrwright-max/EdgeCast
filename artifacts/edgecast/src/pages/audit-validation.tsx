@@ -9,9 +9,14 @@ import { ReactNode } from "react";
 import { useState } from "react";
 import {
   useGetAuditCheckResults,
+  useGetFtbResearchFunnel,
   triggerAuditDbChecks,
   type AuditCheckResultItem,
   type AuditCheckStatus,
+  type FtbRejectionRow,
+  type FtbCityRow,
+  type FtbSafeAction,
+  type FtbFunnelStep,
 } from "@workspace/api-client-react";
 import {
   ShieldCheck,
@@ -26,6 +31,10 @@ import {
   ChevronDown,
   ChevronUp,
   RefreshCw,
+  FlaskConical,
+  CheckCircle,
+  XCircle as XCircleIcon,
+  Loader2,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -798,6 +807,358 @@ function BaselineSection() {
 }
 
 // ---------------------------------------------------------------------------
+// FTB Research Funnel Section
+// ---------------------------------------------------------------------------
+
+const REASON_LABELS: Record<string, string> = {
+  missing_or_stale_executable_quote: "Stale executable quote (>300 s)",
+  v2_excluded:                        "Market price ≤$0.01 (no liquidity)",
+  hourly_temperature_not_approved:    "Hourly contract — FTB rule",
+  settlement_station_unverified:      "Settlement station unverified",
+  same_day_not_approved:              "Same-day contract — FTB rule",
+  entry_price_below_official_floor:   "Entry price below floor",
+  extreme_edge_requires_validation:   "Extreme edge — FTB rule",
+  correlated_outcome_limit:           "Correlated outcome limit",
+  cutoff_unverified_or_too_close:     "Market closes ≤120 min away",
+  no_reason_recorded:                 "No reason recorded",
+};
+
+function ReasonLabel({ reason }: { reason: string }) {
+  return <>{REASON_LABELS[reason] ?? reason}</>;
+}
+
+function FixableBadge({ fixable }: { fixable: boolean }) {
+  if (fixable) {
+    return (
+      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+        <CheckCircle2 className="h-2.5 w-2.5" /> fixable
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-muted/40 text-muted-foreground border border-border">
+      FTB rule
+    </span>
+  );
+}
+
+function FunnelBar({ step, maxRemaining }: { step: FtbFunnelStep; maxRemaining: number }) {
+  const pct = maxRemaining > 0 ? Math.round((step.remaining / maxRemaining) * 100) : 0;
+  const droppedPct = maxRemaining > 0 ? Math.round((step.dropped / maxRemaining) * 100) : 0;
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <div className="w-48 shrink-0 text-muted-foreground truncate" title={step.gate}>
+        {step.gate}
+      </div>
+      <div className="flex-1 flex h-5 rounded overflow-hidden bg-muted/30 min-w-0">
+        {step.remaining > 0 && (
+          <div
+            className="bg-primary/60 h-full transition-all"
+            style={{ width: `${pct}%` }}
+          />
+        )}
+        {step.dropped > 0 && (
+          <div
+            className="bg-destructive/50 h-full transition-all"
+            style={{ width: `${droppedPct}%` }}
+          />
+        )}
+      </div>
+      <div className="w-20 shrink-0 text-right font-mono">
+        <span className="text-foreground">{step.remaining}</span>
+        {step.dropped > 0 && (
+          <span className="text-destructive ml-1">−{step.dropped}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FtbResearchFunnelSection() {
+  const { data, isLoading, isError, refetch, isFetching } = useGetFtbResearchFunnel();
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <FlaskConical className="h-4 w-4 text-primary" />
+            <h2 className="text-sm font-semibold">Forward Test B — RESEARCH_ONLY Funnel</h2>
+          </div>
+        </CardHeader>
+        <CardBody>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading live funnel data…
+          </div>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  if (isError || !data) {
+    return (
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <FlaskConical className="h-4 w-4 text-primary" />
+            <h2 className="text-sm font-semibold">Forward Test B — RESEARCH_ONLY Funnel</h2>
+          </div>
+        </CardHeader>
+        <CardBody>
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-destructive">Failed to load funnel data.</p>
+            <button
+              onClick={() => refetch()}
+              className="text-xs text-primary hover:underline flex items-center gap-1"
+            >
+              <RefreshCw className="h-3 w-3" /> Retry
+            </button>
+          </div>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  const { summary, narrative, rejections, funnel, cities, liquidity, safeActions, generatedAt, ftbBoundary } = data;
+  const maxRemaining = funnel[0]?.remaining ?? summary.total;
+  const fixableCount = rejections.filter(r => r.fixable).reduce((a, r) => a + r.count, 0);
+  const unverifiedCities = cities.filter(c => c.potentiallyFixable);
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <FlaskConical className="h-4 w-4 text-primary" />
+            <h2 className="text-sm font-semibold">Forward Test B — RESEARCH_ONLY Funnel</h2>
+          </div>
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3 w-3 ${isFetching ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
+        <p className="text-[11px] text-muted-foreground mt-1">
+          FTB boundary: <span className="font-mono">{ftbBoundary}</span> · strategy: <span className="font-mono">{data.strategy}</span> ·
+          generated: <span className="font-mono">{new Date(generatedAt).toLocaleString()}</span>
+        </p>
+      </CardHeader>
+
+      <CardBody className="space-y-6">
+
+        {/* ── Why no OFFICIAL FTB trades? ── */}
+        <div className="rounded-md border border-primary/20 bg-primary/5 p-3 space-y-1">
+          <p className="text-xs font-semibold text-primary mb-1">Why are there no OFFICIAL FTB trades yet?</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">{narrative}</p>
+        </div>
+
+        {/* ── Summary stats ── */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="rounded-md border border-border p-3 text-center">
+            <div className="text-xl font-bold font-mono">{summary.total}</div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">Total evaluated</div>
+          </div>
+          <div className="rounded-md border border-border p-3 text-center">
+            <div className="text-xl font-bold font-mono text-muted-foreground">0</div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">OFFICIAL</div>
+          </div>
+          <div className="rounded-md border border-border p-3 text-center">
+            <div className="text-xl font-bold font-mono text-orange-400">{summary.researchOnly}</div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">RESEARCH_ONLY</div>
+          </div>
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-center">
+            <div className="text-xl font-bold font-mono text-amber-400">{liquidity.pctLiquidityBlocked}%</div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">Liquidity-blocked</div>
+          </div>
+        </div>
+
+        {/* ── Rejection Breakdown ── */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+            Rejection Breakdown
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border text-muted-foreground">
+                  <th className="text-left py-2 pr-3 font-medium">Reason</th>
+                  <th className="text-right py-2 px-3 font-medium">Count</th>
+                  <th className="text-right py-2 px-3 font-medium">%</th>
+                  <th className="text-right py-2 px-3 font-medium">Markets</th>
+                  <th className="text-left py-2 px-3 font-medium">Class</th>
+                  <th className="text-left py-2 pl-3 font-medium hidden md:table-cell">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rejections.map(r => (
+                  <tr key={r.reason} className="border-b border-border/50 hover:bg-muted/20">
+                    <td className="py-2 pr-3 font-mono text-foreground">
+                      <ReasonLabel reason={r.reason} />
+                    </td>
+                    <td className="text-right py-2 px-3 font-mono">{r.count}</td>
+                    <td className="text-right py-2 px-3 font-mono text-muted-foreground">{r.pctOfTotal}%</td>
+                    <td className="text-right py-2 px-3 font-mono text-muted-foreground">{r.uniqueTickers}</td>
+                    <td className="py-2 px-3"><FixableBadge fixable={r.fixable} /></td>
+                    <td className="py-2 pl-3 text-muted-foreground hidden md:table-cell max-w-xs truncate" title={r.fixableNotes}>
+                      {r.fixableNotes}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-border text-muted-foreground">
+                  <td className="py-2 pr-3 font-semibold">Total</td>
+                  <td className="text-right py-2 px-3 font-semibold font-mono">{summary.total}</td>
+                  <td className="text-right py-2 px-3 font-mono">100%</td>
+                  <td colSpan={3} />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          {fixableCount > 0 && (
+            <p className="text-[11px] text-emerald-400 mt-1">
+              ✓ {fixableCount} trades ({Math.round(fixableCount / summary.total * 100)}%) are blocked by fixable reasons — no eligibility rule changes required.
+            </p>
+          )}
+        </div>
+
+        {/* ── Eligibility Funnel ── */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+            Rule-by-Rule Eligibility Funnel
+          </h3>
+          <div className="space-y-1.5">
+            {funnel.map((step, i) => (
+              <FunnelBar key={i} step={step} maxRemaining={maxRemaining} />
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-2">
+            Blue = surviving trades · Red = dropped at this gate. Each trade is counted at its first-failing gate.
+          </p>
+        </div>
+
+        {/* ── Liquidity Detail ── */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+            Liquidity Analysis
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="rounded border border-border p-3 text-center">
+              <div className="text-lg font-bold font-mono text-destructive">{liquidity.noPriceAboveFloor}</div>
+              <div className="text-[11px] text-muted-foreground">Market price ≤$0.01</div>
+              <div className="text-[10px] text-muted-foreground/60 mt-0.5">no ask above floor</div>
+            </div>
+            <div className="rounded border border-border p-3 text-center">
+              <div className="text-lg font-bold font-mono text-orange-400">{liquidity.staleQuoteWithAsk}</div>
+              <div className="text-[11px] text-muted-foreground">Stale ask (&gt;300 s)</div>
+              <div className="text-[10px] text-muted-foreground/60 mt-0.5">had a price, expired</div>
+            </div>
+            <div className="rounded border border-amber-500/30 bg-amber-500/5 p-3 text-center">
+              <div className="text-lg font-bold font-mono text-amber-400">{liquidity.pctLiquidityBlocked}%</div>
+              <div className="text-[11px] text-muted-foreground">Liquidity-blocked</div>
+              <div className="text-[10px] text-muted-foreground/60 mt-0.5">{liquidity.totalLiquidityBlocked} / {summary.total} trades</div>
+            </div>
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-2 italic">{liquidity.interpretation}</p>
+        </div>
+
+        {/* ── City Opportunity Ranking ── */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+            City Opportunity Ranking
+            <span className="ml-2 font-normal normal-case">(ranked by estimated recoverable without rule changes)</span>
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border text-muted-foreground">
+                  <th className="text-left py-2 pr-3 font-medium">City</th>
+                  <th className="text-right py-2 px-3 font-medium">Evaluated</th>
+                  <th className="text-left py-2 px-3 font-medium">Top Reason</th>
+                  <th className="text-center py-2 px-3 font-medium">Station</th>
+                  <th className="text-right py-2 pl-3 font-medium">Recoverable</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cities.map(c => (
+                  <tr key={c.city} className={`border-b border-border/50 hover:bg-muted/20 ${c.potentiallyFixable ? "bg-emerald-500/3" : ""}`}>
+                    <td className="py-2 pr-3 font-medium">{c.city}</td>
+                    <td className="text-right py-2 px-3 font-mono">{c.total}</td>
+                    <td className="py-2 px-3 text-muted-foreground">
+                      <ReasonLabel reason={c.topReason} />
+                    </td>
+                    <td className="text-center py-2 px-3">
+                      {c.stationVerified ? (
+                        <CheckCircle2 className="h-3 w-3 text-emerald-400 inline" />
+                      ) : (
+                        <XCircle className="h-3 w-3 text-destructive inline" />
+                      )}
+                    </td>
+                    <td className="text-right py-2 pl-3 font-mono">
+                      {c.potentiallyFixable ? (
+                        <span className="text-emerald-400">+{c.estimatedRecoverable}</span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {unverifiedCities.length > 0 && (
+            <p className="text-[11px] text-emerald-400 mt-1">
+              ✓ {unverifiedCities.length} cit{unverifiedCities.length === 1 ? "y" : "ies"} ({unverifiedCities.map(c => c.city).join(", ")}) could become OFFICIAL with station documentation only.
+            </p>
+          )}
+        </div>
+
+        {/* ── Top 5 Safe Actions ── */}
+        {safeActions.length > 0 && (
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+              Top Safe Acceleration Actions
+              <span className="ml-2 font-normal normal-case">(no FTB rule changes)</span>
+            </h3>
+            <div className="space-y-2">
+              {safeActions.map((a, i) => (
+                <div key={i} className="rounded border border-border p-3 text-xs space-y-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="font-medium text-foreground">{i + 1}. {a.action}</span>
+                    <span className={`shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                      a.confidence === "MEDIUM"
+                        ? "bg-primary/10 text-primary border-primary/30"
+                        : a.confidence === "LOW"
+                          ? "bg-muted/40 text-muted-foreground border-border"
+                          : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                    }`}>{a.confidence} confidence</span>
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-muted-foreground">
+                    <span>Cities: {a.affectedCities.join(", ")}</span>
+                    <span>Est. opportunities: <span className="font-mono text-foreground">{a.estimatedOpportunities}</span></span>
+                    <span>Effort: {a.effort}</span>
+                    <span>Risk: {a.riskToComparability}</span>
+                    {a.requiresExternalVerification && <span className="text-amber-400">⚠ requires external verification</span>}
+                  </div>
+                  <p className="text-muted-foreground/80 leading-relaxed">{a.notes}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <p className="text-[10px] text-muted-foreground/50 text-right">
+          Read-only diagnostic · no model, eligibility, or trading logic modified
+        </p>
+      </CardBody>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -817,6 +1178,7 @@ export default function AuditValidationPage() {
       <ValidationStatus />
       <BlockersSection />
       <LiveDbChecksSection />
+      <FtbResearchFunnelSection />
       <NonBlockersSection />
       <ChainCoverageSection />
       <BaselineSection />
