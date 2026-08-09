@@ -1,0 +1,242 @@
+Complete the Forward Test B launch from the reviewed correction package.
+
+Use the reviewed replit-work branch with latest correction commit:
+
+628798cbb59632cfc89f2fd12020bf0e72a848a9
+
+Goal:
+Merge the reviewed fixes, deploy them, verify production, activate a clean Forward Test B boundary, and confirm the new forward test starts from zero without altering Forward Test A history.
+
+Do this carefully and in this exact order.
+
+====================================
+1. FINAL PRE-MERGE CHECK
+====================================
+
+Confirm replit-work contains commit:
+
+628798cbb59632cfc89f2fd12020bf0e72a848a9
+
+Run:
+
+pytest tests/ -q
+
+Report:
+- passed
+- failed
+- warnings
+
+Also run normal frontend/type checks.
+
+Do not continue if there are new failures.
+
+====================================
+2. MERGE TO MAIN
+====================================
+
+Merge replit-work into main.
+
+Do not squash away historical commit context unless required by the existing workflow.
+
+Report:
+- resulting main commit SHA
+- whether merge was clean
+- whether any conflicts occurred
+
+Do not modify historical trades.
+
+====================================
+3. PUBLISH THE CORRECTED BUILD
+====================================
+
+Publish the corrected main build to the live EdgeCast app.
+
+Record the exact deployment information:
+
+- deployment/build ID
+- deployed commit SHA
+- exact deployment completion timestamp in UTC
+
+This deployment timestamp will become the candidate Forward Test B boundary.
+
+Do NOT set FORWARD_TEST_START_B before production verification.
+
+====================================
+4. VERIFY PRODUCTION RUNTIME
+====================================
+
+After deployment, verify the live production app.
+
+Confirm:
+
+- API starts cleanly
+- frontend loads
+- Audit & Validation loads
+- /api/audit/check-results returns 200
+- no startup errors
+- no DB migration/create_all errors
+- no API 500s
+- no frontend rendering errors
+- scheduler starts normally
+- existing paper-trade history is still present
+- Forward Test A history is unchanged
+
+====================================
+5. VERIFY ALL FORWARD TEST B FIXES LIVE
+====================================
+
+Verify the deployed production code implements all reviewed corrections:
+
+A. NWS threshold rounding
+- integer GTE uses T - 0.5
+- integer LTE uses T + 0.5
+- half-integer thresholds remain unchanged
+- unsupported operators fail safely
+
+B. NWS range rounding
+- integer range bounds use lower - 0.5 and upper + 0.5
+
+C. Hourly sigma
+- hourly_threshold uses hourly sigma handling
+
+D. Station verification
+- unverified stations cannot create OFFICIAL V2.3 or V3 trades
+
+E. Coordinates
+- Philadelphia and San Antonio use corrected settlement-aligned coordinates
+
+F. V2.3 strategy isolation
+- new corrected V2 trades identify as strategy_version = "v2.3"
+- V2.3 calibration factor is 1.0 because no v2.3 calibration rows exist
+- historical V2.2 trades remain V2.2
+
+G. ERA5/GHCND local settlement date
+- verification converts UTC timestamp into settlement-station timezone before extracting local date
+- confirm the previously affected LA example would now resolve to 2026-08-07 rather than 2026-08-08
+
+Do not create fake production trades merely to prove these checks.
+
+====================================
+6. MARK VERIFIED AUDIT FIXES
+====================================
+
+After production verification succeeds, update the Audit & Validation statuses for the implemented blockers.
+
+Only mark a blocker RESOLVED if:
+
+- code fix is present
+- tests pass
+- live runtime behavior is verified
+
+Keep deferred/non-blocking items unchanged.
+
+Keep the WeatherLocation coordinate audit running because production weather_locations may still be empty.
+
+====================================
+7. ACTIVATE FORWARD TEST B
+====================================
+
+ONLY after all production verification above succeeds:
+
+Set:
+
+FORWARD_TEST_START_B
+
+to the exact UTC completion timestamp of the successfully verified corrected deployment.
+
+The timestamp must be precise to the second.
+
+Requirements:
+
+- Forward Test B metrics include only qualifying corrected trades created at or after FORWARD_TEST_START_B
+- historical Forward Test A trades remain untouched
+- Forward Test A and Forward Test B must never be mixed
+- V2.3 is the corrected V2 strategy for Forward Test B
+- V3 corrected trades after the boundary may also be tracked separately
+- RESEARCH_ONLY remains excluded from OFFICIAL metrics
+- legacy/pre-boundary trades remain excluded
+- real-money readiness remains "Not ready for real money"
+- MANUAL_READINESS_APPROVAL remains false
+
+====================================
+8. PUBLISH THE ACTIVATION CHANGE
+====================================
+
+If setting FORWARD_TEST_START_B requires a code/config change:
+
+- commit it
+- merge it to main if needed
+- republish once
+- record the final activation deployment build ID and commit SHA
+
+Do not change the timestamp to this second deployment time.
+
+The Forward Test B boundary must remain the exact timestamp from the first successfully verified corrected deployment identified in Step 3/4.
+
+====================================
+9. VERIFY FORWARD TEST B STARTS CLEAN
+====================================
+
+After final activation, verify production shows:
+
+Forward Test B
+- OFFICIAL settled: 0
+- OFFICIAL open: 0
+- V2.3 count: 0
+- V3 corrected count: 0
+- progress toward 50: 0%
+
+This must be true immediately at activation unless a legitimate corrected trade was created after the exact Forward Test B timestamp during deployment/activation.
+
+If any qualifying trade already exists after the boundary, report it explicitly rather than moving the timestamp forward.
+
+Also verify:
+
+- Forward Test A historical counts are still visible separately
+- no historical trade was relabeled or deleted
+- Audit & Validation shows the previous blockers as resolved where verified
+- the page identifies the current phase as Forward Test B active / collecting clean data
+- currentReadiness remains "Not ready for real money"
+
+====================================
+10. SAFETY / DO NOT CHANGE
+====================================
+
+Do NOT:
+
+- enable real-money trading
+- create real orders
+- alter stake sizing
+- change entry thresholds beyond the reviewed correction package
+- add multi-model consensus
+- add GFS cycle logic
+- fit calibration
+- build calibration write/refit logic
+- delete historical trades
+- overwrite Forward Test A
+- rewrite settled outcomes
+- move the Forward Test B timestamp to make counts look cleaner
+
+====================================
+11. FINAL REPORT
+====================================
+
+Return one compact final report:
+
+PRE-MERGE TESTS:
+MAIN MERGE SHA:
+CORRECTED DEPLOYMENT BUILD ID:
+CORRECTED DEPLOYMENT UTC TIMESTAMP:
+PRODUCTION RUNTIME:
+LIVE FIX VERIFICATION:
+FORWARD_TEST_START_B:
+ACTIVATION COMMIT SHA:
+ACTIVATION DEPLOYMENT BUILD ID:
+FORWARD TEST B INITIAL COUNTS:
+FORWARD TEST A PRESERVED:
+AUDIT STATUS:
+REAL-MONEY READINESS:
+ANY ERRORS OR EXCEPTIONS:
+FORWARD TEST B SUCCESSFULLY ACTIVE: YES / NO
+
+If anything fails at any stage, stop and report the failure instead of forcing activation.
