@@ -490,3 +490,20 @@ class PaperTrade(Base):
     # (market_close_timestamp - decision_timestamp) in minutes, stored at write time
     settlement_timezone: Mapped[str | None] = mapped_column(String(100))
     # IANA timezone string for the settlement station (e.g. "America/Denver")
+
+    # Settlement regime — tracks which data authority governs this contract's
+    # final settlement.  Stamped at trade creation from target_settlement_date.
+    # 'LEGACY_NWS'     : contracts settling before 2026-08-14 (NWS source)
+    # 'WEATHER_COMPANY': contracts settling on/after 2026-08-14 (The Weather Company)
+    # NULL: pre-migration row — treated as LEGACY_NWS for display purposes.
+    # NEVER rewrite old values; historical integrity depends on immutability.
+    settlement_regime: Mapped[str | None] = mapped_column(String(20))
+
+    # outcome_verified — True when settlement outcome confirmed against the
+    # authoritative source for this regime.  False/NULL = disputed or not yet
+    # manually confirmed.  Unverified outcomes are excluded from calibration
+    # learning to prevent contaminated sigma/bias estimates.
+    # Set to True automatically when Kalshi settles the trade (Kalshi IS the
+    # authoritative source); set to False if an ERA5 or other diagnostic check
+    # finds a discrepancy that requires manual review.
+    outcome_verified: Mapped[bool | None] = mapped_column(Boolean)

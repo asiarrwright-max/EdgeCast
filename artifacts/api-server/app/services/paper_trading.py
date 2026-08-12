@@ -610,6 +610,8 @@ async def maybe_create_paper_trade(
     now = datetime.now(timezone.utc)
     flags = compute_quality_flags(market, snap, side_price, created_at=now, correlated_count=correlated_count)
 
+    from app.services.settlement_regime import infer_settlement_regime  # local import avoids circular
+
     trade = PaperTrade(
         market_ticker=market.ticker,
         event_ticker=market.event_ticker,
@@ -635,6 +637,8 @@ async def maybe_create_paper_trade(
         decision_explanation=decision["decision_explanation"],
         warnings="; ".join(decision["warnings"]),
         quality_flags=flags if flags else None,
+        settlement_regime=infer_settlement_regime(market.target_date),
+        outcome_verified=None,  # set to True when Kalshi confirms settlement
     )
     session.add(trade)
     await session.flush()

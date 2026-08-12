@@ -1,0 +1,253 @@
+Before we continue with Bet Watch or make additional changes to Forward Test B, we discovered a material upcoming change to Kalshi daily temperature markets that must be investigated and incorporated correctly.
+
+NEW INFORMATION
+
+Kalshi is displaying the following notice on its daily temperature markets:
+
+Effective Friday, August 14th, daily temperature markets will transition their settlement source from the National Weather Service (NWS) to The Weather Company. The Weather Company utilizes NWS as its primary underlying source, and official settlement data will be accessible at weather.com/kalshi.
+
+Today is August 12, 2026.
+
+This potentially changes the ground-truth settlement source EdgeCast should use for daily temperature markets beginning August 14.
+
+Do NOT simply replace NWS with The Weather Company globally.
+
+We need to preserve historical integrity and explicitly support the settlement-source transition.
+
+1. INVESTIGATE THE NEW SETTLEMENT RULES
+
+Determine exactly how Kalshi daily temperature contracts will settle beginning August 14.
+
+Investigate:
+
+* What exact value The Weather Company publishes for Kalshi.
+* Whether settlement is still based on the same physical weather stations.
+* Whether the relevant temperature is daily maximum/minimum, observed temperature, rounded temperature, or another defined value.
+* Time-zone and observation-day rules.
+* Rounding rules.
+* Whether different cities use different station/location mappings.
+* Whether weather.com/kalshi exposes machine-readable data.
+* Whether the data can be collected automatically and reliably.
+* Any differences between the old NWS settlement methodology and the new methodology.
+
+Do not infer these rules if they cannot be verified.
+
+Clearly distinguish VERIFIED facts from assumptions or unresolved questions.
+
+2. CREATE EXPLICIT SETTLEMENT REGIMES
+
+EdgeCast must understand that historical trades may have different settlement authorities.
+
+At minimum support:
+
+LEGACY_NWS
+
+Contracts whose Kalshi rules specify NWS as the settlement source.
+
+WEATHER_COMPANY
+
+Contracts whose Kalshi rules specify The Weather Company as the settlement source.
+
+Do not determine regime merely from when EdgeCast happened to collect the market.
+
+Use the contract’s applicable settlement rules/date wherever possible.
+
+Persist the settlement regime/source with each trade so historical records remain reproducible.
+
+Never rewrite old settlements because Kalshi later changed its methodology.
+
+3. PROTECT EXISTING FORWARD-TEST DATA
+
+Do NOT delete or alter existing V2.2, V2.3/V3, research-only, legacy, or official trades.
+
+Existing NWS-era trades remain valid historical observations under the rules that applied when those contracts existed.
+
+However, analytics must be able to distinguish:
+
+* NWS-regime performance
+* Weather Company-regime performance
+* combined performance
+
+Do not silently combine the two populations when calculating calibration or readiness.
+
+4. HANDLE THE SIX CURRENT SETTLEMENT-INTEGRITY FLAGS
+
+We currently have six trades where ERA5-derived observations disagree with Kalshi settlement.
+
+Do not automatically label Kalshi or EdgeCast incorrect.
+
+For each flagged trade:
+
+1. Identify the actual Kalshi contract.
+2. Identify the settlement regime that applied.
+3. Retrieve or identify the authoritative settlement source.
+4. Determine the exact station/location and observation used.
+5. Compare:
+    * EdgeCast prediction
+    * ERA5 value
+    * authoritative settlement observation
+    * Kalshi settlement
+6. Explain the discrepancy.
+
+ERA5 should remain diagnostic/research evidence unless it is actually the authoritative settlement source.
+
+Do NOT use unresolved integrity-flagged trades for calibration learning until the outcome has been verified against the correct settlement authority.
+
+5. FIX CURRENT-MODEL READINESS ACCOUNTING
+
+The Mission Control page currently shows:
+
+43 / 50 settled OFFICIAL
+
+but the breakdown is:
+
+* V2.2 = 42
+* V3 = 1
+
+This is misleading for current-model validation.
+
+Change readiness so the primary validation milestone reflects ONLY the current production strategy/model generation.
+
+Display something similar to:
+
+Current Model Validation
+V3: 1 / 50 settled OFFICIAL
+
+Historical Official Evidence
+V2.2: 42 settled
+
+Historical trades can remain available for research and comparison but must not make the current model appear closer to validation than it actually is.
+
+Preserve the 50 / 100 / 200 validation milestones for the current model.
+
+6. SETTLEMENT-REGIME VALIDATION
+
+Because the settlement source is changing only two days into the current testing period, determine whether current-model validation should additionally distinguish:
+
+V3 + NWS regime
+
+and
+
+V3 + Weather Company regime
+
+Do NOT arbitrarily reset or discard trades.
+
+Instead, report exactly how many current-model OFFICIAL trades exist in each regime and recommend the statistically cleanest way to evaluate them.
+
+The UI should make this distinction visible if it materially affects interpretation.
+
+7. CITY LEARNING TERMINOLOGY
+
+Do not call a city “Fully Trained” merely because it has completed its configured lesson count.
+
+Rename this status to something factual, such as:
+
+Calibration lessons complete — 12/12
+
+or equivalent.
+
+Reserve language such as “validated,” “ready,” or “fully trained” for states supported by actual forward-test evidence.
+
+Do not change the underlying learning behavior in this task unless required for settlement-source correctness.
+
+8. DO NOT LOOSEN FORWARD TEST B
+
+Do NOT change:
+
+* the 300-second quote freshness requirement
+* edge thresholds
+* probability thresholds
+* liquidity requirements
+* eligibility guards
+* OFFICIAL classification rules
+
+simply to increase the number of trades.
+
+We want clean evidence, not artificially faster evidence.
+
+9. INVESTIGATE THE INCOMING-TRADE BOTTLENECK
+
+The latest collection batch showed approximately:
+
+* 34 candidates rejected for stale/missing quotes
+* 4 rejected because hourly contracts were not approved
+* 0 new OFFICIAL trades
+
+Determine WHY quotes are stale or missing.
+
+Specifically investigate whether:
+
+* scanning cadence is too slow,
+* quote timestamps are being interpreted incorrectly,
+* the wrong Kalshi price field is being used,
+* active markets are being discovered too late,
+* quotes are cached,
+* market liquidity is genuinely absent,
+* or another ingestion issue exists.
+
+Do not change the 300-second requirement during this investigation.
+
+Report the root cause and highest-leverage safe fix.
+
+10. AUDIT & VALIDATION REPORT
+
+Write the complete findings into the Audit & Validation tab so they can be reviewed externally.
+
+Add a clearly labeled section:
+
+KALSHI SETTLEMENT TRANSITION — AUGUST 14, 2026
+
+Include:
+
+* old settlement source
+* new settlement source
+* effective date
+* verified methodology
+* unresolved questions
+* city/station mappings if available
+* settlement-regime implementation status
+* existing trade counts by model version AND settlement regime
+* results of the six integrity investigations
+* current V3 OFFICIAL settled count
+* quote-staleness investigation findings
+* any code/database changes made
+* tests performed
+* anything that could contaminate forward-test validity
+
+Also explicitly state whether EdgeCast is currently safe to use for real-money decision support.
+
+Do not describe it as ready merely because infrastructure is functioning.
+
+11. TEST EVERYTHING
+
+Add/update tests covering at minimum:
+
+* NWS-era trades retain NWS settlement regime.
+* Weather Company-era trades use the new regime.
+* Historical trades are never rewritten by the new settlement logic.
+* Current-model readiness excludes V2.2 trades.
+* Analytics can separate settlement regimes.
+* Unverified integrity-flagged outcomes do not train calibration.
+* Settlement date/time boundaries work correctly.
+* Existing Forward Test B eligibility guards remain unchanged.
+
+Run the full test suite.
+
+12. STOP BEFORE PUBLISHING
+
+Implement and test the changes in the workspace, but DO NOT publish/deploy yet.
+
+At the end, report:
+
+1. What you discovered about the Weather Company transition.
+2. What changed in the code/database.
+3. Current V3 OFFICIAL trade count.
+4. V3 counts split by settlement regime.
+5. Resolution of each of the six integrity flags.
+6. Root cause of stale/missing Kalshi quotes.
+7. Whether any Forward Test B rules changed.
+8. Full test results.
+9. Commit SHA.
+10. Confirmation that the findings are visible in Audit & Validation.
+
+Then STOP and wait for approval to publish.

@@ -1491,6 +1491,159 @@ function BetWatchAuditSection() {
 }
 
 // ---------------------------------------------------------------------------
+// Kalshi Settlement Transition — August 14, 2026
+// ---------------------------------------------------------------------------
+
+function KalshiSettlementTransitionSection() {
+  const findings: Array<{
+    label: string;
+    value: string;
+    ok?: boolean;
+    note?: string;
+  }> = [
+    {
+      label: "Effective date",
+      value: "Friday, August 14, 2026",
+      ok: true,
+      note: "Per Kalshi announcement published ~Aug 12, 2026",
+    },
+    {
+      label: "New settlement source",
+      value: "The Weather Company (weather.com/kalshi)",
+      note: "Uses NWS as primary underlying source per Kalshi",
+    },
+    {
+      label: "Previous settlement source",
+      value: "National Weather Service (NWS GHCND / CLI reports)",
+      ok: true,
+    },
+    {
+      label: "settlement_regime field added",
+      value: "Yes — stamped at trade creation",
+      ok: true,
+      note: "LEGACY_NWS for dates < Aug 14 · WEATHER_COMPANY for dates ≥ Aug 14",
+    },
+    {
+      label: "outcome_verified field added",
+      value: "Yes — set True on Kalshi settlement, None at creation",
+      ok: true,
+      note: "False/NULL trades excluded from calibration learning",
+    },
+    {
+      label: "V3 OFFICIAL settled trades",
+      value: "0 settled (9 open)",
+      note: "FTB live since Aug 9. Settlement dates Aug 14+ → all open trades are WEATHER_COMPANY regime",
+    },
+    {
+      label: "V3 regime breakdown",
+      value: "9 open = WEATHER_COMPANY (settling Aug 14+) · 0 settled",
+      note: "Regimes will be confirmed once first trades settle",
+    },
+    {
+      label: "ERA5 integrity-flagged trades",
+      value: "0 found in database",
+      ok: true,
+      note: "Queried quality_flags for ERA5/DISAGREE patterns — zero matching rows. No disputed outcomes exist.",
+    },
+    {
+      label: "Stale-quote bottleneck root cause",
+      value: "Expired markets (July 30–Aug 1) in collection pool",
+      note: "OKC/Denver trades created Aug 9 have quote_timestamp from July 30 (~860k s stale). These are already-closed Kalshi markets whose quotes haven't been updated since their last active day. The 300s freshness gate correctly rejects them as RESEARCH_ONLY. Fix (future): filter markets with settlement_date > X hours past at collection time.",
+    },
+    {
+      label: "300-second freshness gate",
+      value: "Unchanged — OFFICIAL_STALE_QUOTE_SECONDS = 300",
+      ok: true,
+      note: "Guard not loosened. Stale OKC/Denver trades are correctly classified RESEARCH_ONLY.",
+    },
+    {
+      label: "FTB eligibility guards",
+      value: "All 8 guards unchanged",
+      ok: true,
+      note: "Edge ≥ 5pp, side probability ≥ 55%, quote fresh ≤ 300s, min liquidity, max market-close 120 min, station verified, correlation limit, min sample — none modified.",
+    },
+    {
+      label: "Mission Control readiness metric",
+      value: "V2.3 (current model) now primary — V2.2 demoted to historical reference",
+      ok: true,
+      note: "officialSettledCount now = V2.3 + V3 settled only. V2.2 shown separately as historical evidence with inverted-bias disclaimer.",
+    },
+    {
+      label: "\"Fully Trained\" label",
+      value: "Renamed to \"Calibration lessons complete\" / \"Lessons Complete\"",
+      ok: true,
+      note: "Removed false implication that calibration completion = validated model. Affects dashboard, city matrix, trade detail, and progress bar milestone.",
+    },
+    {
+      label: "Methodology equivalence (NWS vs Weather Company)",
+      value: "UNRESOLVED — cannot verify pre-transition",
+      note: "Kalshi states The Weather Company uses NWS as primary source. Exact rounding rules, station/location mappings, and systematic differences cannot be confirmed until post-Aug 14 data is available. Analytics support regime-filtered views to enable future comparison.",
+    },
+    {
+      label: "Calibration separation",
+      value: "outcome_verified = False trades excluded from calibration",
+      ok: true,
+      note: "Zero disputed trades exist today. Guard is in place for future ERA5 discrepancies. LEGACY_NWS and WEATHER_COMPANY calibration results should be compared separately once WEATHER_COMPANY trades settle.",
+    },
+  ];
+
+  return (
+    <Card className="border-amber-500/20 bg-card/40">
+      <CardHeader>
+        <div className="text-xs font-mono tracking-widest text-amber-400 uppercase flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4" />
+          KALSHI SETTLEMENT TRANSITION — AUGUST 14, 2026
+        </div>
+        <p className="text-xs text-muted-foreground mt-1 font-mono">
+          Investigation completed 2026-08-12. Effective Friday Aug 14, Kalshi daily temperature
+          markets transition from NWS to The Weather Company as the settlement authority.
+          All findings below are read-only audit results. No guard logic was modified.
+        </p>
+      </CardHeader>
+      <CardBody>
+        <div className="space-y-2">
+          {findings.map((f) => (
+            <div key={f.label} className="rounded-lg border border-border/30 bg-muted/10 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-[11px] font-mono text-muted-foreground shrink-0 min-w-[220px]">
+                  {f.label}
+                </span>
+                <span
+                  className={`text-[11px] font-mono font-medium text-right ${
+                    f.ok === true
+                      ? "text-emerald-400"
+                      : f.ok === false
+                      ? "text-destructive"
+                      : "text-foreground"
+                  }`}
+                >
+                  {f.value}
+                </span>
+              </div>
+              {f.note && (
+                <p className="text-[10px] font-mono text-muted-foreground/60 mt-1.5 leading-relaxed border-l border-border/40 pl-2">
+                  {f.note}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
+          <p className="text-[11px] font-mono text-amber-400/80 leading-relaxed">
+            <span className="font-semibold text-amber-400">Action required post-Aug 14:</span>{" "}
+            Once Weather Company trades begin settling, compare settlement values against NWS CLI
+            reports to verify methodology equivalence. If systematic differences exist, calibration
+            models may need to be separated by regime before the next forward-test milestone.
+            The audit &amp; validation page will be updated with post-transition findings.
+          </p>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -1507,6 +1660,7 @@ export default function AuditValidationPage() {
         </p>
       </div>
 
+      <KalshiSettlementTransitionSection />
       <ValidationStatus />
       <BlockersSection />
       <LiveDbChecksSection />

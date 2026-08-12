@@ -17,6 +17,8 @@ export interface ForwardTestStrategyRow {
   officialSettled: number;
   officialOpen: number;
   researchOnly: number;
+  /** Human-readable note about this strategy's role in the readiness metric. */
+  note?: string;
 }
 
 export interface ForwardTestReasonEntry {
@@ -45,8 +47,14 @@ export interface ForwardTestStatus {
   whyNoOfficialBet: Record<string, ForwardTestReasonEntry>;
   /** "Latest collection batch" or "Past 24 hours" — describes the whyNoOfficialBet window. */
   reasonBreakdownWindow: string;
+  /** Note explaining how settlement_regime is stamped. */
+  settlementRegimeNote?: string;
   byStrategy: {
+    /** Current production model (V2.3 corrected formula). Counts toward primary validation milestone. */
+    v23: ForwardTestStrategyRow;
+    /** Historical reference model (V2.2 inverted bias). EXCLUDED from primary metric. */
     v22: ForwardTestStrategyRow;
+    /** V3 predictive model (v3_paper_trades table). */
     v3: ForwardTestStrategyRow;
   };
   explanation: string;

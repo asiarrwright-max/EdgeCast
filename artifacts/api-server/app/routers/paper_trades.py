@@ -819,29 +819,55 @@ async def get_forward_test_status(
             q = q.where(c)
         return (await db.execute(q)).scalar_one() or 0
 
-    # ── V2.2 post-hardening counts (paper_trades table) ───────────────────────
-    # V2.2/V2.3 combined — v2.3 is the corrected continuation of v2.2 (same engine,
-    # corrected constants); both count toward the same forward-test strategy slot.
-    _v2x_versions = ["v2.2", "v2.3"]
+    # ── V2.3 — current production model (FTB corrected formula) ──────────────
+    # v2.3 is the live Forward Test B strategy, activated 2026-08-09.
+    # Only v2.3 (not v2.2) counts toward the primary readiness milestone —
+    # keeping these separate prevents historical V2.2 results from inflating
+    # the progress score of the current model.
+    v23_off_settled = await _ct(
+        PaperTrade,
+        PaperTrade.created_at >= start,
+        PaperTrade.eligibility_status == "OFFICIAL",
+        PaperTrade.status == "SETTLED",
+        PaperTrade.strategy_version == "v2.3",
+    )
+    v23_off_open = await _ct(
+        PaperTrade,
+        PaperTrade.created_at >= start,
+        PaperTrade.eligibility_status == "OFFICIAL",
+        PaperTrade.status == "OPEN",
+        PaperTrade.strategy_version == "v2.3",
+    )
+    v23_research = await _ct(
+        PaperTrade,
+        PaperTrade.created_at >= start,
+        PaperTrade.eligibility_status == "RESEARCH_ONLY",
+        PaperTrade.strategy_version == "v2.3",
+    )
+
+    # ── V2.2 — historical reference model (excluded from primary metric) ──────
+    # V2.2 ran with an inverted bias sign and was superseded by V2.3.
+    # Its settled trades are kept for research integrity but MUST NOT be counted
+    # toward the current model validation milestone.
     v22_off_settled = await _ct(
         PaperTrade,
         PaperTrade.created_at >= start,
         PaperTrade.eligibility_status == "OFFICIAL",
         PaperTrade.status == "SETTLED",
-        PaperTrade.strategy_version.in_(_v2x_versions),
+        PaperTrade.strategy_version == "v2.2",
     )
     v22_off_open = await _ct(
         PaperTrade,
         PaperTrade.created_at >= start,
         PaperTrade.eligibility_status == "OFFICIAL",
         PaperTrade.status == "OPEN",
-        PaperTrade.strategy_version.in_(_v2x_versions),
+        PaperTrade.strategy_version == "v2.2",
     )
     v22_research = await _ct(
         PaperTrade,
         PaperTrade.created_at >= start,
         PaperTrade.eligibility_status == "RESEARCH_ONLY",
-        PaperTrade.strategy_version.in_(_v2x_versions),
+        PaperTrade.strategy_version == "v2.2",
     )
 
     # ── V3 post-hardening counts (v3_paper_trades table) ─────────────────────
@@ -863,10 +889,13 @@ async def get_forward_test_status(
         V3PaperTrade.eligibility_status == "RESEARCH_ONLY",
     )
 
-    # ── Combined totals ───────────────────────────────────────────────────────
-    total_off_settled = v22_off_settled + v3_off_settled
-    total_off_open    = v22_off_open    + v3_off_open
-    total_research    = v22_research    + v3_research
+    # ── Combined totals — current model only (V2.3 + V3) ────────────────────
+    # IMPORTANT: V2.2 is deliberately excluded here.  Including V2.2 settled
+    # trades would misrepresent the current production model's validation
+    # status.  V2.2 is shown separately in byStrategy as historical reference.
+    total_off_settled = v23_off_settled + v3_off_settled
+    total_off_open    = v23_off_open    + v3_off_open
+    total_research    = v23_research    + v3_research
 
     # ── Legacy trades (both tables, created before forward-test start) ─────────
     legacy_pt = await _ct(PaperTrade,    PaperTrade.created_at    < start)
@@ -942,16 +971,33 @@ async def get_forward_test_status(
         "manualReadinessApproval": MANUAL_READINESS_APPROVAL,
         "whyNoOfficialBet":        why_no_bet,
         "reasonBreakdownWindow":   reason_window_label,
+        # Settlement regime breakdown — helps verify the transition is stamped correctly.
+        # All V2.3 OPEN trades created after 2026-08-09 should be WEATHER_COMPANY regime
+        # (settlement dates 2026-08-14+).  This appears in the audit section.
+        "settlementRegimeNote": (
+            "settlement_regime is stamped at trade creation from target_settlement_date. "
+            "Contracts settling 2026-08-14+ → WEATHER_COMPANY. "
+            "Pre-transition contracts → LEGACY_NWS. "
+            "NULL on pre-migration rows = LEGACY_NWS for display."
+        ),
         "byStrategy": {
+            "v23": {
+                "officialSettled": v23_off_settled,
+                "officialOpen":    v23_off_open,
+                "researchOnly":    v23_research,
+                "note": "Current production model — counts toward primary validation milestone.",
+            },
             "v22": {
                 "officialSettled": v22_off_settled,
                 "officialOpen":    v22_off_open,
                 "researchOnly":    v22_research,
+                "note": "Historical reference — inverted bias sign; superseded by V2.3. Excluded from primary metric.",
             },
             "v3": {
                 "officialSettled": v3_off_settled,
                 "officialOpen":    v3_off_open,
                 "researchOnly":    v3_research,
+                "note": "V3 predictive model (v3_paper_trades table).",
             },
         },
         "explanation": (

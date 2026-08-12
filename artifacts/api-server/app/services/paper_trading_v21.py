@@ -37,6 +37,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AppSetting, KalshiMarket, PaperTrade, PredictionSnapshot
+from app.services.settlement_regime import infer_settlement_regime as _infer_regime
 from app.services.paper_trading import (
     _is_confidence_sufficient,
     _select_yes_price,
@@ -569,6 +570,8 @@ async def maybe_create_paper_trade_v21(
             is_executable=decision["is_executable"],
             comparison_snapshot_id=comparison_snapshot_id,
             collection_batch_id=batch_id,
+            settlement_regime=_infer_regime(market.target_date),
+            outcome_verified=None,
         )
         session.add(trade)
         await session.flush()
@@ -624,6 +627,8 @@ async def maybe_create_paper_trade_v21(
         is_executable=decision["is_executable"],
         comparison_snapshot_id=comparison_snapshot_id,
         collection_batch_id=batch_id,
+        settlement_regime=_infer_regime(market.target_date),
+        outcome_verified=None,
     )
     session.add(trade)
     await session.flush()

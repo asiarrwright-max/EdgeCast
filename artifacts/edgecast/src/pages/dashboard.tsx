@@ -60,7 +60,7 @@ const CITY_CHIP_COLORS: Record<string, string> = {
 };
 
 const CITY_STATUS_LABEL: Record<string, string> = {
-  learned:             "Fully trained",
+  learned:             "Calibration lessons complete",
   partially_learned:   "Partially trained",
   insufficient_sample: "Almost ready",
   collecting:          "Collecting",
@@ -133,7 +133,7 @@ function getModelStage(summary: {
     return {
       color: "green",
       icon: <Sun className="h-10 w-10 sm:h-12 sm:w-12" />,
-      label: "Fully Trained",
+      label: "Calibration lessons complete",
       desc: "EdgeCast is using measured data for major cities and fine-tuning its probability outputs based on its own track record.",
       readiness: "Predictions use real-world data"
     };
@@ -588,14 +588,14 @@ export default function DashboardPage() {
                         </div>
                       </TooltipTrigger>
                       <TooltipContent className="font-sans text-xs leading-relaxed max-w-[280px]">
-                        Composite score (0–100): cities fully trained (40 pts), observation volume (30 pts), trades using learned data vs defaults (20 pts), cities partially trained (10 pts).
+                        Composite score (0–100): cities with calibration lessons complete (40 pts), observation volume (30 pts), trades using learned data vs defaults (20 pts), cities partially trained (10 pts).
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                   <div className="flex gap-5 text-right">
                     <div className="space-y-0.5">
                       <div className="text-2xl font-mono font-bold text-foreground">{learning.summary.citiesLearned}</div>
-                      <div className="text-[9px] uppercase tracking-widest text-muted-foreground">Fully Trained</div>
+                      <div className="text-[9px] uppercase tracking-widest text-muted-foreground">Lessons Complete</div>
                     </div>
                     <div className="space-y-0.5">
                       <div className="text-2xl font-mono font-bold text-foreground">{overallPct}%</div>
@@ -611,7 +611,7 @@ export default function DashboardPage() {
                    <span className={overallPct >= 0 ? "text-foreground" : ""}>Waiting</span>
                    <span className={overallPct >= 5 ? "text-foreground" : ""}>Learning</span>
                    <span className={overallPct >= 30 ? "text-foreground" : ""}>Getting Smarter</span>
-                   <span className={overallPct === 100 ? "text-emerald-400" : ""}>Fully Trained</span>
+                   <span className={overallPct === 100 ? "text-emerald-400" : ""}>Lessons Complete</span>
                 </div>
                 <div className="h-2.5 sm:h-3 bg-muted/50 rounded-full overflow-hidden border border-border/50">
                   <div
@@ -661,9 +661,9 @@ export default function DashboardPage() {
                     value={`${activelyLearning} / ${learning.summary.totalCities}`}
                     tip="Cities currently receiving real temperature data" />
                   <LearningStat 
-                    label="Fully Trained" 
+                    label="Lessons Complete" 
                     value={learning.summary.citiesLearned}
-                    tip="Cities that have collected enough data to use measured statistics" />
+                    tip="Cities that have collected enough calibration lessons to use measured statistics" />
                   <LearningStat 
                     label="Total Progress" 
                     value={`${overallPct}%`}

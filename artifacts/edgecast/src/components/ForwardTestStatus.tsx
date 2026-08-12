@@ -105,50 +105,88 @@ function StatPill({
 
 function OfficialTab({ data }: { data: ForwardTestStatus }) {
   const { byStrategy, officialSettledCount, officialOpenCount } = data;
+  const v23 = byStrategy.v23;
+  const v3  = byStrategy.v3;
+  const v22 = byStrategy.v22;
 
   return (
     <div className="space-y-4">
       <p className="text-[11px] font-mono text-muted-foreground leading-relaxed">
         Only trades stamped <span className="text-emerald-400 font-semibold">OFFICIAL</span> and
-        created after {data.forwardTestStartDate} count toward the win rate, ROI, and readiness score.
-        V2.2 and V3 are tracked separately.
+        created after {data.forwardTestStartDate} count toward the readiness score.
+        <span className="text-foreground font-semibold"> V2.3 (current model) + V3 feed the primary milestone.</span>{" "}
+        V2.2 is historical reference only — its results do not affect the progress bar.
       </p>
 
-      {/* Strategy breakdown table */}
-      <div className="overflow-x-auto rounded-lg border border-border/40">
-        <table className="w-full text-xs font-mono">
-          <thead className="bg-muted/30 border-b border-border/40">
-            <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              <th className="px-4 py-2.5 text-left font-medium">Strategy</th>
-              <th className="px-4 py-2.5 text-right font-medium">Settled ✓</th>
-              <th className="px-4 py-2.5 text-right font-medium">Open</th>
-              <th className="px-4 py-2.5 text-right font-medium">Total</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border/30">
-            {[
-              { label: "V2.2", row: byStrategy.v22 },
-              { label: "V3.0", row: byStrategy.v3 },
-            ].map(({ label, row }) => (
-              <tr key={label} className="hover:bg-muted/10 transition-colors">
-                <td className="px-4 py-3 text-foreground font-semibold">{label}</td>
-                <td className="px-4 py-3 text-right text-emerald-400">{row.officialSettled}</td>
-                <td className="px-4 py-3 text-right text-blue-400">{row.officialOpen}</td>
-                <td className="px-4 py-3 text-right text-muted-foreground">
-                  {row.officialSettled + row.officialOpen}
-                </td>
+      {/* ── Current model validation (V2.3 + V3) ── */}
+      <div>
+        <div className="text-[9px] font-mono uppercase tracking-widest text-emerald-400/70 mb-1.5 px-1">
+          Current Model Validation
+        </div>
+        <div className="overflow-x-auto rounded-lg border border-emerald-500/20">
+          <table className="w-full text-xs font-mono">
+            <thead className="bg-emerald-500/5 border-b border-border/40">
+              <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                <th className="px-4 py-2.5 text-left font-medium">Strategy</th>
+                <th className="px-4 py-2.5 text-right font-medium">Settled ✓</th>
+                <th className="px-4 py-2.5 text-right font-medium">Open</th>
+                <th className="px-4 py-2.5 text-right font-medium">Total</th>
               </tr>
-            ))}
-            <tr className="bg-muted/10 font-semibold">
-              <td className="px-4 py-3 text-foreground">Total</td>
-              <td className="px-4 py-3 text-right text-emerald-400">{officialSettledCount}</td>
-              <td className="px-4 py-3 text-right text-blue-400">{officialOpenCount}</td>
-              <td className="px-4 py-3 text-right text-foreground">
-                {officialSettledCount + officialOpenCount}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-border/30">
+              {v23 && (
+                <tr className="hover:bg-muted/10 transition-colors">
+                  <td className="px-4 py-3 text-foreground font-semibold">V2.3 <span className="text-[9px] text-emerald-400/70 font-normal ml-1">current</span></td>
+                  <td className="px-4 py-3 text-right text-emerald-400">{v23.officialSettled}</td>
+                  <td className="px-4 py-3 text-right text-blue-400">{v23.officialOpen}</td>
+                  <td className="px-4 py-3 text-right text-muted-foreground">{v23.officialSettled + v23.officialOpen}</td>
+                </tr>
+              )}
+              <tr className="hover:bg-muted/10 transition-colors">
+                <td className="px-4 py-3 text-foreground font-semibold">V3.0 <span className="text-[9px] text-muted-foreground font-normal ml-1">predictive</span></td>
+                <td className="px-4 py-3 text-right text-emerald-400">{v3.officialSettled}</td>
+                <td className="px-4 py-3 text-right text-blue-400">{v3.officialOpen}</td>
+                <td className="px-4 py-3 text-right text-muted-foreground">{v3.officialSettled + v3.officialOpen}</td>
+              </tr>
+              <tr className="bg-muted/10 font-semibold border-t border-emerald-500/20">
+                <td className="px-4 py-3 text-foreground">Milestone total</td>
+                <td className="px-4 py-3 text-right text-emerald-400">{officialSettledCount}</td>
+                <td className="px-4 py-3 text-right text-blue-400">{officialOpenCount}</td>
+                <td className="px-4 py-3 text-right text-foreground">{officialSettledCount + officialOpenCount}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── Historical evidence (V2.2) ── */}
+      <div>
+        <div className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground/50 mb-1.5 px-1">
+          Historical Evidence (excluded from milestone)
+        </div>
+        <div className="overflow-x-auto rounded-lg border border-border/30 opacity-60">
+          <table className="w-full text-xs font-mono">
+            <thead className="bg-muted/20 border-b border-border/30">
+              <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                <th className="px-4 py-2 text-left font-medium">Strategy</th>
+                <th className="px-4 py-2 text-right font-medium">Settled ✓</th>
+                <th className="px-4 py-2 text-right font-medium">Open</th>
+                <th className="px-4 py-2 text-right font-medium">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="px-4 py-2.5 text-muted-foreground font-semibold">V2.2 <span className="text-[9px] font-normal ml-1">inverted bias — superseded</span></td>
+                <td className="px-4 py-2.5 text-right text-muted-foreground">{v22.officialSettled}</td>
+                <td className="px-4 py-2.5 text-right text-muted-foreground">{v22.officialOpen}</td>
+                <td className="px-4 py-2.5 text-right text-muted-foreground">{v22.officialSettled + v22.officialOpen}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p className="text-[10px] font-mono text-muted-foreground/50 mt-1 px-1">
+          V2.2 used an inverted bias sign and was superseded by V2.3. Retained for record integrity; never mixed into the current model score.
+        </p>
       </div>
 
       {officialSettledCount === 0 && (

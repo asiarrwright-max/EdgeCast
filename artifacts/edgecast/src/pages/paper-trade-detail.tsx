@@ -179,15 +179,15 @@ function buildReasoningBullets(
       bullets.push({
         tone: "green",
         icon: <MapPin className="h-4 w-4" />,
-        headline: `${trade.city ?? "This city"} is fully trained${obsNote}`,
-        detail: "Enough historical outcomes have been confirmed for this city that EdgeCast's city-specific patterns are considered reliable.",
+        headline: `${trade.city ?? "This city"} has calibration lessons complete${obsNote}`,
+        detail: "Enough calibration lessons have been logged for this city to use measured statistics — calibration completion alone does not mean the model is validated for real-money use.",
       });
     } else if (cityStatus === "partially_learned") {
       bullets.push({
         tone: "blue",
         icon: <MapPin className="h-4 w-4" />,
         headline: `${trade.city ?? "This city"} is partially trained${obsNote}`,
-        detail: "This city is actively collecting data. Predictions are improving but haven't yet reached the fully-trained threshold.",
+        detail: "This city is actively collecting data. Predictions are improving but haven't yet reached the calibration completion threshold.",
       });
     } else if (cityStatus === "insufficient_sample") {
       bullets.push({

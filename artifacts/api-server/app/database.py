@@ -132,6 +132,18 @@ async def _apply_migrations(conn) -> None:
         "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS decision_timestamp TIMESTAMPTZ",
         "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS minutes_to_market_close FLOAT",
         "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS settlement_timezone VARCHAR(100)",
+        # Settlement regime — tracks which data source governs contract settlement.
+        # 'LEGACY_NWS'     = NWS-sourced (contracts settling before 2026-08-14)
+        # 'WEATHER_COMPANY' = The Weather Company sourced (settling 2026-08-14+)
+        # NULL = regime not yet stamped (pre-migration rows; treated as LEGACY_NWS for display)
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS settlement_regime VARCHAR(20)",
+        "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS settlement_regime VARCHAR(20)",
+        # outcome_verified — True when the settlement outcome has been confirmed against
+        # the authoritative settlement source.  False/NULL = disputed or unverified.
+        # ERA5-flagged or other disputed trades should remain outcome_verified=False
+        # until manually resolved.  Such trades are excluded from calibration learning.
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS outcome_verified BOOLEAN",
+        "ALTER TABLE v3_paper_trades ADD COLUMN IF NOT EXISTS outcome_verified BOOLEAN",
     ]
     for stmt in migrations:
         try:

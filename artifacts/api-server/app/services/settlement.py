@@ -256,6 +256,18 @@ async def run_settlement_job() -> dict[str, int]:
                 trade.return_pct = outcome["return_pct"]
                 trade.settlement_timestamp = datetime.now(timezone.utc)
 
+                # Stamp settlement regime if not already set (covers pre-migration rows).
+                # Kalshi is the authoritative settlement source, so Kalshi-confirmed
+                # outcomes are marked verified.  ERA5 discrepancies are handled
+                # separately via the integrity audit — they set outcome_verified=False.
+                if trade.settlement_regime is None:
+                    from app.services.settlement_regime import infer_settlement_regime
+                    trade.settlement_regime = infer_settlement_regime(
+                        trade.target_settlement_date
+                    )
+                if trade.outcome_verified is None:
+                    trade.outcome_verified = True  # Kalshi is authoritative source
+
                 if kalshi_result == "void":
                     trade.status = "VOID"
                     stats["voided"] += 1
