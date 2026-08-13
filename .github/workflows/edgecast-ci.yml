@@ -60,11 +60,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck
+      - name: Typecheck workspace
         run: pnpm typecheck
 
-      - name: Build
-        run: pnpm build
+      - name: Build production EdgeCast app
+        run: pnpm --filter @workspace/edgecast build
 
   safety-scan:
     name: Safety guard scan
