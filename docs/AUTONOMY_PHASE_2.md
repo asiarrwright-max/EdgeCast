@@ -66,3 +66,7 @@ No phone, browser tab, EdgeCast UI, or ChatGPT session needs to remain open for 
 ## Phase 3 activation point
 
 Once a supported cloud coding agent is enabled for this repository, the next change is to wire only `green-candidate` issues into that agent. The agent will be allowed to prepare a repair branch and PR, but not auto-merge or deploy. `safety-block`, YELLOW, and RED work must remain owner-gated.
+
+## Validation before merge
+
+Phase 2 is only ready to merge when the normal `EdgeCast CI` workflow is green on the feature branch. After merge, the first `main` push will automatically exercise the scheduled-maintenance workflow once, in addition to its every-six-hours schedule.
