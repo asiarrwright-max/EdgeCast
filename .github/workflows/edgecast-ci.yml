@@ -64,6 +64,8 @@ jobs:
         run: pnpm typecheck
 
       - name: Build production EdgeCast app
+        env:
+          PORT: "3000"
         run: pnpm --filter @workspace/edgecast build
 
   safety-scan:
