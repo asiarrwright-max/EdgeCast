@@ -170,11 +170,7 @@ def _yellow_reasons_from_files(files: list[dict[str, Any]]) -> list[str]:
         for pattern, _area, reason in _YELLOW_RULES:
             if pattern.search(filename):
                 reasons.append(f"{reason}: {filename}")
-    deduped: list[str] = []
-    for reason in reasons:
-        if reason not in deduped:
-            deduped.append(reason)
-    return deduped
+    return list(dict.fromkeys(reasons))
 
 
 def _affected_area(files: list[dict[str, Any]], title: str, body: str) -> str:
@@ -351,8 +347,14 @@ async def get_autonomy_snapshot() -> dict[str, Any]:
         )
 
     green_work = []
+    green_ready = 0
+    green_in_progress = 0
     for issue in green_items:
         labels = _label_names(issue)
+        if "agent-ready" in labels:
+            green_ready += 1
+        else:
+            green_in_progress += 1
         green_work.append(
             {
                 "number": issue["number"],
@@ -379,15 +381,6 @@ async def get_autonomy_snapshot() -> dict[str, Any]:
                 "isPullRequest": _is_pr(issue),
             }
         )
-
-    green_ready = 0
-    green_in_progress = 0
-    for issue in green_items:
-        labels = _label_names(issue)
-        if "agent-ready" in labels:
-            green_ready += 1
-        else:
-            green_in_progress += 1
 
     review_waiting_numbers = {
         int(issue["number"])

@@ -70,6 +70,7 @@ class TestYellowApprovalMutations:
                 result = await set_yellow_owner_approval(8, approved=True)
 
         assert result["ownerApproved"] is True
+        assert len(mock_client.request.await_args_list) == 2
         issue_call, add_label_call = mock_client.request.await_args_list
         assert issue_call.args[0] == "GET"
         assert issue_call.args[1] == "/repos/asiarrwright-max/EdgeCast/issues/8"
