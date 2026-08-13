@@ -268,12 +268,13 @@ export interface BestBetToday {
 // Hooks
 // ---------------------------------------------------------------------------
 
-export function useGetMultiStrategyComparison<
-  TData = StrategyComparisonData,
-  TError = unknown,
->(
-  options?: UseQueryOptions<StrategyComparisonData, TError, TData>
-): UseQueryResult<TData, TError> {
+export function useGetMultiStrategyComparison(
+  options?: UseQueryOptions<
+    StrategyComparisonData,
+    unknown,
+    StrategyComparisonData
+  >
+): UseQueryResult<StrategyComparisonData, unknown> {
   return useQuery({
     queryKey: ["/api/analytics/strategy-comparison"],
     queryFn: ({ signal }) =>
@@ -283,7 +284,7 @@ export function useGetMultiStrategyComparison<
       ),
     staleTime: 60_000,
     ...options,
-  }) as UseQueryResult<TData, TError>;
+  });
 }
 
 export function useGetBestBetToday<
