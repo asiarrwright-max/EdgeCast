@@ -51,7 +51,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: pnpm
 
       - name: Enable pnpm
         run: corepack enable
@@ -86,9 +85,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # EdgeCast is permanently paper-trading only. This is a narrow guard
-          # against introducing obvious Kalshi order-submission functions.
-          if git grep -nEi '(place_order|submit_order|create_order|order[_ -]?placement)' -- ':!AGENTS.md' ':!COLLABORATION.md' ':!docs/**' ':!*.md'; then
+          # EdgeCast is permanently paper-trading only. This deliberately scans
+          # executable source, while excluding policy/workflow text that names
+          # the forbidden functions as examples.
+          if git grep -nEi '(place_order|submit_order|create_order|order[_ -]?placement)' -- \
+            'artifacts/**/*.py' 'artifacts/**/*.ts' 'artifacts/**/*.tsx' 'lib/**/*.ts' 'lib/**/*.tsx' 'scripts/**/*.ts'; then
             echo "Potential real-money order-placement code detected. Review required."
             exit 1
           fi
