@@ -1,0 +1,221 @@
+name: EdgeCast Autonomous Maintenance
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: edgecast-autonomous-maintenance
+  cancel-in-progress: false
+
+jobs:
+  maintenance:
+    name: Repository health and autonomous triage
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync --frozen
+
+      - name: Backend tests
+        id: backend
+        continue-on-error: true
+        working-directory: artifacts/api-server
+        run: uv run --project ../.. pytest tests/ -q
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable pinned pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.15.1 --activate
+
+      - name: Install frontend dependencies
+        id: install
+        continue-on-error: true
+        run: pnpm install --frozen-lockfile
+
+      - name: Workspace typecheck
+        id: typecheck
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: pnpm typecheck
+
+      - name: Production EdgeCast build
+        id: build
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        env:
+          PORT: "3000"
+          BASE_PATH: "/"
+        run: pnpm --filter @workspace/edgecast build
+
+      - name: Secret-like tracked file guard
+        id: secrets
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -Ei '(^|/)(\.env($|\.)|secrets?\.(json|ya?ml)$|id_(rsa|ecdsa|ed25519)$)|\.(pem|pfx|p12|key)$'; then
+            echo "Forbidden secret-like file is tracked."
+            exit 1
+          fi
+
+      - name: Real-money order placement guard
+        id: order_guard
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -nEi '(place_order|submit_order|create_order|order[_ -]?placement)' -- \
+            'artifacts/**/*.py' 'artifacts/**/*.ts' 'artifacts/**/*.tsx' 'lib/**/*.ts' 'lib/**/*.tsx' 'scripts/**/*.ts'; then
+            echo "Potential real-money order-placement code detected."
+            exit 1
+          fi
+
+      - name: Open, update, or close autonomous health issue
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          BACKEND: ${{ steps.backend.outcome }}
+          INSTALL: ${{ steps.install.outcome }}
+          TYPECHECK: ${{ steps.typecheck.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          SECRETS: ${{ steps.secrets.outcome }}
+          ORDER_GUARD: ${{ steps.order_guard.outcome }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const title = '[AUTO] EdgeCast repository health failure';
+
+            const checks = [
+              ['backend-tests', process.env.BACKEND],
+              ['dependency-install', process.env.INSTALL],
+              ['workspace-typecheck', process.env.TYPECHECK],
+              ['production-build', process.env.BUILD],
+              ['secret-file-guard', process.env.SECRETS],
+              ['real-money-order-guard', process.env.ORDER_GUARD],
+            ];
+
+            const failures = checks.filter(([, outcome]) =>
+              outcome && !['success', 'skipped'].includes(outcome)
+            );
+
+            const labelSpecs = [
+              ['edgecast-auto', '5319e7', 'Created by EdgeCast autonomous maintenance'],
+              ['needs-triage', 'fbca04', 'Automated check found something that needs diagnosis'],
+              ['green-candidate', '0e8a16', 'Candidate for a GREEN engineering repair under AGENTS.md'],
+              ['safety-block', 'b60205', 'Safety/integrity guard failed; do not auto-repair or merge'],
+            ];
+
+            for (const [name, color, description] of labelSpecs) {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name });
+              } catch (error) {
+                if (error.status === 404) {
+                  await github.rest.issues.createLabel({ owner, repo, name, color, description });
+                } else {
+                  throw error;
+                }
+              }
+            }
+
+            const existing = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'open',
+              labels: 'edgecast-auto',
+              per_page: 100,
+            });
+            const healthIssue = existing.data.find(i => i.title === title);
+
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const now = new Date().toISOString();
+
+            if (failures.length === 0) {
+              core.summary
+                .addHeading('EdgeCast autonomous maintenance')
+                .addRaw(`All repository health checks passed at ${now}.`)
+                .write();
+
+              if (healthIssue) {
+                const recoveredBody = `${healthIssue.body || ''}\n\n---\n✅ **Recovered automatically**\n\nAll scheduled repository-health checks passed at ${now}.\n\nRun: ${runUrl}`;
+                await github.rest.issues.update({
+                  owner,
+                  repo,
+                  issue_number: healthIssue.number,
+                  state: 'closed',
+                  state_reason: 'completed',
+                  body: recoveredBody,
+                });
+              }
+              return;
+            }
+
+            const safetyFailure = failures.some(([name]) =>
+              ['secret-file-guard', 'real-money-order-guard'].includes(name)
+            );
+
+            const rows = checks.map(([name, outcome]) =>
+              `| ${name} | ${outcome || 'not-run'} |`
+            ).join('\n');
+
+            const body = `## Automated EdgeCast health alert\n\n` +
+              `EdgeCast found a repository-health failure while nobody needed to have the app or ChatGPT open.\n\n` +
+              `**Detected:** ${now}\n` +
+              `**Commit:** \`${context.sha}\`\n` +
+              `**Workflow run:** ${runUrl}\n\n` +
+              `| Check | Outcome |\n|---|---|\n${rows}\n\n` +
+              `### Autonomous classification\n\n` +
+              (safetyFailure
+                ? `**SAFETY BLOCK.** A secret/integrity guard failed. Do not auto-fix, auto-merge, or deploy. Owner review is required.\n\n`
+                : `**GREEN CANDIDATE FOR TRIAGE.** An engineering check failed. A coding agent may investigate and prepare a minimal tested repair, but AGENTS.md still governs whether the actual repair remains GREEN or must be escalated to YELLOW/RED.\n\n`) +
+              `### Agent handoff\n\n` +
+              `1. Inspect the failed workflow logs and reproduce the failure.\n` +
+              `2. Read AGENTS.md before editing.\n` +
+              `3. If the required repair is GREEN, create a branch and PR with the smallest safe fix.\n` +
+              `4. If the repair touches prediction probability, calibration, eligibility, settlement, OFFICIAL evidence, bankroll/risk, or real-money behavior, stop and classify upward for owner approval.\n` +
+              `5. Never weaken a test or safety gate merely to make CI pass.\n`;
+
+            const labels = safetyFailure
+              ? ['edgecast-auto', 'needs-triage', 'safety-block']
+              : ['edgecast-auto', 'needs-triage', 'green-candidate'];
+
+            if (healthIssue) {
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: healthIssue.number,
+                body,
+                labels,
+              });
+            } else {
+              await github.rest.issues.create({ owner, repo, title, body, labels });
+            }
+
+            core.setFailed(`Autonomous maintenance found ${failures.length} failed check(s).`);

@@ -1,0 +1,122 @@
+name: EdgeCast RGY Risk Gate
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  classify:
+    name: GREEN / YELLOW / RED classification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Classify changed files and enforce owner gates
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pull_number = context.payload.pull_request.number;
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner, repo, pull_number, per_page: 100,
+            });
+            const filenames = files.map(f => f.filename);
+            const labels = new Set((context.payload.pull_request.labels || []).map(l => l.name));
+
+            const secretLike = /(^|\/)(\.env($|\.)|secrets?\.(json|ya?ml)$|id_(rsa|ecdsa|ed25519)$)|\.(pem|pfx|p12|key)$/i;
+            const orderPattern = /(place_order|submit_order|create_order|order[_ -]?placement)/i;
+
+            const yellowPathPatterns = [
+              /probability_engine/i,
+              /eligibility\.py$/i,
+              /paper_trading/i,
+              /settlement\.py$/i,
+              /settlement_regime/i,
+              /calibrat/i,
+              /bankroll/i,
+              /stake_siz/i,
+              /verified.?cit/i,
+              /station.?map/i,
+              /forecast.?weight/i,
+              /ensemble.?weight/i,
+              /confidence.?scor/i,
+              /edge.?calcul/i,
+            ];
+
+            const redReasons = [];
+            const yellowReasons = [];
+
+            for (const f of files) {
+              if (secretLike.test(f.filename)) {
+                redReasons.push(`secret-like tracked file: ${f.filename}`);
+              }
+              if (f.patch && orderPattern.test(f.patch) && !f.filename.endsWith('.md') && !f.filename.includes('.github/workflows/')) {
+                redReasons.push(`possible real-money order-placement code in ${f.filename}`);
+              }
+              if (yellowPathPatterns.some(re => re.test(f.filename))) {
+                yellowReasons.push(`protected/sensitive path changed: ${f.filename}`);
+              }
+            }
+
+            // Policy/workflow changes are not automatically RED, but altering the core
+            // safeguards themselves deserves owner review.
+            if (filenames.includes('AGENTS.md') && context.payload.pull_request.user?.login === 'copilot-swe-agent[bot]') {
+              yellowReasons.push('cloud agent modified AGENTS.md');
+            }
+            if (filenames.some(f => f === '.github/workflows/pr-risk-gate.yml') && context.payload.pull_request.user?.login === 'copilot-swe-agent[bot]') {
+              yellowReasons.push('cloud agent modified the RGY enforcement workflow');
+            }
+
+            let classification = 'GREEN';
+            if (redReasons.length) classification = 'RED';
+            else if (yellowReasons.length) classification = 'YELLOW';
+
+            const labelSpecs = [
+              ['risk-green', '0e8a16', 'GREEN: routine engineering change'],
+              ['risk-yellow', 'd4a72c', 'YELLOW: owner approval required before merge/activation'],
+              ['risk-red', 'b60205', 'RED: autonomous activation prohibited'],
+              ['owner-approval-required', 'fbca04', 'Owner approval required before protected behavior can merge'],
+              ['owner-approved-yellow', '8250df', 'Repository owner explicitly approved this YELLOW PR'],
+            ];
+            for (const [name, color, description] of labelSpecs) {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name });
+              } catch (error) {
+                if (error.status === 404) await github.rest.issues.createLabel({ owner, repo, name, color, description });
+                else throw error;
+              }
+            }
+
+            const nextLabels = new Set(labels);
+            for (const l of ['risk-green', 'risk-yellow', 'risk-red', 'owner-approval-required']) nextLabels.delete(l);
+            nextLabels.add(`risk-${classification.toLowerCase()}`);
+            if (classification !== 'GREEN') nextLabels.add('owner-approval-required');
+            await github.rest.issues.setLabels({ owner, repo, issue_number: pull_number, labels: [...nextLabels] });
+
+            const details = classification === 'RED' ? redReasons : classification === 'YELLOW' ? yellowReasons : ['No protected behavior path or RED signature detected by the deterministic gate.'];
+            core.summary
+              .addHeading(`EdgeCast risk classification: ${classification}`)
+              .addRaw(details.map(x => `- ${x}`).join('\n'))
+              .write();
+
+            if (classification === 'RED') {
+              core.setFailed(`RED: ${redReasons.join('; ')}. Autonomous merge/activation is blocked. Real-money order placement remains prohibited.`);
+              return;
+            }
+
+            if (classification === 'YELLOW' && !labels.has('owner-approved-yellow')) {
+              core.setFailed(`YELLOW: owner approval required. Apply owner-approved-yellow only after explicit owner review. Reasons: ${yellowReasons.join('; ')}`);
+              return;
+            }
+
+            if (classification === 'YELLOW' && labels.has('owner-approved-yellow')) {
+              core.notice('YELLOW PR has explicit owner-approved-yellow label; risk gate permits CI to continue.');
+            } else {
+              core.notice('GREEN engineering change: risk gate passed.');
+            }

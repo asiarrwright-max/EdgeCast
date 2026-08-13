@@ -1,0 +1,167 @@
+name: EdgeCast Agent Dispatch
+
+on:
+  issues:
+    types: [labeled, reopened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to route"
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: edgecast-agent-dispatch-${{ github.event.issue.number || inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  route:
+    name: GREEN / YELLOW / RED routing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve issue and classification
+        id: classify
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNumber = context.payload.issue?.number ?? Number('${{ inputs.issue_number }}');
+            if (!issueNumber) core.setFailed('No issue number was provided.');
+
+            const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+            const labels = issue.labels.map(l => typeof l === 'string' ? l : l.name).filter(Boolean);
+
+            const labelSpecs = [
+              ['risk-green', '0e8a16', 'GREEN: autonomous engineering repair may be prepared as a PR'],
+              ['risk-yellow', 'd4a72c', 'YELLOW: investigation allowed; owner approval required before behavioral activation'],
+              ['risk-red', 'b60205', 'RED: autonomous implementation/activation prohibited'],
+              ['owner-approval-required', 'fbca04', 'Owner approval is required before merge/activation'],
+              ['agent-ready', '1d76db', 'Eligible for cloud coding-agent assignment'],
+              ['agent-token-needed', 'cfd3d7', 'Cloud agent dispatch is prepared but repository token/configuration is still needed'],
+            ];
+            for (const [name, color, description] of labelSpecs) {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name });
+              } catch (error) {
+                if (error.status === 404) {
+                  await github.rest.issues.createLabel({ owner, repo, name, color, description });
+                } else throw error;
+              }
+            }
+
+            let classification = 'NONE';
+            if (labels.includes('safety-block') || labels.includes('risk-red')) {
+              classification = 'RED';
+            } else if (labels.includes('yellow-candidate') || labels.includes('risk-yellow')) {
+              classification = 'YELLOW';
+            } else if (labels.includes('green-candidate') || labels.includes('risk-green')) {
+              classification = 'GREEN';
+            }
+
+            const desired = new Set(labels);
+            for (const l of ['risk-green', 'risk-yellow', 'risk-red', 'owner-approval-required', 'agent-ready']) desired.delete(l);
+
+            if (classification === 'GREEN') {
+              desired.add('risk-green');
+              desired.add('agent-ready');
+            } else if (classification === 'YELLOW') {
+              desired.add('risk-yellow');
+              desired.add('owner-approval-required');
+            } else if (classification === 'RED') {
+              desired.add('risk-red');
+              desired.add('owner-approval-required');
+            }
+
+            await github.rest.issues.update({ owner, repo, issue_number: issueNumber, labels: [...desired] });
+
+            core.setOutput('issue_number', String(issueNumber));
+            core.setOutput('classification', classification);
+
+            if (classification === 'YELLOW' || classification === 'RED') {
+              const marker = `<!-- edgecast-route-${classification.toLowerCase()} -->`;
+              const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: issueNumber, per_page: 100 });
+              if (!comments.some(c => (c.body || '').includes(marker))) {
+                const message = classification === 'YELLOW'
+                  ? `${marker}\n🟡 **YELLOW — OWNER APPROVAL REQUIRED**\n\nAutomated engineering may investigate and prepare evidence, but this issue must not be behaviorally activated, merged, or deployed without explicit owner approval under \`AGENTS.md\`.`
+                  : `${marker}\n🔴 **RED — AUTONOMOUS IMPLEMENTATION STOPPED**\n\nThis issue crosses an EdgeCast safety/integrity boundary. No cloud coding agent will be assigned automatically. Real-money execution remains prohibited and any permitted next step requires explicit owner review under \`AGENTS.md\`.`;
+                await github.rest.issues.createComment({ owner, repo, issue_number: issueNumber, body: message });
+              }
+            }
+
+      - name: Dispatch GREEN issue to Copilot cloud agent
+        if: steps.classify.outputs.classification == 'GREEN'
+        env:
+          COPILOT_AGENT_TOKEN: ${{ secrets.COPILOT_AGENT_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.classify.outputs.issue_number }}
+          GH_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${COPILOT_AGENT_TOKEN:-}" ]; then
+            echo "COPILOT_AGENT_TOKEN is not configured; leaving issue agent-ready."
+            exit 0
+          fi
+
+          payload=$(cat <<JSON
+          {
+            "assignees": ["copilot-swe-agent[bot]"],
+            "agent_assignment": {
+              "target_repo": "${GH_REPOSITORY}",
+              "base_branch": "main",
+              "custom_instructions": "Read AGENTS.md and COLLABORATION.md first. This issue was routed GREEN. Use the EdgeCast Green Repair policy: make only the smallest behavior-preserving engineering repair, run tests/typecheck/build, open a PR, never merge/deploy, and stop/escalate if the required repair is YELLOW or RED. Never change real-money behavior."
+            }
+          }
+          JSON
+          )
+
+          http_code=$(curl -sS -o /tmp/copilot-response.json -w "%{http_code}" \
+            -L -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${COPILOT_AGENT_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GH_REPOSITORY}/issues/${ISSUE_NUMBER}/assignees" \
+            -d "$payload")
+
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "Copilot assignment failed with HTTP ${http_code}."
+            cat /tmp/copilot-response.json
+            exit 1
+          fi
+
+          echo "GREEN issue ${ISSUE_NUMBER} assigned to Copilot cloud agent."
+
+      - name: Record GREEN dispatch state
+        if: always() && steps.classify.outputs.classification == 'GREEN'
+        uses: actions/github-script@v7
+        env:
+          TOKEN_CONFIGURED: ${{ secrets.COPILOT_AGENT_TOKEN != '' }}
+          ISSUE_NUMBER: ${{ steps.classify.outputs.issue_number }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
+            const tokenConfigured = process.env.TOKEN_CONFIGURED === 'true';
+            const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+            const labels = new Set(issue.labels.map(l => typeof l === 'string' ? l : l.name).filter(Boolean));
+
+            if (!tokenConfigured) labels.add('agent-token-needed');
+            else labels.delete('agent-token-needed');
+
+            await github.rest.issues.update({ owner, repo, issue_number: issueNumber, labels: [...labels] });
+
+            const marker = '<!-- edgecast-green-dispatch -->';
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: issueNumber, per_page: 100 });
+            if (!comments.some(c => (c.body || '').includes(marker))) {
+              const body = tokenConfigured
+                ? `${marker}\n🟢 **GREEN — CLOUD REPAIR DISPATCHED**\n\nThis issue is eligible for autonomous repair. Copilot cloud agent has been asked to diagnose it, make the smallest GREEN-safe fix, run validation, and open a PR. It is not allowed to merge or deploy. If the real repair is YELLOW or RED, the agent must stop and escalate.`
+                : `${marker}\n🟢 **GREEN — AGENT READY**\n\nThis issue is eligible for autonomous repair, but \`COPILOT_AGENT_TOKEN\` is not configured yet. The repository will keep the issue ready without making unsafe substitutions. Once the token is configured, reapply the \`green-candidate\` label or run EdgeCast Agent Dispatch manually.`;
+              await github.rest.issues.createComment({ owner, repo, issue_number: issueNumber, body });
+            }
