@@ -66,6 +66,7 @@ jobs:
       - name: Build production EdgeCast app
         env:
           PORT: "3000"
+          BASE_PATH: "/"
         run: pnpm --filter @workspace/edgecast build
 
   safety-scan:
