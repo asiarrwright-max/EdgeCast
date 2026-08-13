@@ -62,3 +62,7 @@ The safe target state is:
 `scheduled health check -> GitHub issue -> cloud coding agent -> tested branch/PR -> CI -> owner only when approval is required`
 
 No phone, browser tab, EdgeCast UI, or ChatGPT session needs to remain open for the scheduled health/triage portion.
+
+## Phase 3 activation point
+
+Once a supported cloud coding agent is enabled for this repository, the next change is to wire only `green-candidate` issues into that agent. The agent will be allowed to prepare a repair branch and PR, but not auto-merge or deploy. `safety-block`, YELLOW, and RED work must remain owner-gated.
