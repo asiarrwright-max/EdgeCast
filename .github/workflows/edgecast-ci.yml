@@ -90,9 +90,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # EdgeCast is permanently paper-trading only. This deliberately scans
-          # executable source, while excluding policy/workflow text that names
-          # the forbidden functions as examples.
           if git grep -nEi '(place_order|submit_order|create_order|order[_ -]?placement)' -- \
             'artifacts/**/*.py' 'artifacts/**/*.ts' 'artifacts/**/*.tsx' 'lib/**/*.ts' 'lib/**/*.tsx' 'scripts/**/*.ts'; then
             echo "Potential real-money order-placement code detected. Review required."
