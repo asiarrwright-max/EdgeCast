@@ -17,6 +17,7 @@ The goal is to reduce human relay work while preserving experimental integrity, 
 7. Autonomous changes must be testable, reversible, and auditable.
 8. EdgeCast remains paper-trading only. Never add or activate real-money order placement.
 9. Follow `COLLABORATION.md`: use feature branches and pull requests; never push feature work directly to `main`.
+10. Scheduled maintenance may detect, classify, create/update issues, and close recovered health issues without owner interaction. It must not auto-merge or deploy code.
 
 ## Change authority
 
@@ -118,40 +119,27 @@ Recommendations should expose the evidence behind ranking, including model proba
 ## Autonomous repair workflow
 
 1. Reproduce/verify the issue from source data, logs, and code.
-2. Classify the proposed change GREEN, YELLOW, or RED.
-3. GREEN: fix on a feature branch, add/update tests, validate, and open a PR.
-4. YELLOW: investigate, quantify impact, prepare the proposed change/PR, and request approval before merge/deploy.
-5. RED: stop before behavioral activation and request explicit approval.
+2. Classify the required repair as GREEN, YELLOW, or RED before editing behavior.
+3. GREEN: implement the smallest safe repair, add/update tests, run validation, and open a PR.
+4. YELLOW: investigate and prepare evidence/patches, but wait for explicit owner approval before behavioral activation.
+5. RED: stop before activation and require explicit owner approval. Real-money execution remains prohibited.
 6. Never hide failed tests or unresolved integrity concerns.
+7. A scheduled health workflow may automatically open/update/close engineering issues. Creating an issue is not permission to change model/trading behavior.
 
 ## Validation expectations
 
-Before considering a change complete, run applicable automated checks, including:
+Before a code change is complete, run applicable automated checks including backend tests, frontend/type checks, production build checks, and targeted regression tests.
 
-```bash
-cd artifacts/api-server && python -m pytest tests/ -q
-pnpm typecheck
-pnpm build
-```
+If pre-existing failures exist, distinguish them from failures introduced by the change.
 
-If pre-existing failures exist, clearly distinguish them from failures introduced by the proposed change.
-
-A successful build alone does not prove forecasting correctness. Data/decision changes require domain-level regression tests where practical.
+A successful build alone does not prove forecasting correctness. Data/decision changes require domain-level assertions where practical.
 
 ## Auditability
 
-Material changes must make it possible to reconstruct:
+Material changes should preserve enough information to reconstruct what changed, why, initiator, commit/version, tests performed, OFFICIAL impact, and whether owner approval was required/obtained.
 
-- what changed,
-- why it changed,
-- who/what initiated it,
-- branch/commit version,
-- tests performed,
-- whether OFFICIAL evaluation is affected,
-- whether owner approval was required/obtained.
+## Default rule when uncertain
 
-## Default when uncertain
+If a change could alter forecasts, probabilities, calibration, settlement, eligibility, OFFICIAL evidence, financial risk, or the meaning of a trade, classify it upward and ask for approval.
 
-If a proposed change could alter forecasts, probabilities, calibration, settlement, eligibility, official performance, financial risk, or the meaning of an OFFICIAL trade, classify it upward and ask for approval.
-
-Autonomy is encouraged for engineering maintenance. Experimental integrity takes priority over autonomy.
+Autonomy is encouraged for engineering maintenance. Experimental integrity and safety take priority over autonomy.
