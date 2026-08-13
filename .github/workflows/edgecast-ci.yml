@@ -1,0 +1,94 @@
+name: EdgeCast CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, replit-work, "chatgpt/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: edgecast-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-tests:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync --frozen
+
+      - name: Run backend test suite
+        working-directory: artifacts/api-server
+        run: uv run --project ../.. pytest tests/ -q
+
+  frontend-checks:
+    name: Frontend typecheck and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+  safety-scan:
+    name: Safety guard scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fail on tracked secret-like files
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -Ei '(^|/)(\.env($|\.)|secrets?\.(json|ya?ml)$|id_(rsa|ecdsa|ed25519)$)|\.(pem|pfx|p12|key)$'; then
+            echo "Forbidden secret-like file is tracked."
+            exit 1
+          fi
+
+      - name: Block real-money order-placement code paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          # EdgeCast is permanently paper-trading only. This is a narrow guard
+          # against introducing obvious Kalshi order-submission functions.
+          if git grep -nEi '(place_order|submit_order|create_order|order[_ -]?placement)' -- ':!AGENTS.md' ':!COLLABORATION.md' ':!docs/**' ':!*.md'; then
+            echo "Potential real-money order-placement code detected. Review required."
+            exit 1
+          fi
