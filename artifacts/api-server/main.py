@@ -15,6 +15,7 @@ from app.routers import strategy_comparison  # Unified cross-strategy comparison
 from app.routers import bet_watch             # Bet Watch — read-only decision support
 from app.routers import city_study            # City Specialization Study — read-only analytics
 from app.routers import verified_city_study   # Verified City Specialization — read-only
+from app.routers import autonomy             # Autonomy approvals/status page API
 
 logging.basicConfig(
     level=logging.INFO,
@@ -77,3 +78,4 @@ app.include_router(strategy_comparison.router, prefix="/api")   # Unified compar
 app.include_router(bet_watch.router, prefix="/api")              # Bet Watch — read-only
 app.include_router(city_study.router, prefix="/api")             # City Study — read-only analytics
 app.include_router(verified_city_study.router, prefix="/api")    # Verified City Study — read-only
+app.include_router(autonomy.router, prefix="/api")               # Autonomy approvals/status
