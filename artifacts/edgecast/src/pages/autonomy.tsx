@@ -356,7 +356,7 @@ export default function AutonomyPage() {
         </div>
         <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-4 text-sm text-rose-100">
           RED work stays blocked. No button on this page can approve prohibited behavior, and
-          real-money order placement remains permanently prohibited.
+          real-money trading remains permanently prohibited.
         </div>
         <WorkList
           items={data.redWork}
