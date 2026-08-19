@@ -17,7 +17,7 @@ The goal is to reduce human relay work while preserving experimental integrity, 
 7. Autonomous changes must be testable, reversible, and auditable.
 8. EdgeCast remains paper-trading only. Never add or activate real-money order placement.
 9. Follow `COLLABORATION.md`: use feature branches and pull requests; never push feature work directly to `main`.
-10. Scheduled maintenance may detect, classify, create/update issues, close recovered health issues, and dispatch approved GREEN issues to a cloud coding agent without owner interaction. It must not auto-merge or deploy code.
+10. Scheduled maintenance may detect, classify, create/update issues, close recovered health issues, and dispatch approved GREEN issues without owner interaction. It may also dispatch a YELLOW issue after the repository owner has explicitly approved that specific issue with `owner-approved-yellow`; that dispatch is limited to the approved scope and does not authorize merge, deploy, broader protected behavior, or real-money execution.
 
 ## Change authority
 
@@ -60,7 +60,7 @@ This includes:
 - Changes that alter historical performance metrics.
 - Automated calibration using newly settled trades.
 
-Agents may gather evidence, run read-only analysis/simulations, add tests, and prepare a PR, but must clearly state expected impact and wait for owner approval before merge/deploy. The deterministic PR gate may require the `owner-approved-yellow` label before allowing a YELLOW PR to pass.
+Agents may gather evidence, run read-only analysis/simulations, add tests, and prepare a PR, but must clearly state expected impact and wait for owner approval before merge/deploy. When the owner explicitly approves a specific YELLOW issue by applying `owner-approved-yellow`, a cloud agent may be assigned automatically to implement and test only the scope that was approved and prepare a PR. That issue-level approval does not authorize a new protected decision discovered during implementation, does not authorize broader forecasting/calibration/eligibility/settlement/recommendation/readiness-threshold changes, and does not authorize merge, deploy, or real-money execution. Any newly discovered protected decision must return to the owner for a separate approval. The deterministic PR gate may still require the `owner-approved-yellow` label on the resulting YELLOW PR before allowing it to pass.
 
 ### RED — never autonomously activate
 
@@ -88,7 +88,7 @@ RED issues must not be automatically dispatched to a coding agent. RED PR signat
 - `risk-yellow`: owner approval is required before protected behavior can merge or activate.
 - `risk-red`: autonomous implementation/activation is blocked.
 - `owner-approval-required`: owner must review before protected behavior can proceed.
-- `owner-approved-yellow`: explicit repository-owner approval for the specific YELLOW PR after review.
+- `owner-approved-yellow`: explicit repository-owner approval for the specific YELLOW issue or PR after review. On an issue, it permits scoped agent implementation/testing and PR preparation only; it does not by itself authorize merge/deploy or any broader protected behavior.
 - `safety-block`: integrity/safety failure; do not auto-repair, auto-merge, or deploy.
 
 Labels are routing aids, not permission to ignore this policy. If the actual required fix is more sensitive than its incoming label, classify upward immediately.
@@ -136,11 +136,11 @@ Recommendations should expose the evidence behind ranking, including model proba
 1. Reproduce/verify the issue from source data, logs, and code.
 2. Classify the required repair as GREEN, YELLOW, or RED before editing behavior.
 3. GREEN: implement the smallest safe repair, add/update tests, run validation, and open a PR.
-4. YELLOW: investigate and prepare evidence/patches, but wait for explicit owner approval before behavioral activation.
+4. YELLOW: investigate and prepare evidence/patches, and require explicit owner approval before protected behavioral activation. After the owner explicitly approves the specific issue, an agent may implement/test only that approved scope and prepare a PR; newly discovered protected decisions require a new owner approval.
 5. RED: stop before activation and require explicit owner approval where project policy allows a next step. Real-money execution remains prohibited.
 6. Never hide failed tests or unresolved integrity concerns.
 7. A scheduled health workflow may automatically open/update/close engineering issues.
-8. A cloud agent may be automatically assigned only to GREEN work. If the real fix becomes YELLOW or RED, it must stop and escalate rather than edit protected behavior.
+8. A cloud agent may be automatically assigned to GREEN work, or to a YELLOW issue only after explicit repository-owner approval is recorded for that specific issue. Approved YELLOW assignment is limited to the approved scope and PR preparation; if the work expands beyond that scope or reaches a RED boundary, the agent must stop and escalate.
 9. No autonomous workflow or coding agent may merge or deploy a PR.
 
 ## Validation expectations
