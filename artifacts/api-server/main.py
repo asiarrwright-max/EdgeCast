@@ -16,6 +16,7 @@ from app.routers import bet_watch             # Bet Watch — read-only decision
 from app.routers import city_study            # City Specialization Study — read-only analytics
 from app.routers import verified_city_study   # Verified City Specialization — read-only
 from app.routers import autonomy             # Autonomy approvals/status page API
+from app.routers import readiness            # Real-Money Readiness dashboard — read-only
 
 logging.basicConfig(
     level=logging.INFO,
@@ -79,3 +80,4 @@ app.include_router(bet_watch.router, prefix="/api")              # Bet Watch —
 app.include_router(city_study.router, prefix="/api")             # City Study — read-only analytics
 app.include_router(verified_city_study.router, prefix="/api")    # Verified City Study — read-only
 app.include_router(autonomy.router, prefix="/api")               # Autonomy approvals/status
+app.include_router(readiness.router, prefix="/api")              # Real-Money Readiness — read-only
