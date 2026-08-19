@@ -38,6 +38,7 @@ export interface YellowProposal {
   ciState: string;
   riskState: string;
   ownerApproved: boolean;
+  isPullRequest: boolean;
   htmlUrl: string;
   updatedAt: string;
 }

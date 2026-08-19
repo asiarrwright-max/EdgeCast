@@ -313,6 +313,7 @@ async def get_autonomy_snapshot() -> dict[str, Any]:
 
     red_work_items = _dedupe_issues(red_items, safety_blocks)
     yellow_pr_issues = [issue for issue in yellow_items if _is_pr(issue)]
+    yellow_plain_issues = [issue for issue in yellow_items if not _is_pr(issue)]
 
     pull_numbers = [int(issue["number"]) for issue in yellow_pr_issues]
     pull_details = await asyncio.gather(*[_get_pull_details(token, number) for number in pull_numbers])
@@ -341,10 +342,37 @@ async def get_autonomy_snapshot() -> dict[str, Any]:
                 "ciState": _plain_ci_state(status),
                 "riskState": _risk_state(labels),
                 "ownerApproved": "owner-approved-yellow" in labels,
+                "isPullRequest": True,
                 "htmlUrl": issue.get("html_url"),
                 "updatedAt": issue.get("updated_at"),
             }
         )
+
+    for issue in yellow_plain_issues:
+        labels = _label_names(issue)
+        body = issue.get("body") or ""
+        why_yellow = (
+            _extract_section(body, ("why yellow", "why edgecast classified this yellow", "classification"))
+            or "This issue touches protected EdgeCast behavior and requires owner approval before any related work can go live."
+        )
+        yellow_cards.append(
+            {
+                "number": issue["number"],
+                "title": issue.get("title") or f"Issue #{issue['number']}",
+                "summary": _extract_summary(body) or "No short summary was provided.",
+                "whyYellow": why_yellow,
+                "affectedArea": _affected_area([], issue.get("title") or "", body),
+                "expectedImpact": _extract_section(body, ("expected impact", "evidence", "impact", "validation", "acceptance criteria")),
+                "ciState": "Not applicable — no pull request yet.",
+                "riskState": _risk_state(labels),
+                "ownerApproved": "owner-approved-yellow" in labels,
+                "isPullRequest": False,
+                "htmlUrl": issue.get("html_url"),
+                "updatedAt": issue.get("updated_at"),
+            }
+        )
+
+    yellow_cards.sort(key=lambda c: c.get("updatedAt") or "", reverse=True)
 
     green_work = []
     green_ready = 0
@@ -423,12 +451,10 @@ async def set_yellow_owner_approval(pull_request_number: int, *, approved: bool)
     )
     labels = _label_names(issue)
 
-    if not _is_pr(issue):
-        raise AutonomyGithubError(400, "Only pull requests can receive an owner YELLOW decision.")
     if issue.get("state") != "open":
-        raise AutonomyGithubError(400, "Only open pull requests can receive an owner YELLOW decision.")
+        raise AutonomyGithubError(400, "Only open issues and pull requests can receive an owner YELLOW decision.")
     if "risk-yellow" not in labels:
-        raise AutonomyGithubError(400, "This pull request is not currently classified as YELLOW.")
+        raise AutonomyGithubError(400, "This item is not currently classified as YELLOW.")
 
     if approved:
         await _github_request(
@@ -451,12 +477,13 @@ async def set_yellow_owner_approval(pull_request_number: int, *, approved: bool)
             json={"labels": ["owner-approval-required"]},
         )
 
+    item_kind = "pull request" if _is_pr(issue) else "issue"
     return {
         "number": pull_request_number,
         "ownerApproved": approved,
         "message": (
-            "Owner approval label applied. This action does not merge or deploy the pull request."
+            f"Owner approval label applied. This action does not merge, deploy, or enable real-money execution."
             if approved
-            else "Owner approval label removed. The pull request remains blocked pending owner review."
+            else f"Owner approval label removed. The {item_kind} remains blocked pending owner review."
         ),
     }
