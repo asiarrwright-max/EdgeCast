@@ -1,5 +1,9 @@
 # EdgeCast AI Engineering Policy
 
+## North Star — read first
+
+**All coding agents must read `EDGECAST_VISION.md` before planning or implementing any work.** That file is the canonical North Star for EdgeCast. No local task should be optimized in a way that moves EdgeCast away from the vision described there.
+
 ## Purpose
 
 EdgeCast is a weather-market forecasting and paper-trading decision-support system. This file defines what AI coding agents may change autonomously, what requires owner approval, and what must never be activated automatically.
