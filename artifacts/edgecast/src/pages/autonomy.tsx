@@ -392,7 +392,8 @@ export default function AutonomyPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Approve this YELLOW proposal?</AlertDialogTitle>
             <AlertDialogDescription>
-              This only adds the <code>owner-approved-yellow</code> label to PR #
+              This only adds the <code>owner-approved-yellow</code> label to{" "}
+              {confirmingProposal?.isPullRequest ? "PR" : "issue"} #
               {confirmingProposal?.number}. It does not merge, deploy, or enable real-money behavior.
             </AlertDialogDescription>
           </AlertDialogHeader>
