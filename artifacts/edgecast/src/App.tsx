@@ -19,6 +19,7 @@ import V21AuditPage from '@/pages/v21-audit';
 import AuditValidationPage from '@/pages/audit-validation';
 import BetWatchPage from '@/pages/bet-watch';
 import AutonomyPage from '@/pages/autonomy';
+import ReadinessPage from '@/pages/readiness';
 
 import Layout from '@/components/layout';
 
@@ -96,6 +97,7 @@ function ProtectedRoutes() {
         <PageErrorBoundary>
           <Switch>
             <Route path="/bet-watch" component={BetWatchPage} />
+            <Route path="/readiness" component={ReadinessPage} />
             <Route path="/dashboard" component={DashboardPage} />
             <Route path="/markets" component={MarketsPage} />
             <Route path="/markets/:ticker" component={MarketDetailPage} />
