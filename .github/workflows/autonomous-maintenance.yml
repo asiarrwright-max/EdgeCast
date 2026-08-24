@@ -91,7 +91,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git grep -nEi '(place_order|submit_order|create_order|order[_ -]?placement)' -- \
+          # Match code-like invocation/assignment signatures, not explanatory UI or safety prose.
+          if git grep -nEi '(place_order[[:space:]]*\(|submit_order[[:space:]]*\(|create_order[[:space:]]*\(|order_placement[[:space:]]*(\(|=|:))' -- \
             'artifacts/**/*.py' 'artifacts/**/*.ts' 'artifacts/**/*.tsx' 'lib/**/*.ts' 'lib/**/*.tsx' 'scripts/**/*.ts'; then
             echo "Potential real-money order-placement code detected."
             exit 1
