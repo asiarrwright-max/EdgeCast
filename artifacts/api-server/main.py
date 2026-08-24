@@ -18,6 +18,7 @@ from app.routers import city_study            # City Specialization Study — re
 from app.routers import verified_city_study   # Verified City Specialization — read-only
 from app.routers import autonomy             # Autonomy approvals/status page API
 from app.routers import readiness            # Real-Money Readiness dashboard — read-only
+from app.routers import forward_evidence_reconciliation  # Forward-evidence reconciliation diagnostics — read-only
 
 logging.basicConfig(
     level=logging.INFO,
@@ -79,3 +80,4 @@ app.include_router(city_study.router, prefix="/api")
 app.include_router(verified_city_study.router, prefix="/api")
 app.include_router(autonomy.router, prefix="/api")
 app.include_router(readiness.router, prefix="/api")
+app.include_router(forward_evidence_reconciliation.router, prefix="/api")
