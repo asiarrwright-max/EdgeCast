@@ -1,0 +1,1 @@
+Temporary engineering note: PR #19 exposed an RGY false positive where safety/UI prose containing the phrase “order placement” was classified as executable order-placement code. The repair narrows RED detection to code-like order function/identifier usage while retaining the prohibition on real-money execution. This note can be removed after the control-plane fix is validated.
