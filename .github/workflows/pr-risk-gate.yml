@@ -30,7 +30,9 @@ jobs:
             const labels = new Set((context.payload.pull_request.labels || []).map(l => l.name));
 
             const secretLike = /(^|\/)(\.env($|\.)|secrets?\.(json|ya?ml)$|id_(rsa|ecdsa|ed25519)$)|\.(pem|pfx|p12|key)$/i;
-            const orderPattern = /(place_order|submit_order|create_order|order[_ -]?placement)/i;
+            // RED detection should match executable/code-like order placement, not safety/UI prose
+            // such as "real-money order placement remains prohibited".
+            const orderCodePattern = /(place_order|submit_order|create_order)\s*\(|\border[_]?placement\b\s*[:=({]/i;
 
             const yellowPathPatterns = [
               /probability_engine/i,
@@ -56,7 +58,7 @@ jobs:
               if (secretLike.test(f.filename)) {
                 redReasons.push(`secret-like tracked file: ${f.filename}`);
               }
-              if (f.patch && orderPattern.test(f.patch) && !f.filename.endsWith('.md') && !f.filename.includes('.github/workflows/')) {
+              if (f.patch && orderCodePattern.test(f.patch) && !f.filename.endsWith('.md') && !f.filename.includes('.github/workflows/')) {
                 redReasons.push(`possible real-money order-placement code in ${f.filename}`);
               }
               if (yellowPathPatterns.some(re => re.test(f.filename))) {
