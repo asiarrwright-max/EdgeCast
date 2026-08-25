@@ -16,7 +16,8 @@ GREEN is routine engineering maintenance that clearly preserves prediction, elig
 
 Examples include UI/type/build defects, logging/diagnostics, defensive null handling, clearly broken API parsing with unchanged upstream meaning, transient retry handling, behavior-preserving refactors, and tests for existing intended behavior.
 
-A GREEN issue can be labeled `green-candidate`. `.github/workflows/agent-dispatch.yml` converts that into `risk-green` + `agent-ready` and, when cloud-agent credentials are configured, assigns the issue to GitHub Copilot cloud agent.
+A GREEN issue can be labeled `green-candidate`. `.github/workflows/agent-dispatch.yml` converts that into `risk-green` + `agent-ready` and, when cloud-agent credentials are configured, requests assignment to GitHub Copilot cloud agent.
+The workflow now fails closed: it only reports `GREEN — CLOUD REPAIR DISPATCHED` after a verifiable post-condition (assignee/implementation-PR signal) is observed; otherwise it reports `DISPATCH REQUESTED — NOT CONFIRMED` or `DISPATCH FAILED / STALLED` for retry/system attention.
 
 The agent receives instructions to read `AGENTS.md` and `COLLABORATION.md`, make the smallest safe repair, run validation, and open a PR. It must not merge or deploy.
 
