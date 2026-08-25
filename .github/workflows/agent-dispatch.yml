@@ -44,6 +44,8 @@ jobs:
               ['owner-approval-required', 'fbca04', 'Owner approval is required before merge/activation'],
               ['agent-ready', '1d76db', 'Eligible for cloud coding-agent assignment'],
               ['agent-token-needed', 'cfd3d7', 'Cloud agent dispatch is prepared but repository token/configuration is still needed'],
+              ['agent-dispatch-not-confirmed', 'fbca04', 'Dispatch was requested but no verifiable assignment/PR post-condition was observed yet'],
+              ['agent-stalled', 'b60205', 'Autonomous dispatch/repair appears stalled and needs system attention'],
             ];
             for (const [name, color, description] of labelSpecs) {
               try {
@@ -65,7 +67,7 @@ jobs:
             }
 
             const desired = new Set(labels);
-            for (const l of ['risk-green', 'risk-yellow', 'risk-red', 'owner-approval-required', 'agent-ready']) desired.delete(l);
+            for (const l of ['risk-green', 'risk-yellow', 'risk-red', 'owner-approval-required', 'agent-ready', 'agent-token-needed', 'agent-dispatch-not-confirmed', 'agent-stalled']) desired.delete(l);
 
             if (classification === 'GREEN') {
               desired.add('risk-green');
@@ -95,9 +97,11 @@ jobs:
             }
 
       - name: Dispatch GREEN issue to Copilot cloud agent
+        id: dispatch_green
         if: steps.classify.outputs.classification == 'GREEN'
         env:
           COPILOT_AGENT_TOKEN: ${{ secrets.COPILOT_AGENT_TOKEN }}
+          COPILOT_AGENT_ASSIGNEE: copilot-swe-agent[bot]
           ISSUE_NUMBER: ${{ steps.classify.outputs.issue_number }}
           GH_REPOSITORY: ${{ github.repository }}
         shell: bash
@@ -106,12 +110,13 @@ jobs:
 
           if [ -z "${COPILOT_AGENT_TOKEN:-}" ]; then
             echo "COPILOT_AGENT_TOKEN is not configured; leaving issue agent-ready."
+            echo "status=token_missing" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           payload=$(cat <<JSON
           {
-            "assignees": ["copilot-swe-agent[bot]"],
+            "assignees": ["${COPILOT_AGENT_ASSIGNEE}"],
             "agent_assignment": {
               "target_repo": "${GH_REPOSITORY}",
               "base_branch": "main",
@@ -121,47 +126,115 @@ jobs:
           JSON
           )
 
-          http_code=$(curl -sS -o /tmp/copilot-response.json -w "%{http_code}" \
+          if ! http_code=$(curl -sS -o /tmp/copilot-response.json -w "%{http_code}" \
             -L -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${COPILOT_AGENT_TOKEN}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${GH_REPOSITORY}/issues/${ISSUE_NUMBER}/assignees" \
-            -d "$payload")
+            -d "$payload"); then
+            echo "Copilot assignment request failed before receiving an HTTP status."
+            cat /tmp/copilot-response.json || true
+            echo "status=request_failed" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
             echo "Copilot assignment failed with HTTP ${http_code}."
             cat /tmp/copilot-response.json
-            exit 1
+            echo "status=request_failed" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
           echo "GREEN issue ${ISSUE_NUMBER} assigned to Copilot cloud agent."
+          echo "status=requested" >> "$GITHUB_OUTPUT"
 
       - name: Record GREEN dispatch state
+        id: record_green_state
         if: always() && steps.classify.outputs.classification == 'GREEN'
         uses: actions/github-script@v7
         env:
-          TOKEN_CONFIGURED: ${{ secrets.COPILOT_AGENT_TOKEN != '' }}
+          DISPATCH_REQUEST_STATUS: ${{ steps.dispatch_green.outputs.status }}
+          COPILOT_AGENT_ASSIGNEE: copilot-swe-agent[bot]
           ISSUE_NUMBER: ${{ steps.classify.outputs.issue_number }}
         with:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const issueNumber = Number(process.env.ISSUE_NUMBER);
-            const tokenConfigured = process.env.TOKEN_CONFIGURED === 'true';
+            const requestStatus = process.env.DISPATCH_REQUEST_STATUS || 'request_failed';
             const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
             const labels = new Set(issue.labels.map(l => typeof l === 'string' ? l : l.name).filter(Boolean));
+            const expectedAssignee = process.env.COPILOT_AGENT_ASSIGNEE || 'copilot-swe-agent[bot]';
+            const assigneeObserved = (issue.assignees || []).some(a => a && a.login === expectedAssignee);
+            let linkedPrObserved = Boolean(issue.pull_request);
 
-            if (!tokenConfigured) labels.add('agent-token-needed');
-            else labels.delete('agent-token-needed');
+            try {
+              const events = await github.paginate(
+                github.rest.issues.listEvents,
+                { owner, repo, issue_number: issueNumber, per_page: 100 }
+              );
+              linkedPrObserved = linkedPrObserved || events.some(event =>
+                event?.event === 'cross-referenced' && Boolean(event?.source?.issue?.pull_request)
+              );
+            } catch (error) {
+              console.log(`Unable to read issue timeline for PR cross-reference verification: ${error?.message || error}`);
+            }
+
+            labels.delete('agent-token-needed');
+            labels.delete('agent-dispatch-not-confirmed');
+            labels.delete('agent-stalled');
+
+            let dispatchState = 'dispatch_failed';
+            if (requestStatus === 'token_missing') {
+              labels.add('agent-token-needed');
+              dispatchState = 'token_missing';
+            } else if (requestStatus === 'requested') {
+              if (assigneeObserved || linkedPrObserved) {
+                dispatchState = 'dispatched';
+              } else {
+                labels.add('agent-dispatch-not-confirmed');
+                dispatchState = 'requested_not_confirmed';
+              }
+            } else {
+              labels.add('agent-stalled');
+            }
 
             await github.rest.issues.update({ owner, repo, issue_number: issueNumber, labels: [...labels] });
 
             const marker = '<!-- edgecast-green-dispatch -->';
             const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: issueNumber, per_page: 100 });
-            if (!comments.some(c => (c.body || '').includes(marker))) {
-              const body = tokenConfigured
-                ? `${marker}\n🟢 **GREEN — CLOUD REPAIR DISPATCHED**\n\nThis issue is eligible for autonomous repair. Copilot cloud agent has been asked to diagnose it, make the smallest GREEN-safe fix, run validation, and open a PR. It is not allowed to merge or deploy. If the real repair is YELLOW or RED, the agent must stop and escalate.`
-                : `${marker}\n🟢 **GREEN — AGENT READY**\n\nThis issue is eligible for autonomous repair, but \`COPILOT_AGENT_TOKEN\` is not configured yet. The repository will keep the issue ready without making unsafe substitutions. Once the token is configured, reapply the \`green-candidate\` label or run EdgeCast Agent Dispatch manually.`;
+            const existing = comments.find(c => (c.body || '').includes(marker));
+
+            let body;
+            if (dispatchState === 'dispatched') {
+              body = `${marker}\n🟢 **GREEN — CLOUD REPAIR DISPATCHED**\n\nDispatch was verified by an observable post-condition (Copilot assignee or implementation PR signal) after the assignment request. The cloud agent may perform GREEN-only repair prep and open a PR, but it may not merge or deploy.`;
+            } else if (dispatchState === 'token_missing') {
+              body = `${marker}\n🟢 **GREEN — AGENT READY**\n\nThis issue is eligible for autonomous repair, but \`COPILOT_AGENT_TOKEN\` is not configured yet. The repository will keep the issue ready without making unsafe substitutions. Once the token is configured, reapply the \`green-candidate\` label or run EdgeCast Agent Dispatch manually.`;
+            } else if (dispatchState === 'requested_not_confirmed') {
+              body = `${marker}\n🟠 **GREEN — DISPATCH REQUESTED — NOT CONFIRMED**\n\nA dispatch request was sent, but no verifiable post-condition (Copilot assignee/session/implementation PR signal) is observable yet. This is treated as fail-closed and routed to retry/system-attention handling.`;
+            } else {
+              body = `${marker}\n🔴 **GREEN — DISPATCH FAILED / STALLED**\n\nCopilot assignment did not complete successfully. No autonomous work claim is being made. The issue remains safely blocked from false \"working\" state and needs dispatch-system attention.`;
+            }
+
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
               await github.rest.issues.createComment({ owner, repo, issue_number: issueNumber, body });
             }
+
+            core.setOutput('dispatch_state', dispatchState);
+
+      - name: Fail workflow when dispatch was not verifiably confirmed
+        if: always() && steps.classify.outputs.classification == 'GREEN' && steps.record_green_state.outputs.dispatch_state != 'dispatched' && steps.record_green_state.outputs.dispatch_state != 'token_missing'
+        shell: bash
+        env:
+          DISPATCH_STATE: ${{ steps.record_green_state.outputs.dispatch_state }}
+        run: |
+          if [ -z "${DISPATCH_STATE:-}" ]; then
+            echo "GREEN dispatch verification step failed before producing a dispatch state." >&2
+          else
+            echo "GREEN dispatch verification state: ${DISPATCH_STATE}" >&2
+          fi
+          echo "GREEN dispatch was not verifiably confirmed; failing closed."
+          exit 1

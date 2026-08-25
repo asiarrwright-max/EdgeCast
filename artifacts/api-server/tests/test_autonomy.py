@@ -325,3 +325,59 @@ class TestYellowApprovalMutations:
 
         for call in mock_client.request.await_args_list:
             assert "/repos/asiarrwright-max/EdgeCast/" in call.args[1]
+
+
+class TestGreenDispatchStatusText:
+    @pytest.mark.asyncio
+    async def test_green_dispatch_not_confirmed_status_is_shown(self):
+        from app.services.autonomy_github import get_autonomy_snapshot
+
+        green_issue = _make_issue(21, ["risk-green", "agent-ready", "agent-dispatch-not-confirmed"])
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+
+        def _side_effect(method, path, **kwargs):
+            params = kwargs.get("params") or {}
+            label = params.get("labels", "")
+            if label == "risk-green":
+                return _mock_response(json_data=[green_issue])
+            return _mock_response(json_data=[])
+
+        mock_client.request = AsyncMock(side_effect=_side_effect)
+
+        with patch("app.services.autonomy_github.os.getenv", return_value="token"):
+            with patch("app.services.autonomy_github.httpx.AsyncClient", return_value=mock_client):
+                with patch("app.services.autonomy_github._build_system_health_summary", AsyncMock(return_value=None)):
+                    snapshot = await get_autonomy_snapshot()
+
+        assert len(snapshot["greenWork"]) == 1
+        assert "not yet confirmed" in snapshot["greenWork"][0]["statusText"].lower()
+
+    @pytest.mark.asyncio
+    async def test_green_stalled_status_is_shown(self):
+        from app.services.autonomy_github import get_autonomy_snapshot
+
+        green_issue = _make_issue(22, ["risk-green", "agent-stalled"])
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+
+        def _side_effect(method, path, **kwargs):
+            params = kwargs.get("params") or {}
+            label = params.get("labels", "")
+            if label == "risk-green":
+                return _mock_response(json_data=[green_issue])
+            return _mock_response(json_data=[])
+
+        mock_client.request = AsyncMock(side_effect=_side_effect)
+
+        with patch("app.services.autonomy_github.os.getenv", return_value="token"):
+            with patch("app.services.autonomy_github.httpx.AsyncClient", return_value=mock_client):
+                with patch("app.services.autonomy_github._build_system_health_summary", AsyncMock(return_value=None)):
+                    snapshot = await get_autonomy_snapshot()
+
+        assert len(snapshot["greenWork"]) == 1
+        assert "system attention needed" in snapshot["greenWork"][0]["statusText"].lower()

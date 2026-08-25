@@ -208,6 +208,10 @@ def _risk_state(labels: set[str]) -> str:
 
 
 def _green_status_text(labels: set[str], issue: dict[str, Any]) -> str:
+    if "agent-stalled" in labels:
+        return "Agent stalled — system attention needed."
+    if "agent-dispatch-not-confirmed" in labels:
+        return "Dispatch requested, but assignment is not yet confirmed."
     if "agent-token-needed" in labels:
         return "Ready, but GitHub cloud-agent credentials still need to be configured."
     if "agent-ready" in labels and not _is_pr(issue):
