@@ -352,14 +352,14 @@ def _normal_95_ci(samples: list[float]) -> dict[str, float] | None:
 
 
 def _calibration_table(trades: list[PaperTrade]) -> list[dict[str, Any]]:
-    bins: list[list[tuple[float, float]]] = [[] for _ in range(10)]
+    bins: list[list[tuple[float, float, bool]]] = [[] for _ in range(10)]
     for t in trades:
         comp = _brier_components(t)
         if comp is None:
             continue
         p, brier = comp
         idx = min(9, max(0, int(p * 10)))
-        bins[idx].append((p, brier))
+        bins[idx].append((p, brier, t.kalshi_result == "yes"))
 
     rows: list[dict[str, Any]] = []
     for idx, vals in enumerate(bins):
@@ -369,19 +369,7 @@ def _calibration_table(trades: list[PaperTrade]) -> list[dict[str, Any]]:
         hi = (idx + 1) / 10
         n = len(vals)
         avg_p = sum(v[0] for v in vals) / n
-        # actual_yes = p - signed_error where brier=(p-actual)^2; for binary event:
-        # derive actual rate from observed binary outcomes instead of inferred error.
-        # Recompute directly for clarity.
-        bucket_trades = []
-        for t in trades:
-            comp = _brier_components(t)
-            if comp is None:
-                continue
-            p = comp[0]
-            bucket_idx = min(9, max(0, int(p * 10)))
-            if bucket_idx == idx:
-                bucket_trades.append(t)
-        yes_count = sum(1 for t in bucket_trades if t.kalshi_result == "yes")
+        yes_count = sum(1 for _, _, is_yes in vals if is_yes)
         actual_rate = yes_count / n if n else None
         rows.append({
             "bucket_lo_inclusive": round(lo, 1),
@@ -411,27 +399,29 @@ def _cohort_metrics(trades: list[PaperTrade]) -> dict[str, Any]:
 
 
 def _evidence_counts_and_pooling(settled: list[PaperTrade]) -> dict[str, Any]:
-    current_v3_forward_settled_n = sum(
-        1
-        for t in settled
-        if (t.strategy_version or "unknown") == "v3.0"
-        and _population_key(t.eligibility_status) == _POP_OFFICIAL
-    )
-    older_direct_n = sum(
-        1
-        for t in settled
-        if (t.strategy_version or "unknown") != "v3.0"
-        and _profile_for_strategy(t.strategy_version)["classification"] == _CLASS_DIRECT
-    )
-    older_context_or_excluded_n = sum(
-        1
-        for t in settled
-        if (t.strategy_version or "unknown") != "v3.0"
-        and _profile_for_strategy(t.strategy_version)["classification"] != _CLASS_DIRECT
-    )
-    pooled_direct_candidates = [
-        t for t in settled if _profile_for_strategy(t.strategy_version)["classification"] == _CLASS_DIRECT
-    ]
+    current_v3_forward_settled_n = 0
+    older_direct_n = 0
+    older_context_or_excluded_n = 0
+    pooled_direct_candidates: list[PaperTrade] = []
+    profile_cache: dict[str, dict[str, Any]] = {}
+
+    for t in settled:
+        strategy = (t.strategy_version or "unknown")
+        if strategy not in profile_cache:
+            profile_cache[strategy] = _profile_for_strategy(strategy)
+        profile = profile_cache[strategy]
+        is_direct = profile["classification"] == _CLASS_DIRECT
+
+        if is_direct:
+            pooled_direct_candidates.append(t)
+
+        if strategy == "v3.0" and _population_key(t.eligibility_status) == _POP_OFFICIAL:
+            current_v3_forward_settled_n += 1
+        elif is_direct:
+            older_direct_n += 1
+        else:
+            older_context_or_excluded_n += 1
+
     pooling_permitted = older_direct_n > 0 and len(pooled_direct_candidates) > 0
     return {
         "current_clean_v3_forward_settled_n": current_v3_forward_settled_n,
@@ -453,6 +443,12 @@ async def get_forward_evidence_comparability(
     This endpoint inventories settled cohorts and classifies older strategy
     versions as DIRECTLY_COMPARABLE, CONTEXT_ONLY, or INCOMPATIBLE_EXCLUDED
     using documented methodology profiles. No data is modified.
+
+    Implementation note:
+    - The report intentionally returns the full settled inventory for audit
+      traceability. This is expected to run on the paper-trade scale used by
+      EdgeCast diagnostics; if settled volume grows materially, pagination can
+      be added in a follow-up engineering task without changing semantics.
     """
     settled_result = await session.execute(
         select(PaperTrade).where(PaperTrade.status == "SETTLED")
