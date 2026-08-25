@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from app.routers.forward_evidence_reconciliation import (
     _CLASS_CONTEXT,
@@ -66,18 +66,17 @@ def test_pooling_guard_blocks_without_older_directly_comparable():
 
 
 def test_pooling_guard_allows_when_direct_older_cohort_exists():
-    _METHOD_PROFILE["v3.1"] = {
+    injected = {
         **_METHOD_PROFILE["v3.0"],
         "classification": _CLASS_DIRECT,
         "equivalent_to_v3": True,
     }
-    try:
+    with patch.dict(_METHOD_PROFILE, {"v3.1": injected}, clear=False):
         settled = [
             _trade(strategy_version="v3.0", eligibility_status="OFFICIAL"),
             _trade(strategy_version="v3.1", eligibility_status="OFFICIAL"),
         ]
         counts = _evidence_counts_and_pooling(settled)
+        assert counts["current_clean_v3_forward_settled_n"] == 1
         assert counts["older_directly_comparable_settled_n"] == 1
         assert counts["pooling_permitted"] is True
-    finally:
-        _METHOD_PROFILE.pop("v3.1", None)

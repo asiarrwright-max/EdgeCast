@@ -454,15 +454,16 @@ async def get_forward_evidence_comparability(
     versions as DIRECTLY_COMPARABLE, CONTEXT_ONLY, or INCOMPATIBLE_EXCLUDED
     using documented methodology profiles. No data is modified.
     """
-    all_result = await session.execute(select(PaperTrade))
-    all_trades: list[PaperTrade] = list(all_result.scalars().all())
-    settled = [t for t in all_trades if t.status == "SETTLED"]
+    settled_result = await session.execute(
+        select(PaperTrade).where(PaperTrade.status == "SETTLED")
+    )
+    settled: list[PaperTrade] = list(settled_result.scalars().all())
 
-    snapshot_ids = [t.snapshot_id for t in settled if t.snapshot_id is not None]
+    snapshot_ids = {t.snapshot_id for t in settled if t.snapshot_id is not None}
     snapshots_by_id: dict[int, PredictionSnapshot] = {}
     if snapshot_ids:
         snap_result = await session.execute(
-            select(PredictionSnapshot).where(PredictionSnapshot.id.in_(set(snapshot_ids)))
+            select(PredictionSnapshot).where(PredictionSnapshot.id.in_(snapshot_ids))
         )
         snapshots = list(snap_result.scalars().all())
         snapshots_by_id = {s.id: s for s in snapshots}
