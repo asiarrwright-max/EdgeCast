@@ -12,6 +12,7 @@ import {
   Activity,
   Star,
 } from "lucide-react";
+import { useMemo, useState } from "react";
 import { useGetBetWatch } from "@workspace/api-client-react";
 import type { BetWatchCandidate } from "@workspace/api-client-react";
 
@@ -25,6 +26,10 @@ type WatchStatus =
   | "WATCHING"
   | "PRELIMINARY"
   | "AVOID / STALE";
+
+type TodaySort = "probability" | "edge";
+
+const UNAVAILABLE_COPY = "Unavailable / insufficient data";
 
 function statusColor(status: WatchStatus): string {
   switch (status) {
@@ -71,13 +76,8 @@ function StatusBadge({ status }: { status: WatchStatus }) {
 }
 
 // ---------------------------------------------------------------------------
-// Price formatter
+// Formatters
 // ---------------------------------------------------------------------------
-
-function fmt(n: number | null | undefined, suffix = ""): string {
-  if (n == null) return "UNKNOWN";
-  return `${n}${suffix}`;
-}
 
 function fmtPct(n: number | null | undefined): string {
   if (n == null) return "UNKNOWN";
@@ -106,6 +106,68 @@ function fmtClose(mins: number | null | undefined): string {
   return `${hrs} hr`;
 }
 
+function todayPct(n: number | null | undefined): string {
+  if (n == null) return UNAVAILABLE_COPY;
+  return `${(n * 100).toFixed(0)}%`;
+}
+
+function todayKalshi(n: number | null | undefined): string {
+  if (n == null) return UNAVAILABLE_COPY;
+  return `${(n * 100).toFixed(0)}% · ${(n * 100).toFixed(0)}¢`;
+}
+
+function todayEdge(n: number | null | undefined): string {
+  if (n == null) return UNAVAILABLE_COPY;
+  return `${n >= 0 ? "+" : ""}${n.toFixed(1)}pp`;
+}
+
+function evidenceStatus(c: BetWatchCandidate): {
+  label: "UNKNOWN" | "INSUFFICIENT";
+  detail: string;
+} {
+  if (c.failed_ftb_guards.length > 0) {
+    return {
+      label: "INSUFFICIENT",
+      detail: c.failed_ftb_guards.join(" · "),
+    };
+  }
+
+  return {
+    label: "UNKNOWN",
+    detail: "Canonical runtime evidence baseline unavailable in this slice.",
+  };
+}
+
+function compareCandidates(a: BetWatchCandidate, b: BetWatchCandidate, sortBy: TodaySort): number {
+  if (sortBy === "probability") {
+    return (
+      b.model_probability - a.model_probability ||
+      b.edge - a.edge ||
+      a.rank - b.rank ||
+      a.city.localeCompare(b.city) ||
+      a.ticker.localeCompare(b.ticker)
+    );
+  }
+
+  return (
+    b.edge - a.edge ||
+    b.model_probability - a.model_probability ||
+    a.rank - b.rank ||
+    a.city.localeCompare(b.city) ||
+    a.ticker.localeCompare(b.ticker)
+  );
+}
+
+function uniqueCandidates(candidates: BetWatchCandidate[]): BetWatchCandidate[] {
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    const key = `${candidate.ticker}:${candidate.side}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Candidate detail card
 // ---------------------------------------------------------------------------
@@ -125,7 +187,6 @@ function CandidateCard({
     <div
       className={`rounded-lg bg-card p-4 md:p-5 space-y-4 ${borderClass}`}
     >
-      {/* Header row */}
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="space-y-1">
           {isBest && (
@@ -171,12 +232,10 @@ function CandidateCard({
         </div>
       </div>
 
-      {/* Contract question */}
       <div className="bg-secondary/30 rounded p-3">
         <p className="text-sm text-foreground italic">"{c.contract_question}"</p>
       </div>
 
-      {/* Key numbers grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="space-y-0.5">
           <p className="text-xs text-muted-foreground uppercase tracking-wide">EdgeCast P(side)</p>
@@ -205,7 +264,6 @@ function CandidateCard({
         </div>
       </div>
 
-      {/* Market metadata */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
         {c.forecast_value != null && (
           <div className="space-y-0.5">
@@ -277,7 +335,6 @@ function CandidateCard({
         </div>
       </div>
 
-      {/* FTB status */}
       <div className="bg-secondary/20 rounded p-3 space-y-1">
         <p className="text-xs font-mono text-muted-foreground uppercase tracking-wide">
           FTB Status
@@ -297,7 +354,6 @@ function CandidateCard({
         )}
       </div>
 
-      {/* Why this bet */}
       <div className="space-y-2">
         <div className="flex items-center gap-2">
           <TrendingUp className="h-4 w-4 text-primary shrink-0" />
@@ -308,7 +364,6 @@ function CandidateCard({
         <p className="text-sm text-foreground leading-relaxed">{c.why_this_bet}</p>
       </div>
 
-      {/* What to watch */}
       <div className="space-y-2">
         <div className="flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 text-yellow-400 shrink-0" />
@@ -319,7 +374,6 @@ function CandidateCard({
         <p className="text-sm text-muted-foreground leading-relaxed">{c.what_to_watch}</p>
       </div>
 
-      {/* Changes */}
       {c.changed_since_previous_scan.length > 0 && (
         <div className="space-y-1">
           <p className="text-xs font-mono text-muted-foreground uppercase tracking-wide">
@@ -336,7 +390,6 @@ function CandidateCard({
         </div>
       )}
 
-      {/* Data freshness footer */}
       <div className="flex items-center justify-between border-t border-border pt-3">
         <p className="text-xs text-muted-foreground font-mono">
           Data freshness:{" "}
@@ -361,68 +414,136 @@ function CandidateCard({
 }
 
 // ---------------------------------------------------------------------------
-// Compact opportunity row for the ranked list
+// Today cards
 // ---------------------------------------------------------------------------
 
 function OpportunityRow({ c }: { c: BetWatchCandidate }) {
+  const evidence = evidenceStatus(c);
+
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 rounded-lg bg-secondary/20 border border-border hover:bg-secondary/40 transition-colors">
-      <div className="flex items-center gap-3 min-w-0">
-        <span className="text-sm font-mono text-muted-foreground w-5 shrink-0">
-          #{c.rank}
-        </span>
-        <StatusBadge status={c.watch_status} />
-        <span
-          className={`text-xs font-mono font-bold px-1.5 py-0.5 rounded border ${
-            c.side === "YES"
-              ? "text-emerald-400 bg-emerald-950/50 border-emerald-700/40"
-              : "text-red-400 bg-red-950/50 border-red-700/40"
-          }`}
-        >
-          {c.side}
-        </span>
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          <p className="text-sm font-medium text-foreground truncate">{c.city}</p>
-          {c.specialization_city && (
-            <Star className="h-3 w-3 text-yellow-400 shrink-0" />
-          )}
+    <div className="rounded-lg border border-border bg-card p-4 space-y-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="space-y-2 min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-mono text-muted-foreground">
+              #{c.rank}
+            </span>
+            <StatusBadge status={c.watch_status} />
+            <span
+              className={`text-xs font-mono font-bold px-1.5 py-0.5 rounded border ${
+                c.side === "YES"
+                  ? "text-emerald-400 bg-emerald-950/50 border-emerald-700/40"
+                  : "text-red-400 bg-red-950/50 border-red-700/40"
+              }`}
+            >
+              {c.side}
+            </span>
+            <span
+              className={`text-xs font-mono font-bold px-2 py-0.5 rounded border ${
+                evidence.label === "INSUFFICIENT"
+                  ? "text-yellow-300 bg-yellow-950/40 border-yellow-700/40"
+                  : "text-muted-foreground bg-secondary/40 border-border"
+              }`}
+            >
+              Evidence {evidence.label}
+            </span>
+          </div>
+          <div>
+            <p className="text-base font-semibold text-foreground">{c.city}</p>
+            <p className="text-xs font-mono text-muted-foreground">{c.ticker}</p>
+          </div>
+          <p className="text-sm text-muted-foreground">{c.contract_question}</p>
         </div>
-        <p className="text-xs text-muted-foreground font-mono truncate">{c.ticker}</p>
-      </div>
-      <div className="flex items-center gap-4 text-right shrink-0">
-        <div>
-          <p className="text-xs text-muted-foreground">Ask</p>
+
+        <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-left md:text-right">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+            Model provenance
+          </p>
           <p className="font-mono text-sm font-bold text-foreground">
-            {fmtPrice(c.kalshi_price)}
+            {c.model_version || UNAVAILABLE_COPY}
           </p>
-        </div>
-        <div>
-          <p className="text-xs text-muted-foreground">Edge</p>
-          <p
-            className={`font-mono text-sm font-bold ${
-              c.edge >= 10 ? "text-emerald-400" : c.edge >= 5 ? "text-yellow-400" : "text-muted-foreground"
-            }`}
-          >
-            +{c.edge.toFixed(1)}pp
-          </p>
-        </div>
-        <div>
-          <p className="text-xs text-muted-foreground">Age</p>
-          <p
-            className={`font-mono text-sm ${
-              c.quote_age_seconds == null || c.quote_age_seconds > 900
-                ? "text-destructive"
-                : c.quote_age_seconds > 300
-                ? "text-yellow-400"
-                : "text-emerald-400"
-            }`}
-          >
-            {fmtAge(c.quote_age_seconds)}
+          <p className="text-xs text-muted-foreground">
+            Confidence: {c.confidence || UNAVAILABLE_COPY}
           </p>
         </div>
       </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="rounded-md bg-secondary/20 p-3">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+            EdgeCast P({c.side})
+          </p>
+          <p className="mt-1 font-mono text-lg font-bold text-foreground">
+            {todayPct(c.model_probability)}
+          </p>
+        </div>
+        <div className="rounded-md bg-secondary/20 p-3">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+            Kalshi implied P({c.side}) / price
+          </p>
+          <p className="mt-1 font-mono text-lg font-bold text-foreground">
+            {todayKalshi(c.kalshi_price)}
+          </p>
+        </div>
+        <div className="rounded-md bg-secondary/20 p-3">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+            Display edge
+          </p>
+          <p
+            className={`mt-1 font-mono text-lg font-bold ${
+              c.edge >= 10 ? "text-emerald-400" : c.edge >= 5 ? "text-yellow-400" : "text-foreground"
+            }`}
+          >
+            {todayEdge(c.edge)}
+          </p>
+        </div>
+        <div className="rounded-md bg-secondary/20 p-3">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+            Quote freshness
+          </p>
+          <p className="mt-1 font-mono text-sm font-bold text-foreground">
+            {c.quote_age_seconds == null ? UNAVAILABLE_COPY : fmtAge(c.quote_age_seconds)}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {c.data_freshness || UNAVAILABLE_COPY}
+          </p>
+        </div>
+        <div className="rounded-md bg-secondary/20 p-3">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+            Existing status
+          </p>
+          <p className="mt-1 text-sm font-medium text-foreground">
+            {c.ftb_eligible ? "FTB eligible" : "Not FTB eligible"}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {c.ftb_status || UNAVAILABLE_COPY}
+          </p>
+        </div>
+        <div className="rounded-md bg-secondary/20 p-3">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+            Evidence detail
+          </p>
+          <p className="mt-1 text-sm font-medium text-foreground">
+            {evidence.label}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {evidence.detail}
+          </p>
+        </div>
+      </div>
+
+      {c.failed_ftb_guards.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {c.failed_ftb_guards.map((guard) => (
+            <span
+              key={guard}
+              className="rounded border border-yellow-700/40 bg-yellow-950/30 px-2 py-1 text-xs font-mono text-yellow-200"
+            >
+              {guard}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -432,8 +553,19 @@ function OpportunityRow({ c }: { c: BetWatchCandidate }) {
 // ---------------------------------------------------------------------------
 
 export default function BetWatchPage() {
+  const [sortBy, setSortBy] = useState<TodaySort>("probability");
   const { data, isLoading, error, isFetching, refetch, dataUpdatedAt } =
     useGetBetWatch({ refetchInterval: 60_000 });
+
+  const displayCandidates = useMemo(() => {
+    if (!data) return [];
+
+    return uniqueCandidates(
+      [data.best_opportunity, ...data.candidates].filter(
+        (candidate): candidate is BetWatchCandidate => candidate != null
+      )
+    ).sort((a, b) => compareCandidates(a, b, sortBy));
+  }, [data, sortBy]);
 
   const lastUpdated = dataUpdatedAt
     ? new Date(dataUpdatedAt).toLocaleTimeString()
@@ -441,17 +573,16 @@ export default function BetWatchPage() {
 
   return (
     <div className="space-y-6 pb-8">
-      {/* ── Page header ──────────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <Eye className="h-5 w-5 text-primary" />
             <h1 className="text-xl font-bold font-mono text-foreground uppercase tracking-widest">
-              BET WATCH
+              TODAY
             </h1>
           </div>
           <p className="text-sm text-muted-foreground">
-            Decision support — what EdgeCast sees right now. Read-only. No trades placed.
+            Default read-only workflow for current opportunities. Existing forecast + Kalshi quote data only. No execution.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -471,7 +602,6 @@ export default function BetWatchPage() {
         </div>
       </div>
 
-      {/* ── Loading ───────────────────────────────────────────────────── */}
       {isLoading && (
         <div className="flex items-center justify-center py-20">
           <div className="flex items-center gap-3 text-muted-foreground">
@@ -481,34 +611,23 @@ export default function BetWatchPage() {
         </div>
       )}
 
-      {/* ── Error ─────────────────────────────────────────────────────── */}
       {!!error && !isLoading && (
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive font-mono">
-          Unable to load Bet Watch data. {error instanceof Error ? error.message : String(error)}
+          Unable to load Today data. {error instanceof Error ? error.message : String(error)}
         </div>
       )}
 
       {data && (
         <>
-          {/* ── City focus banner ─────────────────────────────────────── */}
-          {data.specialization_cities.length > 0 && (
-            <div className="rounded-lg border border-yellow-700/40 bg-yellow-900/10 p-3 flex items-start gap-2">
-              <Star className="h-4 w-4 text-yellow-400 shrink-0 mt-0.5" />
-              <div className="space-y-0.5">
-                <p className="text-xs font-mono font-semibold text-yellow-400">
-                  Focus cities: {data.specialization_cities.join(" · ")}
-                </p>
-                <p className="text-xs text-muted-foreground">{data.specialization_note}</p>
-              </div>
-            </div>
-          )}
-
-          {/* ── Today's summary ───────────────────────────────────────── */}
           <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
             <div className="flex items-start gap-3">
               <Info className="h-4 w-4 text-primary mt-0.5 shrink-0" />
               <div className="space-y-2 flex-1">
                 <p className="text-sm font-medium text-foreground">{data.summary.text}</p>
+                <p className="text-xs text-muted-foreground">
+                  Evidence defaults to <span className="font-mono text-foreground">UNKNOWN</span> or{" "}
+                  <span className="font-mono text-foreground">INSUFFICIENT</span> here when the canonical runtime baseline is unavailable.
+                </p>
                 <div className="flex flex-wrap gap-3 text-xs font-mono">
                   <span className="text-emerald-400">
                     {data.summary.actionable} actionable
@@ -533,7 +652,74 @@ export default function BetWatchPage() {
             </div>
           </div>
 
-          {/* ── Recommendation ────────────────────────────────────────── */}
+          <section className="space-y-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-xs font-mono text-primary uppercase tracking-widest flex items-center gap-2">
+                  <TrendingUp className="h-3.5 w-3.5" />
+                  Today&apos;s Opportunities
+                </h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Client-side display sort only. Missing fields fail closed as unavailable.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSortBy("probability")}
+                  className={`rounded border px-3 py-1.5 text-xs font-mono transition-colors ${
+                    sortBy === "probability"
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  }`}
+                >
+                  Highest win probability
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSortBy("edge")}
+                  className={`rounded border px-3 py-1.5 text-xs font-mono transition-colors ${
+                    sortBy === "edge"
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  }`}
+                >
+                  Largest estimated edge
+                </button>
+              </div>
+            </div>
+
+            {displayCandidates.length > 0 ? (
+              <div className="space-y-3">
+                {displayCandidates.map((c) => (
+                  <OpportunityRow key={`${c.ticker}:${c.side}`} c={c} />
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-border bg-card p-8 text-center space-y-2">
+                <Eye className="h-8 w-8 text-muted-foreground mx-auto" />
+                <p className="text-base font-mono text-muted-foreground">
+                  No current opportunity rows are available.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Check back after the next scan or refresh if stored quote/probability data is unavailable.
+                </p>
+              </div>
+            )}
+          </section>
+
+          {data.specialization_cities.length > 0 && (
+            <div className="rounded-lg border border-yellow-700/40 bg-yellow-900/10 p-3 flex items-start gap-2">
+              <Star className="h-4 w-4 text-yellow-400 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <p className="text-xs font-mono font-semibold text-yellow-400">
+                  Focus cities: {data.specialization_cities.join(" · ")}
+                </p>
+                <p className="text-xs text-muted-foreground">{data.specialization_note}</p>
+              </div>
+            </div>
+          )}
+
           <div
             className={`rounded-lg border p-4 ${
               data.best_opportunity
@@ -549,7 +735,7 @@ export default function BetWatchPage() {
               />
               <div className="space-y-1">
                 <p className="text-xs font-mono text-muted-foreground uppercase tracking-wide">
-                  EdgeCast Recommendation
+                  Diagnostics / existing recommendation text
                 </p>
                 <p className="text-sm md:text-base text-foreground leading-relaxed">
                   {data.recommendation}
@@ -561,12 +747,11 @@ export default function BetWatchPage() {
             </div>
           </div>
 
-          {/* ── Best Bet Card ─────────────────────────────────────────── */}
           {data.best_opportunity ? (
             <section className="space-y-3">
               <h2 className="text-xs font-mono text-primary uppercase tracking-widest flex items-center gap-2">
                 <Zap className="h-3.5 w-3.5" />
-                Best Bet Right Now
+                Existing Top Candidate Detail
               </h2>
               <CandidateCard c={data.best_opportunity} isBest />
             </section>
@@ -582,36 +767,23 @@ export default function BetWatchPage() {
             </div>
           )}
 
-          {/* ── Top Opportunities ─────────────────────────────────────── */}
-          {data.candidates.length > 0 && (
-            <section className="space-y-3">
-              <h2 className="text-xs font-mono text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-                <TrendingUp className="h-3.5 w-3.5" />
-                Top Opportunities Right Now
-              </h2>
-              <div className="space-y-2">
-                {data.candidates.map((c) => (
-                  <OpportunityRow key={c.ticker} c={c} />
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* ── Detailed candidate cards (non-best) ───────────────────── */}
-          {data.candidates.length > 1 && (
+          {displayCandidates.length > 1 && (
             <section className="space-y-4">
               <h2 className="text-xs font-mono text-muted-foreground uppercase tracking-widest">
-                Candidate Details
+                Diagnostics / full candidate detail
               </h2>
-              {data.candidates
-                .filter((c) => c.ticker !== data.best_opportunity?.ticker)
+              {displayCandidates
+                .filter(
+                  (c) =>
+                    `${c.ticker}:${c.side}` !==
+                    `${data.best_opportunity?.ticker}:${data.best_opportunity?.side}`
+                )
                 .map((c) => (
-                  <CandidateCard key={c.ticker} c={c} />
+                  <CandidateCard key={`${c.ticker}:${c.side}`} c={c} />
                 ))}
             </section>
           )}
 
-          {/* ── What Changed ──────────────────────────────────────────── */}
           {(() => {
             const allChanges = data.candidates.flatMap((c) =>
               c.changed_since_previous_scan.map((ch) => ({
@@ -620,7 +792,9 @@ export default function BetWatchPage() {
                 change: ch,
               }))
             );
+
             if (allChanges.length === 0) return null;
+
             return (
               <section className="space-y-3">
                 <h2 className="text-xs font-mono text-muted-foreground uppercase tracking-widest flex items-center gap-2">
@@ -642,7 +816,6 @@ export default function BetWatchPage() {
             );
           })()}
 
-          {/* ── Safety footer ─────────────────────────────────────────── */}
           <div className="rounded-lg border border-border bg-secondary/10 p-4 space-y-1">
             <p className="text-xs font-mono text-muted-foreground uppercase tracking-wide">
               Safety Attestations
