@@ -30,6 +30,7 @@ counting, the corresponding field is set to None and the
 from __future__ import annotations
 
 import logging
+import math
 from collections import defaultdict
 from typing import Any
 
@@ -39,7 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import PaperTrade
+from app.models import PaperTrade, PredictionSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +247,332 @@ def _build_population_block(
         "strategy_breakdown": _strategy_summary(trades),
         "funnel_narrative": _funnel_narrative(
             len(trades), lifecycle, missing_ep, int_exc
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Cross-version comparability analysis (YELLOW evidence only, read-only)
+# ---------------------------------------------------------------------------
+
+_CLASS_DIRECT = "DIRECTLY_COMPARABLE"
+_CLASS_CONTEXT = "CONTEXT_ONLY"
+_CLASS_INCOMPATIBLE = "INCOMPATIBLE_EXCLUDED"
+
+_METHOD_PROFILE: dict[str, dict[str, Any]] = {
+    "v3.0": {
+        "probability_method": "v3_probability_engine (historical-prior preload + shrunk sigma)",
+        "calibration_method": "V3 prior/sigma methodology as implemented in V3 services",
+        "feature_timing_boundary": "Forward prospective paper-trade snapshot at decision time",
+        "eligibility_method": "Guard-based OFFICIAL/RESEARCH_ONLY/LEGACY classification",
+        "quote_capture_method": "Entry-time quote snapshot on PaperTrade fields",
+        "settlement_interpretation": "Kalshi-authoritative settlement with regime stamp",
+        "classification": _CLASS_DIRECT,
+        "equivalent_to_v3": True,
+        "classification_reason": "Current V3 baseline cohort under active forward protocol.",
+    },
+    "v2.3": {
+        "probability_method": "v2.2 corrected-bias probability engine (stored as strategy v2.3)",
+        "calibration_method": "V2 error-stats + calibration adjustments (different from V3 preload)",
+        "feature_timing_boundary": "Forward prospective paper-trade snapshot at decision time",
+        "eligibility_method": "V2.2 guard set with RESEARCH_ONLY demotions for some conditions",
+        "quote_capture_method": "Entry-time quote snapshot on PaperTrade fields",
+        "settlement_interpretation": "Kalshi-authoritative settlement under recorded regime",
+        "classification": _CLASS_CONTEXT,
+        "equivalent_to_v3": False,
+        "classification_reason": "Different probability/calibration engine from V3; not poolable into V3 readiness N.",
+    },
+    "v2.1": {
+        "probability_method": "v2.1 probability engine with legacy bias-sign behavior",
+        "calibration_method": "V2 error-stats/calibration path, not V3 preload methodology",
+        "feature_timing_boundary": "Forward prospective paper-trade snapshot at decision time",
+        "eligibility_method": "V2.1 guard set with hard skips for stale/unverified cases",
+        "quote_capture_method": "Entry-time quote snapshot on PaperTrade fields",
+        "settlement_interpretation": "Kalshi-authoritative settlement under recorded regime",
+        "classification": _CLASS_CONTEXT,
+        "equivalent_to_v3": False,
+        "classification_reason": "Behaviorally different engine/guarding path; useful context, not V3-ready pooled evidence.",
+    },
+    "v2.0": {
+        "probability_method": "v2 shadow probability engine",
+        "calibration_method": "Legacy V2 calibration path with different exclusions/quality rules",
+        "feature_timing_boundary": "Forward paper-trade records; earlier guard regime",
+        "eligibility_method": "Pre-hardening eligibility semantics (no OFFICIAL gate on early rows)",
+        "quote_capture_method": "Stored side price; early rows may miss full quote metadata",
+        "settlement_interpretation": "Settlement records vary across pre-hardening periods",
+        "classification": _CLASS_INCOMPATIBLE,
+        "equivalent_to_v3": False,
+        "classification_reason": "Legacy cohort with materially different eligibility/calibration semantics.",
+    },
+}
+
+
+def _profile_for_strategy(strategy_version: str | None) -> dict[str, Any]:
+    strategy = (strategy_version or "unknown").strip() or "unknown"
+    if strategy in _METHOD_PROFILE:
+        return _METHOD_PROFILE[strategy]
+    return {
+        "probability_method": "Unknown/legacy strategy metadata",
+        "calibration_method": "Unknown/legacy calibration metadata",
+        "feature_timing_boundary": "Unknown",
+        "eligibility_method": "Unknown",
+        "quote_capture_method": "Unknown",
+        "settlement_interpretation": "Unknown",
+        "classification": _CLASS_INCOMPATIBLE,
+        "equivalent_to_v3": False,
+        "classification_reason": "No methodology profile available for comparability proof.",
+    }
+
+
+def _brier_components(trade: PaperTrade) -> tuple[float, float] | None:
+    if trade.ec_yes_probability is None:
+        return None
+    if trade.kalshi_result not in ("yes", "no"):
+        return None
+    actual = 1.0 if trade.kalshi_result == "yes" else 0.0
+    err = float(trade.ec_yes_probability) - actual
+    return float(trade.ec_yes_probability), err * err
+
+
+def _normal_95_ci(samples: list[float]) -> dict[str, float] | None:
+    n = len(samples)
+    if n == 0:
+        return None
+    mean = sum(samples) / n
+    if n == 1:
+        return {"mean": round(mean, 6), "ci95_low": round(mean, 6), "ci95_high": round(mean, 6)}
+    variance = sum((x - mean) ** 2 for x in samples) / (n - 1)
+    stderr = math.sqrt(max(variance, 0.0) / n)
+    delta = 1.96 * stderr
+    return {
+        "mean": round(mean, 6),
+        "ci95_low": round(mean - delta, 6),
+        "ci95_high": round(mean + delta, 6),
+    }
+
+
+def _calibration_table(trades: list[PaperTrade]) -> list[dict[str, Any]]:
+    bins: list[list[tuple[float, float]]] = [[] for _ in range(10)]
+    for t in trades:
+        comp = _brier_components(t)
+        if comp is None:
+            continue
+        p, brier = comp
+        idx = min(9, max(0, int(p * 10)))
+        bins[idx].append((p, brier))
+
+    rows: list[dict[str, Any]] = []
+    for idx, vals in enumerate(bins):
+        if not vals:
+            continue
+        lo = idx / 10
+        hi = (idx + 1) / 10
+        n = len(vals)
+        avg_p = sum(v[0] for v in vals) / n
+        # actual_yes = p - signed_error where brier=(p-actual)^2; for binary event:
+        # derive actual rate from observed binary outcomes instead of inferred error.
+        # Recompute directly for clarity.
+        bucket_trades = []
+        for t in trades:
+            comp = _brier_components(t)
+            if comp is None:
+                continue
+            p = comp[0]
+            bucket_idx = min(9, max(0, int(p * 10)))
+            if bucket_idx == idx:
+                bucket_trades.append(t)
+        yes_count = sum(1 for t in bucket_trades if t.kalshi_result == "yes")
+        actual_rate = yes_count / n if n else None
+        rows.append({
+            "bucket_lo_inclusive": round(lo, 1),
+            "bucket_hi_exclusive": round(hi, 1),
+            "n": n,
+            "avg_predicted_yes_probability": round(avg_p, 6),
+            "observed_yes_rate": round(actual_rate, 6) if actual_rate is not None else None,
+            "bucket_brier_mean": round(sum(v[1] for v in vals) / n, 6),
+        })
+    return rows
+
+
+def _cohort_metrics(trades: list[PaperTrade]) -> dict[str, Any]:
+    settled = [t for t in trades if t.status == "SETTLED"]
+    scored = []
+    for t in settled:
+        comp = _brier_components(t)
+        if comp is not None:
+            scored.append(comp[1])
+    brier = _normal_95_ci(scored)
+    return {
+        "settled_n": len(settled),
+        "scored_n": len(scored),
+        "brier": brier,
+        "calibration_table": _calibration_table(settled),
+    }
+
+
+def _evidence_counts_and_pooling(settled: list[PaperTrade]) -> dict[str, Any]:
+    current_v3_forward_settled_n = sum(
+        1
+        for t in settled
+        if (t.strategy_version or "unknown") == "v3.0"
+        and _population_key(t.eligibility_status) == _POP_OFFICIAL
+    )
+    older_direct_n = sum(
+        1
+        for t in settled
+        if (t.strategy_version or "unknown") != "v3.0"
+        and _profile_for_strategy(t.strategy_version)["classification"] == _CLASS_DIRECT
+    )
+    older_context_or_excluded_n = sum(
+        1
+        for t in settled
+        if (t.strategy_version or "unknown") != "v3.0"
+        and _profile_for_strategy(t.strategy_version)["classification"] != _CLASS_DIRECT
+    )
+    pooled_direct_candidates = [
+        t for t in settled if _profile_for_strategy(t.strategy_version)["classification"] == _CLASS_DIRECT
+    ]
+    pooling_permitted = older_direct_n > 0 and len(pooled_direct_candidates) > 0
+    return {
+        "current_clean_v3_forward_settled_n": current_v3_forward_settled_n,
+        "older_directly_comparable_settled_n": older_direct_n,
+        "older_context_only_or_excluded_settled_n": older_context_or_excluded_n,
+        "pooling_permitted": pooling_permitted,
+        "pooled_direct_candidates": pooled_direct_candidates,
+    }
+
+
+@router.get("/forward-evidence-comparability")
+async def get_forward_evidence_comparability(
+    _user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Read-only cross-version probability-evidence comparability diagnostics.
+
+    This endpoint inventories settled cohorts and classifies older strategy
+    versions as DIRECTLY_COMPARABLE, CONTEXT_ONLY, or INCOMPATIBLE_EXCLUDED
+    using documented methodology profiles. No data is modified.
+    """
+    all_result = await session.execute(select(PaperTrade))
+    all_trades: list[PaperTrade] = list(all_result.scalars().all())
+    settled = [t for t in all_trades if t.status == "SETTLED"]
+
+    snapshot_ids = [t.snapshot_id for t in settled if t.snapshot_id is not None]
+    snapshots_by_id: dict[int, PredictionSnapshot] = {}
+    if snapshot_ids:
+        snap_result = await session.execute(
+            select(PredictionSnapshot).where(PredictionSnapshot.id.in_(set(snapshot_ids)))
+        )
+        snapshots = list(snap_result.scalars().all())
+        snapshots_by_id = {s.id: s for s in snapshots}
+
+    settled_inventory: list[dict[str, Any]] = []
+    cohort_buckets: dict[tuple[str, str], list[PaperTrade]] = defaultdict(list)
+    methodology_rows: dict[str, dict[str, Any]] = {}
+
+    for t in settled:
+        strategy = t.strategy_version or "unknown"
+        population = _population_key(t.eligibility_status)
+        profile = _profile_for_strategy(strategy)
+        snapshot = snapshots_by_id.get(t.snapshot_id) if t.snapshot_id is not None else None
+        forecast_ts = (
+            snapshot.forecast_retrieved_at.isoformat()  # type: ignore[union-attr]
+            if snapshot and snapshot.forecast_retrieved_at
+            else (t.created_at.isoformat() if t.created_at else None)
+        )
+        forecast_ts_source = (
+            "prediction_snapshots.forecast_retrieved_at"
+            if snapshot and snapshot.forecast_retrieved_at
+            else "paper_trades.created_at"
+        )
+
+        settled_inventory.append({
+            "paper_trade_id": t.id,
+            "forecast_timestamp": forecast_ts,
+            "forecast_timestamp_provenance": forecast_ts_source,
+            "provenance_class": "FORWARD_PROSPECTIVE",
+            "strategy_version": strategy,
+            "probability_method": profile["probability_method"],
+            "calibration_method": profile["calibration_method"],
+            "feature_timing_boundary": profile["feature_timing_boundary"],
+            "eligibility_method": profile["eligibility_method"],
+            "quote_capture_method": profile["quote_capture_method"],
+            "city": t.city,
+            "market_type": t.contract_type,
+            "market_ticker": t.market_ticker,
+            "evidence_class": population,
+            "forecast_yes_probability": t.ec_yes_probability,
+            "market_yes_probability": t.market_yes_probability,
+            "entry_side_price": t.side_market_price,
+            "settlement_source_regime": t.settlement_regime,
+            "settlement_quality_flags": t.quality_flags or [],
+            "outcome_verified": t.outcome_verified,
+            "classification": profile["classification"],
+            "classification_reason": profile["classification_reason"],
+        })
+        cohort_buckets[(strategy, population)].append(t)
+
+        if strategy not in methodology_rows:
+            methodology_rows[strategy] = {
+                "strategy_version": strategy,
+                "classification": profile["classification"],
+                "classification_reason": profile["classification_reason"],
+                "equivalent_to_v3": bool(profile["equivalent_to_v3"]),
+                "probability_method": profile["probability_method"],
+                "calibration_method": profile["calibration_method"],
+                "feature_timing_boundary": profile["feature_timing_boundary"],
+                "eligibility_method": profile["eligibility_method"],
+                "quote_capture_method": profile["quote_capture_method"],
+                "settlement_interpretation": profile["settlement_interpretation"],
+                "settled_n_total": 0,
+            }
+        methodology_rows[strategy]["settled_n_total"] += 1
+
+    cohort_metrics = []
+    for (strategy, population), trades in sorted(cohort_buckets.items()):
+        profile = _profile_for_strategy(strategy)
+        cohort_metrics.append({
+            "strategy_version": strategy,
+            "evidence_class": population,
+            "classification": profile["classification"],
+            "metrics": _cohort_metrics(trades),
+        })
+
+    evidence_counts = _evidence_counts_and_pooling(settled)
+    pooling_permitted = bool(evidence_counts["pooling_permitted"])
+    pooled_direct_candidates = evidence_counts["pooled_direct_candidates"]
+    pooled_metrics = _cohort_metrics(pooled_direct_candidates) if pooling_permitted else None
+
+    pooling_explanation = (
+        "Pooling includes V3 plus older DIRECTLY_COMPARABLE cohorts with documented equivalence."
+        if pooling_permitted
+        else (
+            "Pooling not performed: no older cohort currently classified DIRECTLY_COMPARABLE. "
+            "Version-separated metrics remain authoritative."
+        )
+    )
+
+    return {
+        "trading_state_modified": False,
+        "real_money_execution_enabled": False,
+        "methodology_matrix": sorted(methodology_rows.values(), key=lambda r: r["strategy_version"]),
+        "version_separated_metrics": cohort_metrics,
+        "pooled_directly_comparable_metrics": {
+            "pooling_permitted": pooling_permitted,
+            "explanation": pooling_explanation,
+            "metrics": pooled_metrics,
+        },
+        "evidence_counts": {
+            "current_clean_v3_forward_settled_n": evidence_counts["current_clean_v3_forward_settled_n"],
+            "older_directly_comparable_settled_n": evidence_counts["older_directly_comparable_settled_n"],
+            "older_context_only_or_excluded_settled_n": evidence_counts["older_context_only_or_excluded_settled_n"],
+        },
+        "settled_observation_inventory": settled_inventory,
+        "note": (
+            "This is a read-only evidence report. OFFICIAL/RESEARCH_ONLY/LEGACY/UNCLASSIFIED "
+            "boundaries are preserved. Older cohorts are not pooled into V3 readiness N unless "
+            "methodology equivalence is explicitly documented."
         ),
     }
 
