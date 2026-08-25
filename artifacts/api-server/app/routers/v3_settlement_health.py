@@ -165,7 +165,8 @@ async def get_v3_settlement_health(
     """
     from app.scheduler import get_scheduler_status
     sched = get_scheduler_status()
-    scheduler_running: bool = sched.get("running", False)
+    raw = sched.get("running")
+    scheduler_running: bool | None = bool(raw) if raw is not None else None
 
     result = await session.execute(select(V3PaperTrade).order_by(V3PaperTrade.created_at.asc()))
     return _health_summary(list(result.scalars().all()), scheduler_running=scheduler_running)
