@@ -12,6 +12,7 @@ Phase 2 endpoints (gated on v3.validation_enabled):
   GET  /analytics/v3/walk-forward-report   — run walk-forward validation and return report
 
 Phase 3 endpoints (live parallel predictions + paper trading):
+  GET  /analytics/v3/phase-a-diagnostics  — read-only V3 calibration/readiness diagnostics
   GET  /analytics/v3/live-predictions      — recent V3 prediction snapshots
   GET  /analytics/v3/live-paper-trades     — V3 paper trades with P/L summary
   GET  /analytics/v3/live-comparison       — V3 vs V2.1 probabilities, same markets
@@ -24,6 +25,9 @@ Phase 3 endpoints (live parallel predictions + paper trading):
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
+from datetime import datetime, timezone
+from math import sqrt
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -38,6 +42,7 @@ from app.models_v3 import (
     V3ErrorStats,
     V3HistoricalRecord,
     V3IngestionLog,
+    V3PaperTrade,
 )
 
 logger = logging.getLogger(__name__)
@@ -165,6 +170,379 @@ def _compute_v3_trade_sections(trades: list, observation_only_count: int) -> dic
                 "Excluded from all trade performance metrics."
             ),
         },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase A read-only diagnostic helpers (V3 calibration/readiness track)
+# ---------------------------------------------------------------------------
+
+_PHASE_A_PROB_BUCKETS: list[tuple[str, float, float]] = [
+    ("0-9%", 0.00, 0.10),
+    ("10-19%", 0.10, 0.20),
+    ("20-29%", 0.20, 0.30),
+    ("30-39%", 0.30, 0.40),
+    ("40-49%", 0.40, 0.50),
+    ("50-59%", 0.50, 0.60),
+    ("60-69%", 0.60, 0.70),
+    ("70-79%", 0.70, 0.80),
+    ("80-89%", 0.80, 0.90),
+    ("90-100%", 0.90, 1.01),
+]
+
+
+def _clamp01(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return min(1.0, max(0.0, value))
+
+
+def _trade_actual_win(trade: V3PaperTrade) -> float | None:
+    if trade.outcome == "WIN":
+        return 1.0
+    if trade.outcome == "LOSS":
+        return 0.0
+    return None
+
+
+def _trade_model_side_probability(trade: V3PaperTrade) -> float | None:
+    if trade.ec_side_probability is not None:
+        return _clamp01(trade.ec_side_probability)
+    if trade.ec_yes_probability is None:
+        return None
+    if trade.direction == "YES":
+        return _clamp01(trade.ec_yes_probability)
+    if trade.direction == "NO":
+        return _clamp01(1.0 - trade.ec_yes_probability)
+    return None
+
+
+def _bucket_for_probability(probability: float | None) -> str:
+    if probability is None:
+        return "unknown"
+    for label, lo, hi in _PHASE_A_PROB_BUCKETS:
+        if lo <= probability < hi:
+            return label
+    return "unknown"
+
+
+def _bucket_for_lead_time(days: int | None) -> str:
+    if days is None:
+        return "unknown"
+    if days <= 1:
+        return "0-1d"
+    if days <= 3:
+        return "2-3d"
+    if days <= 7:
+        return "4-7d"
+    return "8d+"
+
+
+def _bucket_for_quote_age(seconds: float | None) -> str:
+    if seconds is None:
+        return "missing"
+    if seconds <= 60:
+        return "0-60s"
+    if seconds <= 300:
+        return "61-300s"
+    return "301s+"
+
+
+def _bucket_for_market_price(price: float | None) -> str:
+    if price is None:
+        return "missing"
+    if price < 0.20:
+        return "<0.20"
+    if price < 0.40:
+        return "0.20-0.39"
+    if price < 0.60:
+        return "0.40-0.59"
+    if price < 0.80:
+        return "0.60-0.79"
+    return "0.80-1.00"
+
+
+def _eligibility_class(eligibility_status: str | None) -> str:
+    if eligibility_status is None:
+        return "UNLABELED"
+    v = eligibility_status.strip().upper()
+    if v in ("OFFICIAL", "RESEARCH_ONLY", "LEGACY"):
+        return v
+    return "UNLABELED"
+
+
+def _event_key(trade: V3PaperTrade) -> str:
+    city = trade.city or "UNKNOWN_CITY"
+    target_date = trade.target_settlement_date or "UNKNOWN_DATE"
+    variable = trade.weather_variable or "UNKNOWN_VAR"
+    return f"{city}|{target_date}|{variable}"
+
+
+def _brier(rows: list[dict[str, Any]], probability_key: str) -> float | None:
+    vals = [
+        (r[probability_key] - r["actual"]) ** 2
+        for r in rows
+        if r.get(probability_key) is not None and r.get("actual") is not None
+    ]
+    if not vals:
+        return None
+    return round(sum(vals) / len(vals), 4)
+
+
+def _event_level_brier(rows: list[dict[str, Any]], probability_key: str) -> float | None:
+    by_event: dict[str, list[float]] = defaultdict(list)
+    for r in rows:
+        p = r.get(probability_key)
+        a = r.get("actual")
+        if p is None or a is None:
+            continue
+        by_event[r["event_key"]].append((p - a) ** 2)
+    if not by_event:
+        return None
+    event_means = [sum(v) / len(v) for v in by_event.values() if v]
+    if not event_means:
+        return None
+    return round(sum(event_means) / len(event_means), 4)
+
+
+def _wilson_95(wins: int, total: int) -> tuple[float, float] | None:
+    if total <= 0:
+        return None
+    z = 1.96
+    phat = wins / total
+    denom = 1 + (z * z) / total
+    center = (phat + (z * z) / (2 * total)) / denom
+    margin = (z / denom) * sqrt((phat * (1 - phat) / total) + ((z * z) / (4 * total * total)))
+    lo = max(0.0, center - margin)
+    hi = min(1.0, center + margin)
+    return round(lo * 100, 2), round(hi * 100, 2)
+
+
+def _event_clustered_95(rows: list[dict[str, Any]]) -> tuple[float, float] | None:
+    grouped: dict[str, list[float]] = defaultdict(list)
+    for r in rows:
+        grouped[r["event_key"]].append(r["actual"])
+    event_rates = [sum(v) / len(v) for v in grouped.values() if v]
+    if not event_rates:
+        return None
+    if len(event_rates) == 1:
+        v = round(event_rates[0] * 100, 2)
+        return v, v
+    mean_rate = sum(event_rates) / len(event_rates)
+    var = sum((x - mean_rate) ** 2 for x in event_rates) / (len(event_rates) - 1)
+    se = sqrt(var / len(event_rates))
+    lo = max(0.0, mean_rate - 1.96 * se)
+    hi = min(1.0, mean_rate + 1.96 * se)
+    return round(lo * 100, 2), round(hi * 100, 2)
+
+
+def _group_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    # rows are expected to contain only binary actual outcomes (0/1).
+    n = len(rows)
+    if n == 0:
+        return {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "win_rate_pct": None,
+            "avg_model_prob_pct": None,
+            "avg_market_prob_pct": None,
+            "avg_edge_pp": None,
+            "roi_pct": None,
+            "brier_model": None,
+            "brier_market": None,
+            "event_level_brier_model": None,
+            "event_level_brier_market": None,
+        }
+    wins = sum(1 for r in rows if r["actual"] == 1.0)
+    losses = n - wins
+    model_probs = [r["model_prob"] for r in rows if r["model_prob"] is not None]
+    market_probs = [r["market_prob"] for r in rows if r["market_prob"] is not None]
+    edges = [r["edge_pp"] for r in rows if r["edge_pp"] is not None]
+    settled_pl = [r["profit_loss"] for r in rows if r["profit_loss"] is not None]
+    settled_stake = [r["stake"] for r in rows if r["stake"] is not None]
+    total_stake = sum(settled_stake)
+    total_pl = sum(settled_pl)
+    return {
+        "count": n,
+        "wins": wins,
+        "losses": losses,
+        "win_rate_pct": round(wins / n * 100, 2),
+        "avg_model_prob_pct": round(sum(model_probs) / len(model_probs) * 100, 2) if model_probs else None,
+        "avg_market_prob_pct": round(sum(market_probs) / len(market_probs) * 100, 2) if market_probs else None,
+        "avg_edge_pp": round(sum(edges) / len(edges), 2) if edges else None,
+        "roi_pct": round(total_pl / total_stake * 100, 2) if total_stake > 0 else None,
+        "brier_model": _brier(rows, "model_prob"),
+        "brier_market": _brier(rows, "market_prob"),
+        "event_level_brier_model": _event_level_brier(rows, "model_prob"),
+        "event_level_brier_market": _event_level_brier(rows, "market_prob"),
+    }
+
+
+def _breakdown(rows: list[dict[str, Any]], field: str) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for r in rows:
+        grouped[str(r.get(field, "unknown"))].append(r)
+    out: list[dict[str, Any]] = []
+    for label in sorted(grouped):
+        row = {"label": label}
+        row.update(_group_summary(grouped[label]))
+        out.append(row)
+    return out
+
+
+def _phase_a_diagnostics_from_trades(trades: list[V3PaperTrade]) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    for trade in trades:
+        actual = _trade_actual_win(trade)
+        model_prob = _trade_model_side_probability(trade)
+        if actual is None:
+            continue
+        rows.append({
+            "event_key": _event_key(trade),
+            "actual": actual,
+            "model_prob": model_prob,
+            "market_prob": _clamp01(trade.side_market_price),
+            "edge_pp": trade.edge_pct_points,
+            "profit_loss": trade.profit_loss,
+            "stake": trade.stake,
+            "city": trade.city or "UNKNOWN",
+            "contract_type": trade.contract_type or "UNKNOWN",
+            "probability_bucket": _bucket_for_probability(model_prob),
+            "lead_time_bucket": _bucket_for_lead_time(trade.lead_time_days),
+            "quote_age_bucket": _bucket_for_quote_age(trade.quote_age_seconds),
+            "market_price_bucket": _bucket_for_market_price(trade.side_market_price),
+            "executable_class": "EXECUTABLE" if trade.is_executable is True else "NON_EXECUTABLE",
+            "evidence_class": _eligibility_class(trade.eligibility_status),
+            "settlement_date": str(trade.target_settlement_date or "UNKNOWN"),
+        })
+
+    overall = _group_summary(rows)
+    event_keys = sorted({r["event_key"] for r in rows})
+    settlement_dates = sorted({r["settlement_date"] for r in rows})
+    base_rate = (overall["wins"] / overall["count"]) if overall["count"] else None
+    constant_rows = []
+    shrink_rows = []
+    if base_rate is not None:
+        for r in rows:
+            constant_rows.append({**r, "constant_prob": base_rate})
+            p = r["model_prob"]
+            shrink_p = None if p is None else (0.5 + 0.5 * (p - 0.5))
+            shrink_rows.append({**r, "shrink_prob": _clamp01(shrink_p)})
+
+    calibration_by_bucket = []
+    bucket_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for r in rows:
+        bucket_groups[r["probability_bucket"]].append(r)
+    for label, _, _ in _PHASE_A_PROB_BUCKETS:
+        grp = bucket_groups.get(label, [])
+        wins = sum(1 for r in grp if r["actual"] == 1.0)
+        obs = (wins / len(grp) * 100) if grp else None
+        pred_probs = [r["model_prob"] for r in grp if r["model_prob"] is not None]
+        pred = (sum(pred_probs) / len(pred_probs) * 100) if pred_probs else None
+        wilson = _wilson_95(wins, len(grp))
+        clustered = _event_clustered_95(grp)
+        calibration_by_bucket.append({
+            "bucket": label,
+            "count": len(grp),
+            "event_count": len({r["event_key"] for r in grp}),
+            "wins": wins,
+            "observed_win_rate_pct": round(obs, 2) if obs is not None else None,
+            "predicted_win_rate_pct": round(pred, 2) if pred is not None else None,
+            "calibration_error_pp": round((obs - pred), 2) if obs is not None and pred is not None else None,
+            "observed_win_rate_wilson95_pct": (
+                {"lower": wilson[0], "upper": wilson[1]} if wilson else None
+            ),
+            "observed_win_rate_event_clustered95_pct": (
+                {"lower": clustered[0], "upper": clustered[1]} if clustered else None
+            ),
+        })
+
+    eligibility_counts: dict[str, int] = defaultdict(int)
+    for t in trades:
+        eligibility_counts[_eligibility_class(t.eligibility_status)] += 1
+
+    return {
+        "total_settled_rows": len(trades),
+        "analyzed_rows": overall["count"],
+        "skipped_non_binary_outcome_rows": max(0, len(trades) - len(rows)),
+        "distinct_event_count": len(event_keys),
+        "distinct_settlement_date_count": len(settlement_dates),
+        "overall": overall,
+        "baseline_comparison": {
+            "model_trade_brier": overall["brier_model"],
+            "model_event_brier": overall["event_level_brier_model"],
+            "market_trade_brier": overall["brier_market"],
+            "market_event_brier": overall["event_level_brier_market"],
+            "constant_rate_trade_brier": _brier(constant_rows, "constant_prob") if constant_rows else None,
+            "constant_rate_event_brier": _event_level_brier(constant_rows, "constant_prob") if constant_rows else None,
+            "shrinkage_trade_brier": _brier(shrink_rows, "shrink_prob") if shrink_rows else None,
+            "shrinkage_event_brier": _event_level_brier(shrink_rows, "shrink_prob") if shrink_rows else None,
+            "notes": (
+                "Constant-rate baseline predicts the global settled win rate for every row. "
+                "Shrinkage baseline uses p'=0.5+0.5*(p-0.5) as a simple conservative recalibration."
+            ),
+        },
+        "breakdowns": {
+            "by_city": _breakdown(rows, "city"),
+            "by_contract_type": _breakdown(rows, "contract_type"),
+            "by_probability_bucket": _breakdown(rows, "probability_bucket"),
+            "by_lead_time_bucket": _breakdown(rows, "lead_time_bucket"),
+            "by_quote_age_bucket": _breakdown(rows, "quote_age_bucket"),
+            "by_market_price_bucket": _breakdown(rows, "market_price_bucket"),
+            "by_executable_class": _breakdown(rows, "executable_class"),
+            "by_evidence_class": _breakdown(rows, "evidence_class"),
+        },
+        "calibration_table": calibration_by_bucket,
+        "data_quality_gaps": {
+            "eligibility_class_counts": dict(sorted(eligibility_counts.items())),
+            "unlabeled_rows": eligibility_counts.get("UNLABELED", 0),
+            "missing_model_prob_rows": sum(
+                1 for t in trades if _trade_model_side_probability(t) is None
+            ),
+            "missing_market_prob_rows": sum(1 for t in trades if t.side_market_price is None),
+            "missing_quote_age_rows": sum(1 for t in trades if t.quote_age_seconds is None),
+            "non_executable_rows": sum(1 for t in trades if t.is_executable is not True),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /analytics/v3/phase-a-diagnostics — read-only diagnostics
+# ---------------------------------------------------------------------------
+
+@router.get("/analytics/v3/phase-a-diagnostics")
+async def get_v3_phase_a_diagnostics(
+    _user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    V3 Phase A read-only diagnostics for calibration/decision-readiness research.
+
+    Safety guarantees:
+    - Read-only metrics only (no behavior/eligibility/settlement updates).
+    - Preserves OFFICIAL / RESEARCH_ONLY / LEGACY / UNLABELED separation.
+    - Intended for YELLOW evidence-gathering, not model activation.
+    """
+    settled_q = await session.execute(
+        select(V3PaperTrade).where(
+            V3PaperTrade.status == "SETTLED",
+        )
+    )
+    settled = settled_q.scalars().all()
+    diagnostics = _phase_a_diagnostics_from_trades(list(settled))
+    return {
+        "classification": "YELLOW",
+        "phase": "A_READ_ONLY_DIAGNOSIS",
+        "protected_semantic_change_activated": False,
+        "trading_state_modified": False,
+        "real_money_execution_enabled": False,
+        "notes": [
+            "Read-only diagnosis only. No calibration, eligibility, settlement, or readiness behavior is activated here.",
+            "Any Phase B protected change requires a separate owner-approved YELLOW proposal/PR.",
+        ],
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "diagnostics": diagnostics,
     }
 
 
