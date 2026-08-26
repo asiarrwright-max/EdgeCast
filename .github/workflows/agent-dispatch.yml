@@ -120,7 +120,7 @@ jobs:
             "agent_assignment": {
               "target_repo": "${GH_REPOSITORY}",
               "base_branch": "main",
-              "custom_instructions": "Read AGENTS.md and COLLABORATION.md first. This issue was routed GREEN. Use the EdgeCast Green Repair policy: make only the smallest behavior-preserving engineering repair, run tests/typecheck/build, open a PR, never merge/deploy, and stop/escalate if the required repair is YELLOW or RED. Never change real-money behavior."
+              "custom_instructions": "Read EDGECAST_VISION.md, AGENTS.md, and COLLABORATION.md first. This issue was routed GREEN. Use the EdgeCast Green Repair policy: make only the smallest behavior-preserving engineering repair, run tests/typecheck/build, open a PR, never merge/deploy, and stop/escalate if the required repair is YELLOW or RED. Never change real-money behavior. Do not optimize any local task in a way that moves EdgeCast away from the North Star in EDGECAST_VISION.md."
             }
           }
           JSON
