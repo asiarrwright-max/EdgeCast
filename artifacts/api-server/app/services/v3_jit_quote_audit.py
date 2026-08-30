@@ -164,6 +164,7 @@ def _evaluate_other_guards(
 async def perform_jit_quote_shadow(
     *,
     market_ticker: str,
+    v3_paper_trade_id: int | None = None,
     direction: str | None,
     collection_quote_ask: float | None,
     collection_quote_age_seconds: float | None,
@@ -276,7 +277,7 @@ async def perform_jit_quote_shadow(
         async with AsyncSessionLocal() as session:
             audit = V3JitQuoteAudit(
                 market_ticker=market_ticker,
-                v3_paper_trade_id=None,           # backfilled by caller after trade creation
+                v3_paper_trade_id=v3_paper_trade_id,
                 collection_batch_id=collection_batch_id,
                 direction=direction,
                 collection_quote_ask=collection_quote_ask,

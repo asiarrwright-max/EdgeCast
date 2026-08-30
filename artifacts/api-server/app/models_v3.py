@@ -545,7 +545,7 @@ class V3JitQuoteAudit(Base):
     # Identity linking
     market_ticker: Mapped[str] = mapped_column(String(300), nullable=False, index=True)
     v3_paper_trade_id: Mapped[int | None] = mapped_column(Integer, index=True)
-    # Set after trade row is created; NULL if trade creation failed.
+    # ID of the linked V3PaperTrade row (set at JIT-shadow dispatch time, after flush).
 
     collection_batch_id: Mapped[str | None] = mapped_column(String(36), index=True)
 

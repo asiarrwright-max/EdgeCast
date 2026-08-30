@@ -466,10 +466,10 @@ async def _run_paper_trading_v3_inner(
             # eligibility.  Uses a separate DB session (fail-closed).
             if decision.get("eligibility_reason") == REASON_STALE_QUOTE:
                 import asyncio as _asyncio
-                _jit_trade_id = trade.id  # captured after flush
                 _asyncio.ensure_future(
                     perform_jit_quote_shadow(
                         market_ticker=market.ticker,
+                        v3_paper_trade_id=trade.id,   # links audit row to this trade
                         direction=decision.get("direction"),
                         collection_quote_ask=decision.get("quote_ask"),
                         collection_quote_age_seconds=decision.get("quote_age_seconds"),

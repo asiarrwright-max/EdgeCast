@@ -1653,14 +1653,15 @@ async def get_jit_quote_audit(
     summary_result = await session.execute(all_q)
     outcome_summary = {r.jit_outcome: r.n for r in summary_result}
 
-    # Other-guards pass rate (for rows where it was evaluated)
-    total_evaluated = sum(
-        1 for r in rows if getattr(r, "other_guards_pass", None) is not None
+    # Other-guards pass rate — aggregate over ALL rows (not the paginated subset)
+    guards_total_q = await session.execute(
+        select(func.count()).where(V3JitQuoteAudit.other_guards_pass.is_not(None))
     )
-    other_guards_passing = sum(
-        1 for r in rows
-        if getattr(r, "other_guards_pass", None) is True
+    guards_pass_q = await session.execute(
+        select(func.count()).where(V3JitQuoteAudit.other_guards_pass.is_(True))
     )
+    total_evaluated   = guards_total_q.scalar() or 0
+    other_guards_passing = guards_pass_q.scalar() or 0
 
     def _row_dict(r: V3JitQuoteAudit) -> dict:
         return {
