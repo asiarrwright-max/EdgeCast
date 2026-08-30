@@ -1,6 +1,6 @@
 """
-V3 Analytics API — Phase 1 + Phase 2 + Phase 3
-================================================
+V3 Analytics API — Phase 1 + Phase 2 + Phase 3 + Phase 3B
+===========================================================
 Phase 1 endpoints:
   GET  /analytics/v3/flags            — current V3 feature flag states
   GET  /analytics/v3/ingestion-audit  — per-city ingestion summary
@@ -21,6 +21,10 @@ Phase 3 endpoints (live parallel predictions + paper trading):
   POST /analytics/v3/run-v3-settlement     — manually trigger V3 settlement step
   POST /analytics/v3/enable-predictions    — set v3.predictions_enabled=true
   POST /analytics/v3/enable-paper-trading  — set v3.paper_trading_enabled=true
+
+Phase 3B diagnostics (read-only, RESEARCH_ONLY evidence only):
+  GET  /analytics/v3/stale-quote-retro-cohort — retrospective settled stale-quote cohort
+  GET  /analytics/v3/jit-quote-audit          — prospective JIT quote shadow audit records
 """
 from __future__ import annotations
 
@@ -42,7 +46,18 @@ from app.models_v3 import (
     V3ErrorStats,
     V3HistoricalRecord,
     V3IngestionLog,
+    V3JitQuoteAudit,
     V3PaperTrade,
+)
+from app.services.eligibility import (
+    REASON_CUTOFF,
+    REASON_EXTREME_EDGE,
+    REASON_HOURLY,
+    REASON_PRICE_FLOOR,
+    REASON_SAME_DAY,
+    REASON_STATION,
+    REASON_STALE_QUOTE,
+    assess_trade_eligibility,
 )
 
 logger = logging.getLogger(__name__)
@@ -1366,3 +1381,313 @@ async def _set_v3_flag(session: AsyncSession, key: str, value: str) -> dict:
         row.value = value
     await session.commit()
     return {"key": key, "value": value, "updated": True}
+
+
+# ---------------------------------------------------------------------------
+# Phase 3B helpers — retrospective stale-quote cohort
+# ---------------------------------------------------------------------------
+
+def _stale_quote_retro_cohort_from_trades(
+    trades: list,
+    *,
+    now: "datetime | None" = None,
+) -> dict[str, Any]:
+    """
+    Compute the retrospective stale-quote V3 RESEARCH_ONLY cohort.
+
+    Parameters
+    ----------
+    trades : list of V3PaperTrade (or duck-typed objects with the same attributes)
+        All V3PaperTrade rows to evaluate. The function filters to the
+        stale-quote RESEARCH_ONLY settled subset internally.
+    now : datetime | None
+        Reference UTC time for guard reconstruction. Defaults to current time.
+        Used only for guards that require a reference timestamp; pass a fixed
+        value in tests for determinism.
+
+    Returns
+    -------
+    dict with structure:
+        raw_stale_quote_count   — total RESEARCH_ONLY stale-quote rows (all statuses)
+        settled_raw_count       — SETTLED rows in the above
+        otherwise_eligible      — subset that passes all non-quote guards
+        excluded_by_guard       — {reason_code: count} of rows failing another guard
+        missing_data_exclusions — rows lacking fields needed for guard reconstruction
+        wins / losses / win_rate_pct
+        brier_score
+        event_level_brier
+        calibration_bins
+        data_limitations        — list of known reconstruction limitations
+
+    This is RESEARCH_ONLY / counterfactual evidence.  It must never be
+    relabelled, backfilled, or counted as OFFICIAL forward evidence.
+    """
+    _now = now or datetime.now(timezone.utc)
+    if _now.tzinfo is None:
+        _now = _now.replace(tzinfo=timezone.utc)
+
+    # ── Step 1: filter to stale-quote RESEARCH_ONLY rows ───────────────────
+    stale_all = [
+        t for t in trades
+        if getattr(t, "eligibility_reason", None) == REASON_STALE_QUOTE
+        and getattr(t, "eligibility_status", None) == "RESEARCH_ONLY"
+    ]
+    raw_stale_quote_count = len(stale_all)
+
+    settled = [
+        t for t in stale_all
+        if getattr(t, "status", None) == "SETTLED"
+        and getattr(t, "outcome", None) in ("WIN", "LOSS")
+    ]
+    settled_raw_count = len(settled)
+
+    # ── Step 2: apply other guards using stored contemporaneous fields ──────
+    otherwise_eligible: list = []
+    excluded_by_guard: dict[str, int] = {}
+    missing_data_exclusions = 0
+
+    for t in settled:
+        contract_type = getattr(t, "contract_type", None)
+        tsd = getattr(t, "target_settlement_date", None)
+        tz_str = getattr(t, "settlement_timezone", None)
+        decision_ts = getattr(t, "decision_timestamp", None) or _now
+        side_price = getattr(t, "side_market_price", None)
+        edge_pp = getattr(t, "edge_pct_points", None)
+        station_verified = getattr(t, "station_verified", None)
+        direction = getattr(t, "direction", "YES") or "YES"
+        market_close_ts = getattr(t, "market_close_timestamp", None)
+
+        # Require minimal reconstruction fields
+        if tsd is None or tz_str is None:
+            missing_data_exclusions += 1
+            continue
+
+        if decision_ts.tzinfo is None:
+            decision_ts = decision_ts.replace(tzinfo=timezone.utc)
+
+        # Synthetic valid quote to bypass Guard 8 only
+        synthetic_quote_ts = decision_ts
+        synthetic_quote_ask: float = 0.50
+
+        try:
+            status, reason, _ = assess_trade_eligibility(
+                contract_type=contract_type,
+                target_settlement_date_str=tsd,
+                settlement_timezone=tz_str,
+                now=decision_ts,
+                side_market_price=side_price,
+                edge_pct_points=edge_pp,
+                station_verified=bool(station_verified),
+                direction=direction,
+                quote_timestamp=synthetic_quote_ts,
+                quote_ask=synthetic_quote_ask,
+                market_close_timestamp=market_close_ts,
+            )
+        except Exception:
+            missing_data_exclusions += 1
+            continue
+
+        if status == "OFFICIAL" or reason == REASON_STALE_QUOTE:
+            otherwise_eligible.append(t)
+        else:
+            excluded_by_guard[reason or "unknown"] = (
+                excluded_by_guard.get(reason or "unknown", 0) + 1
+            )
+
+    # ── Step 3: metrics on otherwise-eligible settled subset ────────────────
+    wins   = sum(1 for t in otherwise_eligible if getattr(t, "outcome", None) == "WIN")
+    losses = sum(1 for t in otherwise_eligible if getattr(t, "outcome", None) == "LOSS")
+    total  = wins + losses
+    win_rate_pct = round(100.0 * wins / total, 1) if total > 0 else None
+
+    # Brier score — trade-level
+    brier: float | None = None
+    event_brier: float | None = None
+    cal_bins: list[dict] = []
+
+    scored = []
+    for t in otherwise_eligible:
+        p_yes = getattr(t, "ec_yes_probability", None)
+        if p_yes is None:
+            continue
+        direction = getattr(t, "direction", "YES") or "YES"
+        outcome = getattr(t, "outcome", None)
+        if direction == "YES":
+            actual_yes = 1.0 if outcome == "WIN" else 0.0
+        else:
+            actual_yes = 0.0 if outcome == "WIN" else 1.0
+        scored.append({
+            "p_yes": p_yes,
+            "actual_yes": actual_yes,
+            "city": getattr(t, "city", None),
+            "target_settlement_date": getattr(t, "target_settlement_date", None),
+            "weather_variable": getattr(t, "weather_variable", None),
+        })
+
+    if scored:
+        brier = round(
+            sum((r["p_yes"] - r["actual_yes"]) ** 2 for r in scored) / len(scored), 4
+        )
+        # Event-level Brier (average one row per event)
+        event_brier = _event_level_brier(
+            [{**r, "probability": r["p_yes"]} for r in scored], "probability"
+        )
+        # Calibration bins
+        cal_bins = _calibration_bins(scored)
+
+    return {
+        "evidence_class":            "RESEARCH_ONLY",
+        "note": (
+            "Counterfactual retrospective evidence only. "
+            "Never relabelled or counted as OFFICIAL forward-test evidence."
+        ),
+        "raw_stale_quote_count":     raw_stale_quote_count,
+        "settled_raw_count":         settled_raw_count,
+        "otherwise_eligible_count":  len(otherwise_eligible),
+        "wins":                      wins,
+        "losses":                    losses,
+        "win_rate_pct":              win_rate_pct,
+        "brier_score":               brier,
+        "event_level_brier":         event_brier,
+        "calibration_bins":          cal_bins,
+        "excluded_by_guard":         excluded_by_guard,
+        "missing_data_exclusions":   missing_data_exclusions,
+        "data_limitations": [
+            "Guard 3 (market-close cutoff) reconstruction uses stored market_close_timestamp; "
+            "rows with null market_close_timestamp are excluded.",
+            "Guard 2 (same-day) reconstruction uses stored decision_timestamp; "
+            "rows with null decision_timestamp fall back to current time (may over-include).",
+            "Quote guard (Guard 8) is intentionally bypassed using a synthetic valid quote.",
+            "Guard 6 (correlated-exposure) cannot be reconstructed retrospectively; "
+            "some otherwise-eligible rows may have been correlated at decision time.",
+        ],
+    }
+
+
+def _calibration_bins(scored: list[dict]) -> list[dict]:
+    """
+    Compute probability calibration bins over scored rows.
+
+    Each row must have keys: p_yes (float), actual_yes (float).
+    Returns list of dicts with: bin_label, predicted_mean, actual_mean, count.
+    """
+    bins: dict[str, list] = {}
+    for r in scored:
+        p = r["p_yes"]
+        label = _bucket_for_probability(p)
+        bins.setdefault(label, []).append(r)
+
+    result = []
+    for label, rows in sorted(bins.items()):
+        pred_mean = sum(r["p_yes"] for r in rows) / len(rows)
+        act_mean  = sum(r["actual_yes"] for r in rows) / len(rows)
+        result.append({
+            "bin_label":       label,
+            "predicted_mean":  round(pred_mean, 3),
+            "actual_mean":     round(act_mean, 3),
+            "count":           len(rows),
+        })
+    return result
+
+
+# ---------------------------------------------------------------------------
+# GET /analytics/v3/stale-quote-retro-cohort  (Phase 3B)
+# ---------------------------------------------------------------------------
+
+@router.get("/analytics/v3/stale-quote-retro-cohort")
+async def get_stale_quote_retro_cohort(
+    _user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Retrospective settled stale-quote V3 RESEARCH_ONLY cohort.
+
+    Reads all V3PaperTrade rows where eligibility_reason =
+    "missing_or_stale_executable_quote" and computes the otherwise-eligible
+    subset (all non-quote guards pass using stored contemporaneous fields).
+
+    Returns RESEARCH_ONLY evidence only. Never relabels or backfills historical rows.
+    Never affects OFFICIAL forward-test population.
+    """
+    result = await session.execute(
+        select(V3PaperTrade).where(
+            V3PaperTrade.eligibility_reason == REASON_STALE_QUOTE
+        )
+    )
+    trades = result.scalars().all()
+    return _stale_quote_retro_cohort_from_trades(trades)
+
+
+# ---------------------------------------------------------------------------
+# GET /analytics/v3/jit-quote-audit  (Phase 3B)
+# ---------------------------------------------------------------------------
+
+@router.get("/analytics/v3/jit-quote-audit")
+async def get_jit_quote_audit(
+    limit: int = 200,
+    outcome: str | None = None,
+    _user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Prospective JIT quote shadow audit records.
+
+    Returns recent V3JitQuoteAudit rows, newest first.
+    Filter by ``outcome`` to see specific outcome categories, e.g.:
+      "unchanged", "changed", "no_ask", "inactive_market",
+      "timeout", "http_error", "rate_limit", "parse_error", "error"
+
+    These records are diagnostic/shadow only and have zero effect on
+    eligibility, classification, or trade decisions.
+    """
+    q = select(V3JitQuoteAudit).order_by(V3JitQuoteAudit.id.desc()).limit(max(1, min(limit, 1000)))
+    if outcome:
+        q = q.where(V3JitQuoteAudit.jit_outcome == outcome)
+    result = await session.execute(q)
+    rows = result.scalars().all()
+
+    # Outcome summary
+    all_q = select(V3JitQuoteAudit.jit_outcome, func.count().label("n")).group_by(
+        V3JitQuoteAudit.jit_outcome
+    )
+    summary_result = await session.execute(all_q)
+    outcome_summary = {r.jit_outcome: r.n for r in summary_result}
+
+    # Other-guards pass rate (for rows where it was evaluated)
+    total_evaluated = sum(
+        1 for r in rows if getattr(r, "other_guards_pass", None) is not None
+    )
+    other_guards_passing = sum(
+        1 for r in rows
+        if getattr(r, "other_guards_pass", None) is True
+    )
+
+    def _row_dict(r: V3JitQuoteAudit) -> dict:
+        return {
+            "id":                            r.id,
+            "created_at":                    r.created_at.isoformat() if r.created_at else None,
+            "market_ticker":                 r.market_ticker,
+            "v3_paper_trade_id":             r.v3_paper_trade_id,
+            "collection_batch_id":           r.collection_batch_id,
+            "direction":                     r.direction,
+            "collection_quote_ask":          r.collection_quote_ask,
+            "collection_quote_age_seconds":  r.collection_quote_age_seconds,
+            "decision_timestamp":            r.decision_timestamp.isoformat() if r.decision_timestamp else None,
+            "jit_fetch_timestamp":           r.jit_fetch_timestamp.isoformat() if r.jit_fetch_timestamp else None,
+            "jit_latency_ms":                r.jit_latency_ms,
+            "jit_outcome":                   r.jit_outcome,
+            "jit_yes_ask":                   r.jit_yes_ask,
+            "jit_no_ask":                    r.jit_no_ask,
+            "jit_market_status":             r.jit_market_status,
+            "other_guards_pass":             r.other_guards_pass,
+            "other_guards_fail_reason":      r.other_guards_fail_reason,
+            "error_detail":                  r.error_detail,
+        }
+
+    return {
+        "total_returned":     len(rows),
+        "outcome_summary":    outcome_summary,
+        "other_guards_evaluated": total_evaluated,
+        "other_guards_pass":      other_guards_passing,
+        "records":            [_row_dict(r) for r in rows],
+    }

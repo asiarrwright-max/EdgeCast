@@ -513,6 +513,73 @@ class V3PaperTrade(Base):
 
 
 # ---------------------------------------------------------------------------
+# V3JitQuoteAudit — shadow JIT quote confirmation records (Phase 3B)
+# ---------------------------------------------------------------------------
+
+class V3JitQuoteAudit(Base):
+    """
+    Shadow record written when a V3 candidate is stopped by a stale/missing
+    executable quote (eligibility_reason = "missing_or_stale_executable_quote").
+
+    A just-in-time read-only Kalshi quote confirmation is attempted
+    immediately before final eligibility completion.  The result is stored
+    here for diagnostics only.
+
+    Safety invariants:
+      - This record NEVER changes the trade's eligibility_status,
+        eligibility_reason, entry price, direction, edge, model probability,
+        classification, or any historical record.
+      - Fail-closed: any error during the JIT fetch is stored as
+        jit_outcome="error" and does not affect trade creation.
+      - Written in a separate DB session from the trade row to ensure zero
+        coupling between shadow state and trade state.
+    """
+
+    __tablename__ = "v3_jit_quote_audits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    # Identity linking
+    market_ticker: Mapped[str] = mapped_column(String(300), nullable=False, index=True)
+    v3_paper_trade_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    # Set after trade row is created; NULL if trade creation failed.
+
+    collection_batch_id: Mapped[str | None] = mapped_column(String(36), index=True)
+
+    # Context at time of JIT fetch
+    direction: Mapped[str | None] = mapped_column(String(10))
+    collection_quote_ask: Mapped[float | None] = mapped_column(Float)
+    # The stale/missing ask that caused RESEARCH_ONLY classification.
+    collection_quote_age_seconds: Mapped[float | None] = mapped_column(Float)
+    # Age of the collection-time quote (may be None if quote was absent).
+    decision_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # JIT fetch result
+    jit_fetch_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    jit_latency_ms: Mapped[float | None] = mapped_column(Float)
+
+    # Outcome of the JIT fetch.
+    # Values: "unchanged" | "changed" | "no_ask" | "inactive_market"
+    #         | "timeout" | "http_error" | "rate_limit" | "parse_error" | "error"
+    jit_outcome: Mapped[str | None] = mapped_column(String(30), index=True)
+
+    jit_yes_ask: Mapped[float | None] = mapped_column(Float)
+    jit_no_ask: Mapped[float | None] = mapped_column(Float)
+    jit_market_status: Mapped[str | None] = mapped_column(String(20))
+
+    # Whether all OTHER eligibility guards (excluding the quote guard) passed
+    # based on stored contemporaneous fields.
+    other_guards_pass: Mapped[bool | None] = mapped_column(Boolean)
+    other_guards_fail_reason: Mapped[str | None] = mapped_column(String(60))
+
+    error_detail: Mapped[str | None] = mapped_column(Text)
+    # Stores exception message on failure outcomes.
+
+
+# ---------------------------------------------------------------------------
 # V3IngestionLog — per-run audit trail
 # ---------------------------------------------------------------------------
 

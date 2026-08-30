@@ -34,13 +34,14 @@ from app.services.paper_trading import (
     _select_no_price,
     calculate_position,
 )
-from app.services.eligibility import apply_correlated_limit, assess_trade_eligibility
+from app.services.eligibility import apply_correlated_limit, assess_trade_eligibility, REASON_STALE_QUOTE
 from app.services.paper_trading_v21 import (
     STALE_QUOTE_SECONDS,
     _is_executable,
 )
 from app.services.settlement_stations import get_station
 from app.services.v3_flags import get_v3_flag
+from app.services.v3_jit_quote_audit import perform_jit_quote_shadow
 
 logger = logging.getLogger(__name__)
 
@@ -458,6 +459,35 @@ async def _run_paper_trading_v3_inner(
             await session.flush()
             existing_tickers.add(v3_snap.market_ticker)
             stats["created"] += 1
+
+            # ── JIT quote shadow audit (Phase 3B) ────────────────────────────
+            # Fire-and-forget shadow for stale/missing-quote RESEARCH_ONLY trades.
+            # The JIT result MUST NOT affect trade fields, classification, or
+            # eligibility.  Uses a separate DB session (fail-closed).
+            if decision.get("eligibility_reason") == REASON_STALE_QUOTE:
+                import asyncio as _asyncio
+                _jit_trade_id = trade.id  # captured after flush
+                _asyncio.ensure_future(
+                    perform_jit_quote_shadow(
+                        market_ticker=market.ticker,
+                        direction=decision.get("direction"),
+                        collection_quote_ask=decision.get("quote_ask"),
+                        collection_quote_age_seconds=decision.get("quote_age_seconds"),
+                        decision_timestamp=decision.get("decision_timestamp"),
+                        collection_batch_id=batch_id,
+                        contract_type=v3_snap.contract_type,
+                        target_settlement_date_str=market.target_date,
+                        settlement_timezone=decision.get("settlement_timezone"),
+                        side_market_price=decision.get("side_market_price"),
+                        edge_pct_points=decision.get("edge_pct_points"),
+                        station_verified=decision.get("station_verified"),
+                        market_close_timestamp=decision.get("market_close_timestamp"),
+                    )
+                )
+                logger.debug(
+                    "JIT quote shadow scheduled for stale-quote RESEARCH_ONLY trade: %s",
+                    market.ticker,
+                )
 
             logger.info(
                 "V3 paper trade created: %s %s @ %.4f "
