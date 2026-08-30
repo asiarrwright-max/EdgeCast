@@ -142,7 +142,8 @@ def _calibration(rows: list[dict[str, Any]], prob_key: str) -> list[dict[str, An
         hi = 1.0 if i == 9 else (i + 1) / 10.0
         bucket = [
             r for r in rows
-            if r.get(prob_key) is not None and lo <= float(r[prob_key]) <= hi
+            if r.get(prob_key) is not None
+            and (lo <= float(r[prob_key]) < hi if i < 9 else lo <= float(r[prob_key]) <= hi)
             and r.get("actual") is not None
         ]
         if not bucket:
