@@ -148,7 +148,7 @@ def _calibration(rows: list[dict[str, Any]], prob_key: str) -> list[dict[str, An
         ]
         if not bucket:
             out.append({
-                "bucket": f"{i*10:02d}-{99 if i == 9 else i*10+9:02d}%",
+                "bucket": f"{i*10:02d}-{100 if i == 9 else i*10+9:02d}%",
                 "count": 0,
                 "mean_pred_pct": None,
                 "observed_rate_pct": None,
@@ -158,7 +158,7 @@ def _calibration(rows: list[dict[str, Any]], prob_key: str) -> list[dict[str, An
         mean_p = sum(float(r[prob_key]) for r in bucket) / len(bucket)
         obs = sum(float(r["actual"]) for r in bucket) / len(bucket)
         out.append({
-            "bucket": f"{i*10:02d}-{99 if i == 9 else i*10+9:02d}%",
+            "bucket": f"{i*10:02d}-{100 if i == 9 else i*10+9:02d}%",
             "count": len(bucket),
             "mean_pred_pct": round(mean_p * 100, 2),
             "observed_rate_pct": round(obs * 100, 2),
@@ -299,10 +299,10 @@ def _split_partitions(event_keys: list[str], event_dates: dict[str, date | None]
     val_n = max(1, int(round(n * 0.2)))
     if dev_n + val_n >= n:
         val_n = max(1, n - dev_n - 1)
-    hold_n = n - dev_n - val_n
-    if hold_n <= 0:
-        hold_n = 1
+    if dev_n + val_n >= n:
         dev_n = max(1, dev_n - 1)
+    if dev_n + val_n >= n:
+        val_n = max(0, n - dev_n - 1)
     return {
         "development": set(sortable[:dev_n]),
         "validation": set(sortable[dev_n:dev_n + val_n]),
@@ -477,9 +477,9 @@ def build_settled_v3_accuracy_lab_report(
     holdout_rows = _rows_for_events(rows, partitions["holdout"])
 
     research_rows = [r for r in rows if r["eligibility_class"] == "RESEARCH_ONLY" and r["actual"] is not None]
-    dev_research = [r for r in dev_rows if r["eligibility_class"] == "RESEARCH_ONLY"]
-    val_research = [r for r in val_rows if r["eligibility_class"] == "RESEARCH_ONLY"]
-    holdout_research = [r for r in holdout_rows if r["eligibility_class"] == "RESEARCH_ONLY"]
+    dev_research = [r for r in dev_rows if r["eligibility_class"] == "RESEARCH_ONLY" and r["actual"] is not None]
+    val_research = [r for r in val_rows if r["eligibility_class"] == "RESEARCH_ONLY" and r["actual"] is not None]
+    holdout_research = [r for r in holdout_rows if r["eligibility_class"] == "RESEARCH_ONLY" and r["actual"] is not None]
 
     baseline_metrics = _metrics(research_rows, "model_prob")
     kalshi_baseline = _metrics(
@@ -488,12 +488,15 @@ def build_settled_v3_accuracy_lab_report(
     )
 
     train_rows = dev_research + val_research
-    alpha = _fit_best_alpha(val_research or train_rows or research_rows)
+    has_validation_partition = len(val_research) > 0
+    # Fit on validation when available, otherwise use pre-holdout rows only.
+    fit_rows = val_research or dev_research or train_rows
+    alpha = _fit_best_alpha(fit_rows)
     contract_rates = _fit_group_rates(dev_research or train_rows, "contract_type")
     lead_rates = _fit_group_rates(dev_research or train_rows, "lead_time_bucket")
     city_errors = _fit_city_error(dev_research or train_rows)
-    disagreement_t = _fit_disagreement_threshold(val_research or train_rows or research_rows)
-    market_w = _fit_market_blend_weight(val_research or train_rows or research_rows)
+    disagreement_t = _fit_disagreement_threshold(fit_rows)
+    market_w = _fit_market_blend_weight(fit_rows)
 
     def _apply_group_blend(r: dict[str, Any], key: str, rates: dict[str, tuple[float, int]]) -> float | None:
         p = r.get("model_prob")
@@ -511,7 +514,7 @@ def build_settled_v3_accuracy_lab_report(
     candidate_defs: list[tuple[str, dict[str, Any], Callable[[dict[str, Any]], float | None]]] = [
         ("v3_baseline", {}, lambda r: r.get("model_prob")),
         ("global_recalibration_shrinkage", {"alpha": alpha},
-         lambda r: 0.5 + (1.0 - alpha) * (float(r["model_prob"]) - 0.5) if r.get("model_prob") is not None else None),
+         lambda r, a=alpha: 0.5 + (1.0 - a) * (float(r["model_prob"]) - 0.5) if r.get("model_prob") is not None else None),
         ("threshold_vs_range_calibration", {"groups": len(contract_rates)},
          lambda r: _apply_group_blend(r, "contract_type", contract_rates)),
         ("lead_time_aware_calibration", {"groups": len(lead_rates)},
@@ -519,17 +522,17 @@ def build_settled_v3_accuracy_lab_report(
         ("city_error_uncertainty_shrinkage", {"cities": len(city_errors)},
          lambda r: 0.5 + (1 - city_errors.get(r["city"], 0.2)) * (float(r["model_prob"]) - 0.5) if r.get("model_prob") is not None else None),
         ("model_disagreement_uncertainty_widening", {"threshold_pp": round(disagreement_t * 100, 1)},
-         lambda r: (
+         lambda r, t=disagreement_t: (
              0.5 + 0.5 * (float(r["model_prob"]) - 0.5)
              if r.get("model_prob") is not None and r.get("market_prob") is not None
-             and abs(float(r["model_prob"]) - float(r["market_prob"])) >= disagreement_t
+             and abs(float(r["model_prob"]) - float(r["market_prob"])) >= t
              else r.get("model_prob")
          )),
         ("conservative_caps_shrinkage", {"cap_lo": 0.1, "cap_hi": 0.9},
          lambda r: min(0.9, max(0.1, float(r["model_prob"]))) if r.get("model_prob") is not None else None),
         ("market_blend_benchmark", {"market_weight": market_w},
-         lambda r: (
-             market_w * float(r["market_prob"]) + (1 - market_w) * float(r["model_prob"])
+         lambda r, w=market_w: (
+             w * float(r["market_prob"]) + (1 - w) * float(r["model_prob"])
              if r.get("model_prob") is not None and r.get("market_prob") is not None
              else r.get("model_prob")
          )),
@@ -537,7 +540,7 @@ def build_settled_v3_accuracy_lab_report(
 
     for name, params, fn in candidate_defs:
         hold_scored = _with_prob(holdout_research, "candidate_prob", fn)
-        val_scored = _with_prob(val_research or train_rows, "candidate_prob", fn)
+        val_scored = _with_prob(val_research, "candidate_prob", fn)
         candidates.append(CandidateResult(
             name=name,
             params=params,
@@ -561,18 +564,20 @@ def build_settled_v3_accuracy_lab_report(
             and partitions["validation"].isdisjoint(partitions["holdout"])
         ),
         "candidate_fit_uses_holdout": False,
-        "chronological_boundaries_non_decreasing": True,
+        "chronological_boundaries_non_decreasing": None,
     }
     dev_dates = [event_dates[e] for e in partitions["development"] if event_dates.get(e)]
     val_dates = [event_dates[e] for e in partitions["validation"] if event_dates.get(e)]
     hold_dates = [event_dates[e] for e in partitions["holdout"] if event_dates.get(e)]
+    chronology_checks: list[bool] = []
     if dev_dates and val_dates:
-        leakage_checks["chronological_boundaries_non_decreasing"] = max(dev_dates) <= min(val_dates)
+        chronology_checks.append(max(dev_dates) <= min(val_dates))
     if val_dates and hold_dates:
-        leakage_checks["chronological_boundaries_non_decreasing"] = (
-            leakage_checks["chronological_boundaries_non_decreasing"]
-            and max(val_dates) <= min(hold_dates)
-        )
+        chronology_checks.append(max(val_dates) <= min(hold_dates))
+    if dev_dates and hold_dates and not val_dates:
+        chronology_checks.append(max(dev_dates) <= min(hold_dates))
+    if chronology_checks:
+        leakage_checks["chronological_boundaries_non_decreasing"] = all(chronology_checks)
 
     return {
         "classification": "GREEN_READ_ONLY_RESEARCH",
@@ -624,7 +629,12 @@ def build_settled_v3_accuracy_lab_report(
                 for c in ranked
             ],
             "ranking_primary": "brier_then_calibration_error",
-            "ranking_secondary": "log_loss_then_event_accuracy_then_paper_return_sensitivity",
+            "ranking_secondary": "log_loss",
+            "validation_partition_available": has_validation_partition,
+            "parameter_fit_protocol": (
+                "Validation partition used for parameter tuning where available. "
+                "When validation is empty, conservative defaults are tuned on pre-holdout rows only."
+            ),
             "regressions_vs_baseline": [
                 {
                     "candidate": c.name,
