@@ -57,6 +57,10 @@ def test_preserves_official_research_unclassified_separation():
     assert counts["OFFICIAL"] == 1
     assert counts["RESEARCH_ONLY"] == 1
     assert counts["UNCLASSIFIED"] == 1
+    metrics = report["baseline_reproduction"]["by_evidence_class"]
+    assert metrics["OFFICIAL"]["v3"]["n"] == 1
+    assert metrics["RESEARCH_ONLY"]["v3"]["n"] == 1
+    assert metrics["UNCLASSIFIED"]["v3"]["n"] == 1
 
 
 def test_event_group_partitioning_is_chronological_and_disjoint():
@@ -74,6 +78,22 @@ def test_event_group_partitioning_is_chronological_and_disjoint():
     assert part["holdout_event_count"] > 0
     assert leak["no_event_overlap"] is True
     assert leak["chronological_boundaries_non_decreasing"] is True
+    assert all(row["partition"] in {"development", "validation", "holdout"}
+               for row in report["main_cohort"])
+
+
+def test_event_level_n_does_not_count_correlated_contracts_as_events():
+    trades = [
+        _trade(target_settlement_date="2026-08-01", contract_type="threshold"),
+        _trade(target_settlement_date="2026-08-01", contract_type="range"),
+        _trade(target_settlement_date="2026-08-02", contract_type="threshold"),
+    ]
+    metrics = build_settled_v3_accuracy_lab_report(trades)["baseline_reproduction"][
+        "research_population_metrics"
+    ]
+    assert metrics["n"] == 3
+    assert metrics["event_n"] == 2
+    assert metrics["event_level_brier"] is not None
 
 
 def test_baseline_and_kalshi_metrics_present():
