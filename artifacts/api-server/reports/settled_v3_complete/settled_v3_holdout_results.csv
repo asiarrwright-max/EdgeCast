@@ -1,0 +1,10 @@
+candidate,holdout_n,event_n,wins,losses,brier,event_level_brier,calibration_error_pp,log_loss
+kalshi_market_benchmark,100,24,21,79,0.0924,0.098,12.985,0.2801
+market_blend_benchmark,100,24,21,79,0.1317,0.1409,22.005,0.4149
+lead_time_aware_calibration,100,24,21,79,0.1695,0.1779,28.889,0.5088
+threshold_vs_range_calibration,100,24,21,79,0.1724,0.1797,27.088,0.525
+model_disagreement_uncertainty_widening,100,24,21,79,0.1927,0.2002,27.928,0.5613
+city_error_uncertainty_shrinkage,100,24,21,79,0.2122,0.2214,40.233,0.6172
+global_recalibration_shrinkage,100,24,21,79,0.2156,0.2263,36.761,0.6287
+conservative_caps_shrinkage,100,24,21,79,0.2278,0.2411,37.24,0.6807
+v3_baseline,100,24,21,79,0.228,0.2412,37.367,0.6814
