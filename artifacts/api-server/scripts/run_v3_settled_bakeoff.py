@@ -20,6 +20,37 @@ from app.models_v3 import V3PaperTrade  # noqa: E402
 from app.services.v3_accuracy_lab import build_settled_v3_accuracy_lab_report  # noqa: E402
 
 
+_FLOAT_FIELDS = {
+    "ec_yes_probability", "ec_side_probability", "market_yes_probability",
+    "side_market_price", "edge_pct_points", "historical_bias_adj",
+    "historical_sigma", "final_bias", "final_sigma", "effective_hist_n",
+    "stake", "quantity", "station_lat", "station_lon", "gross_payout",
+    "profit_loss", "return_pct", "quote_age_seconds", "minutes_to_market_close",
+}
+_INT_FIELDS = {
+    "id", "v3_snapshot_id", "lead_time_days", "fallback_level_used",
+    "hist_sample_count", "v3_forward_count",
+}
+_BOOL_FIELDS = {"is_executable", "station_verified", "outcome_verified"}
+
+
+def _coerce_export_row(row: dict) -> SimpleNamespace:
+    """Restore primitive DB types lost by CSV serialization."""
+    clean = {}
+    for key, value in row.items():
+        if value == "":
+            clean[key] = None
+        elif key in _FLOAT_FIELDS:
+            clean[key] = float(value)
+        elif key in _INT_FIELDS:
+            clean[key] = int(value)
+        elif key in _BOOL_FIELDS:
+            clean[key] = str(value).strip().lower() in {"true", "1", "yes"}
+        else:
+            clean[key] = value
+    return SimpleNamespace(**clean)
+
+
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=Path, help="Complete settled-V3 CSV/JSON export")
@@ -45,7 +76,7 @@ def _load_export(path: Path, manifest_path: Path | None) -> tuple[list[SimpleNam
         raise SystemExit(
             f"BLOCKED_INCOMPLETE_SOURCE: export has {len(raw_rows)} rows; manifest declares {expected}"
         )
-    return [SimpleNamespace(**row) for row in raw_rows], manifest
+    return [_coerce_export_row(row) for row in raw_rows], manifest
 
 
 async def _load_database() -> tuple[list[V3PaperTrade], dict]:
