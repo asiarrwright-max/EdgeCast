@@ -384,7 +384,7 @@ def _fit_city_error(rows: list[dict[str, Any]]) -> dict[str, float]:
         grouped[r["city"]].append(abs(float(r["model_prob"]) - float(r["actual"])))
     return {
         city: min(0.8, max(0.05, statistics.mean(vals)))
-        for city, vals in grouped.items() if vals
+        for city, vals in grouped.items() if len(vals) >= _INSUFFICIENT_N
     }
 
 
@@ -553,6 +553,7 @@ def build_settled_v3_accuracy_lab_report(
     candidates: list[CandidateResult] = []
     candidate_defs: list[tuple[str, dict[str, Any], Callable[[dict[str, Any]], float | None]]] = [
         ("v3_baseline", {}, lambda r: r.get("model_prob")),
+        ("kalshi_market_benchmark", {"benchmark_only": True}, lambda r: r.get("market_prob")),
         ("global_recalibration_shrinkage", {"alpha": alpha},
          lambda r, a=alpha: 0.5 + (1.0 - a) * (float(r["model_prob"]) - 0.5) if r.get("model_prob") is not None else None),
         ("threshold_vs_range_calibration", {"groups": len(contract_rates)},
@@ -590,7 +591,8 @@ def build_settled_v3_accuracy_lab_report(
 
     ranked = sorted(candidates, key=_candidate_ranking_key)
     baseline = next((c for c in ranked if c.name == "v3_baseline"), None)
-    top = ranked[0] if ranked else None
+    selectable = [c for c in ranked if c.name != "kalshi_market_benchmark"]
+    top = selectable[0] if selectable else None
     recommendation = "more_research"
     if top and baseline and top.name != baseline.name and _candidate_ranking_key(top) < _candidate_ranking_key(baseline):
         recommendation = "candidate_for_v3_1_shadow"
@@ -671,6 +673,7 @@ def build_settled_v3_accuracy_lab_report(
             ],
             "ranking_primary": "brier_then_calibration_error",
             "ranking_secondary": "log_loss",
+            "benchmark_note": "Kalshi is ranked for comparison but is not selected as a V3.1 candidate.",
             "validation_partition_available": has_validation_partition,
             "parameter_fit_protocol": (
                 "Validation partition used for parameter tuning where available. "
