@@ -1,0 +1,6 @@
+{
+  "source": "complete production v3_paper_trades export",
+  "complete_settled_v3_count": 555,
+  "status": "SETTLED",
+  "strategy_version": "v3.0"
+}
