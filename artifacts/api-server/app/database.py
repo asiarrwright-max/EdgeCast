@@ -205,6 +205,7 @@ async def init_db() -> None:
     # Create all tables if they don't exist yet
     from app import models  # noqa: F401 – ensure models are registered
     from app import models_comparison  # noqa: F401 – register ComparisonSnapshot table
+    from app import models_v3  # noqa: F401 – register all V3/shadow tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _apply_migrations(conn)

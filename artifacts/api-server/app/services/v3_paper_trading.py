@@ -42,6 +42,10 @@ from app.services.paper_trading_v21 import (
 from app.services.settlement_stations import get_station
 from app.services.v3_flags import get_v3_flag
 from app.services.v3_jit_quote_audit import perform_jit_quote_shadow
+from app.services.v31_shadow_validation import (
+    build_shadow_payload,
+    persist_shadow_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -327,6 +331,9 @@ async def _run_paper_trading_v3_inner(
         return {"status": "disabled", **stats}
 
     now = datetime.now(timezone.utc)
+    # Built from immutable decision-time values and persisted only after the
+    # source trades commit.  Shadow write failures cannot roll back V3 trades.
+    shadow_payloads: list[dict[str, Any]] = []
 
     # Latest PENDING V3 snapshot per ticker.
     # SUPERSEDED rows are excluded so paper trading only considers the most
@@ -460,6 +467,14 @@ async def _run_paper_trading_v3_inner(
             existing_tickers.add(v3_snap.market_ticker)
             stats["created"] += 1
 
+            station = get_station(market.city)
+            shadow_payload = build_shadow_payload(
+                trade,
+                station_id=getattr(station, "ghcnd_station_id", None) if station else None,
+            )
+            if shadow_payload is not None:
+                shadow_payloads.append(shadow_payload)
+
             # ── JIT quote shadow audit (Phase 3B) ────────────────────────────
             # Fire-and-forget shadow for stale/missing-quote RESEARCH_ONLY trades.
             # The JIT result MUST NOT affect trade fields, classification, or
@@ -508,6 +523,12 @@ async def _run_paper_trading_v3_inner(
             )
 
     await session.commit()
+
+    # Prospective V3.1 collection is strictly shadow-only.  Each payload is
+    # written through its own fail-closed session after the production V3
+    # transaction is durable; no result is fed back into decision behavior.
+    for payload in shadow_payloads:
+        await persist_shadow_payload(payload)
     logger.info(
         "V3 paper trading: %d candidates, %d created, %d skipped, %d errors",
         stats["candidates"], stats["created"], stats["skipped"], stats["errors"],
