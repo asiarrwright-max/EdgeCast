@@ -188,6 +188,23 @@ def _event_level_accuracy(rows: list[dict[str, Any]], prob_key: str) -> float | 
     return round(correct / total * 100, 2) if total else None
 
 
+def _event_level_brier(rows: list[dict[str, Any]], prob_key: str) -> tuple[int, float | None]:
+    """Score each weather event once so contract fan-out cannot inflate N."""
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        if row.get(prob_key) is not None and row.get("actual") is not None:
+            grouped[row["event_key"]].append(row)
+    if not grouped:
+        return 0, None
+    losses = []
+    for event_rows in grouped.values():
+        losses.append(statistics.mean(
+            (float(row[prob_key]) - float(row["actual"])) ** 2
+            for row in event_rows
+        ))
+    return len(losses), round(statistics.mean(losses), 4)
+
+
 def _metrics(rows: list[dict[str, Any]], prob_key: str) -> dict[str, Any]:
     valid = [
         r for r in rows
@@ -204,6 +221,8 @@ def _metrics(rows: list[dict[str, Any]], prob_key: str) -> dict[str, Any]:
             "log_loss": None,
             "log_loss_supported_n": 0,
             "mean_abs_calibration_error_pp": None,
+            "event_n": 0,
+            "event_level_brier": None,
             "event_level_accuracy_pct": None,
             "paper_return_sensitivity_roi_pct": None,
             "calibration": _calibration([], prob_key),
@@ -234,6 +253,7 @@ def _metrics(rows: list[dict[str, Any]], prob_key: str) -> dict[str, Any]:
             pl = sum(float(r.get("profit_loss") or 0.0) for r in high_conf)
             roi = round(pl / stake * 100, 2)
 
+    event_n, event_brier = _event_level_brier(valid, prob_key)
     return {
         "n": n,
         "wins": wins,
@@ -243,6 +263,8 @@ def _metrics(rows: list[dict[str, Any]], prob_key: str) -> dict[str, Any]:
         "log_loss": round(log_loss, 4) if log_loss is not None else None,
         "log_loss_supported_n": len(log_terms),
         "mean_abs_calibration_error_pp": round(avg_cal_err, 3) if avg_cal_err is not None else None,
+        "event_n": event_n,
+        "event_level_brier": event_brier,
         "event_level_accuracy_pct": _event_level_accuracy(valid, prob_key),
         "paper_return_sensitivity_roi_pct": roi,
         "calibration": calibration,
@@ -440,6 +462,8 @@ def build_settled_v3_accuracy_lab_report(
         if sigma is None:
             sigma = getattr(t, "historical_sigma", None)
         rows.append({
+            "trade_id": getattr(t, "id", None),
+            "market_ticker": getattr(t, "market_ticker", None),
             "actual": actual,
             "model_prob": model_prob,
             "market_prob": market_prob,
@@ -475,6 +499,13 @@ def build_settled_v3_accuracy_lab_report(
     dev_rows = _rows_for_events(rows, partitions["development"])
     val_rows = _rows_for_events(rows, partitions["validation"])
     holdout_rows = _rows_for_events(rows, partitions["holdout"])
+    partition_by_event = {
+        event: partition
+        for partition, events in partitions.items()
+        for event in events
+    }
+    for row in rows:
+        row["partition"] = partition_by_event.get(row["event_key"], "unknown")
 
     research_rows = [r for r in rows if r["eligibility_class"] == "RESEARCH_ONLY" and r["actual"] is not None]
     dev_research = [r for r in dev_rows if r["eligibility_class"] == "RESEARCH_ONLY" and r["actual"] is not None]
@@ -486,6 +517,15 @@ def build_settled_v3_accuracy_lab_report(
         [r for r in research_rows if r.get("market_prob") is not None],
         "market_prob",
     )
+    evidence_class_metrics = {}
+    for evidence_class in ("OFFICIAL", "RESEARCH_ONLY", "UNCLASSIFIED"):
+        class_rows = [r for r in rows if r["eligibility_class"] == evidence_class]
+        class_market_rows = [r for r in class_rows if r.get("market_prob") is not None]
+        evidence_class_metrics[evidence_class] = {
+            "v3": _metrics(class_rows, "model_prob"),
+            "kalshi": _metrics(class_market_rows, "market_prob"),
+            "kalshi_coverage_n": len(class_market_rows),
+        }
 
     train_rows = dev_research + val_research
     has_validation_partition = len(val_research) > 0
@@ -601,6 +641,7 @@ def build_settled_v3_accuracy_lab_report(
             "holdout_events": sorted(partitions["holdout"]),
         },
         "baseline_reproduction": {
+            "by_evidence_class": evidence_class_metrics,
             "research_population_metrics": baseline_metrics,
             "kalshi_baseline": {
                 "coverage_n": kalshi_baseline["n"],
@@ -662,4 +703,5 @@ def build_settled_v3_accuracy_lab_report(
                 "Any activation requires a separate prospective V3.1 shadow approval."
             ),
         },
+        "main_cohort": rows,
     }
