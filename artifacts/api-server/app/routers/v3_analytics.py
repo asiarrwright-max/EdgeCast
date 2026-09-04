@@ -508,6 +508,210 @@ def _phase_a_diagnostics_from_trades(trades: list[V3PaperTrade]) -> dict[str, An
 
 
 # ---------------------------------------------------------------------------
+# V3.1 research candidate helpers (YELLOW — offline, read-only only)
+# ---------------------------------------------------------------------------
+
+_V31_SHRINKAGE_K_DEFAULT = 0.5         # global shrinkage: p' = 0.5 + k*(p − 0.5)
+_V31_SHRINKAGE_K_THRESHOLD = 0.4      # stronger shrinkage for threshold contracts
+_V31_SHRINKAGE_K_RANGE = 0.6          # weaker shrinkage for range contracts
+_V31_LEAD_SHRINKAGE: dict[str, float] = {
+    "0-1d": 0.70,
+    "2-3d": 0.55,
+    "4-7d": 0.40,
+    "8d+":  0.30,
+}
+_V31_MARKET_BLEND_ALPHA = 0.5          # p' = α*p_market + (1−α)*p_model
+_V31_CANDIDATES = [
+    "global_shrinkage",
+    "threshold_shrinkage",
+    "range_shrinkage",
+    "lead_time_shrinkage",
+    "market_blend",
+]
+
+
+def _v31_apply_candidate(
+    p: float | None,
+    *,
+    candidate: str,
+    contract_type: str,
+    lead_time_bucket: str,
+    market_prob: float | None,
+) -> float | None:
+    """
+    Apply a V3.1 candidate probability transformation offline.
+
+    No production state is modified; this function is purely computational.
+    Returns None when the input probability is None.
+
+    Design note for threshold_shrinkage / range_shrinkage:
+    Each of these candidates tests whether *one* contract type specifically
+    needs more or less shrinkage while leaving the *other* at the global
+    baseline.  Using the same k for both contract types in both candidates
+    would make them identical transformations, defeating the purpose.
+    """
+    if p is None:
+        return None
+    if candidate == "global_shrinkage":
+        return _clamp01(0.5 + _V31_SHRINKAGE_K_DEFAULT * (p - 0.5))
+    if candidate == "threshold_shrinkage":
+        # Apply stronger shrinkage to threshold contracts; range uses global default.
+        k = _V31_SHRINKAGE_K_THRESHOLD if contract_type == "threshold" else _V31_SHRINKAGE_K_DEFAULT
+        return _clamp01(0.5 + k * (p - 0.5))
+    if candidate == "range_shrinkage":
+        # Apply weaker shrinkage to range contracts; threshold uses global default.
+        k = _V31_SHRINKAGE_K_RANGE if contract_type == "range" else _V31_SHRINKAGE_K_DEFAULT
+        return _clamp01(0.5 + k * (p - 0.5))
+    if candidate == "lead_time_shrinkage":
+        k = _V31_LEAD_SHRINKAGE.get(lead_time_bucket, _V31_SHRINKAGE_K_DEFAULT)
+        return _clamp01(0.5 + k * (p - 0.5))
+    if candidate == "market_blend":
+        if market_prob is None:
+            return _clamp01(0.5 + _V31_SHRINKAGE_K_DEFAULT * (p - 0.5))
+        return _clamp01(_V31_MARKET_BLEND_ALPHA * market_prob + (1.0 - _V31_MARKET_BLEND_ALPHA) * p)
+    return None
+
+
+def _v31_candidate_evaluations(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Evaluate each V3.1 candidate transformation against the current V3 baseline.
+
+    Computes trade-level and event-level Brier scores for each candidate and
+    for each contract type.  Returns an empty list when no rows are supplied.
+    Production V3 outputs are not altered; all candidate probabilities are
+    ephemeral and computed in memory only.
+    """
+    if not rows:
+        return []
+
+    baseline_brier_trade = _brier(rows, "model_prob")
+    baseline_brier_event = _event_level_brier(rows, "model_prob")
+    baseline_brier_market = _brier(rows, "market_prob")
+
+    results: list[dict[str, Any]] = []
+    for candidate in _V31_CANDIDATES:
+        enriched: list[dict[str, Any]] = []
+        for r in rows:
+            cp = _v31_apply_candidate(
+                r.get("model_prob"),
+                candidate=candidate,
+                contract_type=r.get("contract_type", "UNKNOWN"),
+                lead_time_bucket=r.get("lead_time_bucket", "unknown"),
+                market_prob=r.get("market_prob"),
+            )
+            enriched.append({**r, "candidate_prob": cp})
+
+        cand_brier_trade = _brier(enriched, "candidate_prob")
+        cand_brier_event = _event_level_brier(enriched, "candidate_prob")
+
+        by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for r in enriched:
+            by_type[r.get("contract_type", "UNKNOWN")].append(r)
+
+        type_rows: list[dict[str, Any]] = []
+        for ct, ct_rows in sorted(by_type.items()):
+            type_rows.append({
+                "contract_type": ct,
+                "count": len(ct_rows),
+                "v3_brier_trade": _brier(ct_rows, "model_prob"),
+                "candidate_brier_trade": _brier(ct_rows, "candidate_prob"),
+                "v3_brier_event": _event_level_brier(ct_rows, "model_prob"),
+                "candidate_brier_event": _event_level_brier(ct_rows, "candidate_prob"),
+            })
+
+        results.append({
+            "candidate": candidate,
+            "n": len(enriched),
+            "v3_baseline_brier_trade": baseline_brier_trade,
+            "v3_baseline_brier_event": baseline_brier_event,
+            "market_baseline_brier_trade": baseline_brier_market,
+            "candidate_brier_trade": cand_brier_trade,
+            "candidate_brier_event": cand_brier_event,
+            "improves_over_v3_trade": (
+                cand_brier_trade < baseline_brier_trade
+                if (cand_brier_trade is not None and baseline_brier_trade is not None)
+                else None
+            ),
+            "improves_over_v3_event": (
+                cand_brier_event < baseline_brier_event
+                if (cand_brier_event is not None and baseline_brier_event is not None)
+                else None
+            ),
+            "by_contract_type": type_rows,
+        })
+
+    return results
+
+
+def _v31_holdout_split(
+    rows: list[dict[str, Any]],
+    holdout_fraction: float = 0.30,
+) -> dict[str, Any]:
+    """
+    Chronological holdout split for anti-overfit validation.
+
+    Splits on the sorted list of distinct settlement dates: the most-recent
+    (holdout_fraction × 100)% of dates form the holdout set.  Rows with no
+    parseable settlement_date are placed in the development set.
+
+    Returns dev and holdout candidate evaluations.  No future-outcome
+    information is used to select the split date or transformation parameters.
+    """
+    if not rows:
+        return {
+            "split_date": None,
+            "dev_rows": 0,
+            "holdout_rows": 0,
+            "dev_dates": [],
+            "holdout_dates": [],
+            "development": [],
+            "holdout": [],
+            "notes": "No rows available for holdout split.",
+        }
+
+    dates = sorted({
+        r["settlement_date"]
+        for r in rows
+        if r.get("settlement_date") not in (None, "UNKNOWN")
+    })
+    if not dates:
+        return {
+            "split_date": None,
+            "dev_rows": len(rows),
+            "holdout_rows": 0,
+            "dev_dates": [],
+            "holdout_dates": [],
+            "development": _v31_candidate_evaluations(rows),
+            "holdout": [],
+            "notes": "No datable settlement_date values; treating all rows as development.",
+        }
+
+    n_holdout = max(1, round(len(dates) * holdout_fraction))
+    holdout_dates = set(dates[-n_holdout:])
+    dev_dates = set(dates[:-n_holdout])
+
+    dev_rows = [r for r in rows if r.get("settlement_date") not in holdout_dates]
+    ho_rows = [r for r in rows if r.get("settlement_date") in holdout_dates]
+
+    split_date = min(holdout_dates) if holdout_dates else None
+
+    return {
+        "split_date": split_date,
+        "dev_rows": len(dev_rows),
+        "holdout_rows": len(ho_rows),
+        "dev_dates": sorted(dev_dates),
+        "holdout_dates": sorted(holdout_dates),
+        "development": _v31_candidate_evaluations(dev_rows),
+        "holdout": _v31_candidate_evaluations(ho_rows),
+        "notes": (
+            f"Holdout is the chronologically last {n_holdout} of {len(dates)} distinct "
+            "settlement dates. Split is by date to prevent correlated-event leakage. "
+            "No holdout peeking was used to choose transformation parameters."
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
 # GET /analytics/v3/phase-a-diagnostics — read-only diagnostics
 # ---------------------------------------------------------------------------
 
@@ -543,6 +747,89 @@ async def get_v3_phase_a_diagnostics(
         ],
         "as_of": datetime.now(timezone.utc).isoformat(),
         "diagnostics": diagnostics,
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /analytics/v3/v31-research-candidates — offline V3.1 candidate comparison
+# ---------------------------------------------------------------------------
+
+@router.get("/analytics/v3/v31-research-candidates")
+async def get_v31_research_candidates(
+    _user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    V3.1 research sprint: offline candidate-model evaluation against settled V3 evidence.
+
+    Safety guarantees:
+    - Read-only: no forecasting, calibration, eligibility, settlement,
+      readiness, or quote-freshness semantics are modified.
+    - Candidate probabilities are computed offline only; production V3 outputs
+      are not affected.
+    - OFFICIAL / RESEARCH_ONLY / LEGACY / UNLABELED separation is preserved.
+    - No shadow or production activation of any candidate is performed here.
+    - Activation of any V3.1 candidate requires a separate explicit YELLOW
+      proposal with owner approval.
+
+    Returns:
+        - full_population_candidates_ranked: each V3.1 candidate ranked by
+          trade-level Brier (lower is better) vs current V3 and market baselines.
+        - holdout_validation: chronological last-30% date-based holdout split with
+          per-partition candidate evaluations to detect overfit.
+    """
+    settled_q = await session.execute(
+        select(V3PaperTrade).where(V3PaperTrade.status == "SETTLED")
+    )
+    settled = settled_q.scalars().all()
+
+    rows: list[dict[str, Any]] = []
+    for trade in settled:
+        actual = _trade_actual_win(trade)
+        model_prob = _trade_model_side_probability(trade)
+        if actual is None:
+            continue
+        rows.append({
+            "event_key": _event_key(trade),
+            "actual": actual,
+            "model_prob": model_prob,
+            "market_prob": _clamp01(trade.side_market_price),
+            "edge_pp": trade.edge_pct_points,
+            "city": trade.city or "UNKNOWN",
+            "contract_type": trade.contract_type or "UNKNOWN",
+            "lead_time_bucket": _bucket_for_lead_time(trade.lead_time_days),
+            "quote_age_bucket": _bucket_for_quote_age(trade.quote_age_seconds),
+            "evidence_class": _eligibility_class(trade.eligibility_status),
+            "settlement_date": str(trade.target_settlement_date or "UNKNOWN"),
+        })
+
+    full_population_candidates = _v31_candidate_evaluations(rows)
+    holdout = _v31_holdout_split(rows)
+
+    ranked = sorted(
+        full_population_candidates,
+        key=lambda c: (c["candidate_brier_trade"] is None, c["candidate_brier_trade"] or 1.0),
+    )
+
+    return {
+        "classification": "YELLOW",
+        "phase": "V3_1_RESEARCH_CANDIDATES_OFFLINE",
+        "protected_semantic_change_activated": False,
+        "trading_state_modified": False,
+        "real_money_execution_enabled": False,
+        "production_v3_outputs_unchanged": True,
+        "notes": [
+            "All candidate probabilities are computed offline for research only.",
+            "No V3.1 candidate is activated here. Production V3 is unmodified.",
+            "Activation of any candidate requires a separate explicit YELLOW proposal/review.",
+            "Holdout split uses chronological date-based partition (no random row splits).",
+            "Do not select a candidate solely on holdout improvement without additional forward evidence.",
+        ],
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "analyzed_rows": len(rows),
+        "skipped_non_binary_rows": len(settled) - len(rows),
+        "full_population_candidates_ranked": ranked,
+        "holdout_validation": holdout,
     }
 
 
