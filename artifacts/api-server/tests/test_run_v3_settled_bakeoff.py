@@ -17,3 +17,21 @@ _SPEC.loader.exec_module(_MODULE)
 def test_validate_args_rejects_manifest_without_input():
     with pytest.raises(SystemExit, match="--manifest requires --input"):
         _MODULE._validate_args(Namespace(input=None, manifest=Path("manifest.json")))
+
+
+def test_load_export_rejects_unsupported_suffix(tmp_path: Path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('{"complete_settled_v3_count": 0}', encoding="utf-8")
+    input_path = tmp_path / "rows.txt"
+    input_path.write_text("not-json", encoding="utf-8")
+    with pytest.raises(SystemExit, match="--input must be \\.csv or \\.json"):
+        _MODULE._load_export(input_path, manifest)
+
+
+def test_load_export_rejects_json_without_list_rows(tmp_path: Path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('{"complete_settled_v3_count": 0}', encoding="utf-8")
+    input_path = tmp_path / "rows.json"
+    input_path.write_text('{"rows": "bad"}', encoding="utf-8")
+    with pytest.raises(SystemExit, match="list-valued rows"):
+        _MODULE._load_export(input_path, manifest)

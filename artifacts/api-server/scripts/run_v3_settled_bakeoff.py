@@ -71,12 +71,20 @@ def _load_export(path: Path, manifest_path: Path | None) -> tuple[list[SimpleNam
     expected = manifest.get("complete_settled_v3_count")
     if not isinstance(expected, int) or expected < 0:
         raise SystemExit("BLOCKED_INCOMPLETE_SOURCE: manifest needs integer complete_settled_v3_count")
-    if path.suffix.lower() == ".csv":
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
         with path.open(newline="", encoding="utf-8") as handle:
             raw_rows = list(csv.DictReader(handle))
-    else:
+    elif suffix == ".json":
         payload = json.loads(path.read_text(encoding="utf-8"))
-        raw_rows = payload if isinstance(payload, list) else payload.get("rows", [])
+        if isinstance(payload, list):
+            raw_rows = payload
+        elif isinstance(payload, dict) and isinstance(payload.get("rows"), list):
+            raw_rows = payload["rows"]
+        else:
+            raise SystemExit("BLOCKED_INCOMPLETE_SOURCE: JSON input must be a list or a dict with list-valued rows")
+    else:
+        raise SystemExit("BLOCKED_INCOMPLETE_SOURCE: --input must be .csv or .json")
     if len(raw_rows) != expected:
         raise SystemExit(
             f"BLOCKED_INCOMPLETE_SOURCE: export has {len(raw_rows)} rows; manifest declares {expected}"
