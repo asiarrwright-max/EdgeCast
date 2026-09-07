@@ -207,6 +207,15 @@ def test_candidate_recommendation_is_deterministic_for_fixed_input():
     assert report_a["recommendation"] == report_b["recommendation"]
 
 
+def test_leakage_check_flags_undated_partition_events():
+    trades = _chronological_candidate_trades()
+    trades.append(_trade(target_settlement_date="not-a-date"))
+    report = build_settled_v3_accuracy_lab_report(trades)
+    leak = report["candidate_results"]["leakage_checks"]
+    assert leak["undated_events_present"] is True
+    assert leak["chronological_boundaries_non_decreasing"] is False
+
+
 def test_alpha_fit_can_choose_full_shrinkage_endpoint():
     rows = [
         {"event_key": "a", "model_prob": 0.99, "actual": 0.0},

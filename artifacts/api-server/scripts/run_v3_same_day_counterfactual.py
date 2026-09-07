@@ -80,6 +80,7 @@ def main() -> None:
         }
         print(json.dumps(payload, indent=2))
         raise SystemExit("BLOCKED_INCOMPLETE_SOURCE: missing settled_v3_main_cohort.csv")
+    base_dir.mkdir(parents=True, exist_ok=True)
     with input_path.open(newline="", encoding="utf-8") as handle:
         rows = [_coerce(row) for row in csv.DictReader(handle)]
     report = build_same_day_counterfactual_report(

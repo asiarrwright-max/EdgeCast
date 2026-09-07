@@ -610,10 +610,17 @@ def build_settled_v3_accuracy_lab_report(
         ),
         "candidate_fit_uses_holdout": False,
         "chronological_boundaries_non_decreasing": None,
+        "undated_events_present": False,
     }
     dev_dates = [event_dates[e] for e in partitions["development"] if event_dates.get(e)]
     val_dates = [event_dates[e] for e in partitions["validation"] if event_dates.get(e)]
     hold_dates = [event_dates[e] for e in partitions["holdout"] if event_dates.get(e)]
+    undated_events_present = any(
+        event_dates.get(event) is None
+        for group in partitions.values()
+        for event in group
+    )
+    leakage_checks["undated_events_present"] = undated_events_present
     chronology_checks: list[bool] = []
     if dev_dates and val_dates:
         chronology_checks.append(max(dev_dates) <= min(val_dates))
@@ -621,7 +628,9 @@ def build_settled_v3_accuracy_lab_report(
         chronology_checks.append(max(val_dates) <= min(hold_dates))
     if dev_dates and hold_dates and not val_dates:
         chronology_checks.append(max(dev_dates) <= min(hold_dates))
-    if chronology_checks:
+    if undated_events_present:
+        leakage_checks["chronological_boundaries_non_decreasing"] = False
+    elif chronology_checks:
         leakage_checks["chronological_boundaries_non_decreasing"] = all(chronology_checks)
 
     return {
