@@ -1,0 +1,916 @@
+{
+  "classification": "GREEN_READ_ONLY_RESEARCH",
+  "generated_at": "2026-09-07T00:07:33.778138+00:00",
+  "requested_same_day_definition": "target-date same-day observations only",
+  "frozen_population": {
+    "total_rows": 555,
+    "eligibility_counts": {
+      "OFFICIAL": 1,
+      "RESEARCH_ONLY": 445,
+      "UNCLASSIFIED": 109
+    }
+  },
+  "lead_time_distribution": {
+    "exact_same_day_supported": false,
+    "exact_by_evidence_class": {
+      "OFFICIAL": [
+        {
+          "bucket": "unknown",
+          "n": 1,
+          "pct_of_evidence_class": 100.0
+        }
+      ],
+      "RESEARCH_ONLY": [
+        {
+          "bucket": "unknown",
+          "n": 445,
+          "pct_of_evidence_class": 100.0
+        }
+      ],
+      "UNCLASSIFIED": [
+        {
+          "bucket": "unknown",
+          "n": 109,
+          "pct_of_evidence_class": 100.0
+        }
+      ]
+    },
+    "coarse_by_evidence_class": {
+      "OFFICIAL": [
+        {
+          "bucket": "0-1d",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
+        {
+          "bucket": "2-3d",
+          "n": 1,
+          "pct_of_evidence_class": 100.0
+        }
+      ],
+      "RESEARCH_ONLY": [
+        {
+          "bucket": "0-1d",
+          "n": 125,
+          "pct_of_evidence_class": 28.09
+        },
+        {
+          "bucket": "2-3d",
+          "n": 320,
+          "pct_of_evidence_class": 71.91
+        }
+      ],
+      "UNCLASSIFIED": [
+        {
+          "bucket": "0-1d",
+          "n": 68,
+          "pct_of_evidence_class": 62.39
+        },
+        {
+          "bucket": "2-3d",
+          "n": 41,
+          "pct_of_evidence_class": 37.61
+        }
+      ]
+    }
+  },
+  "status": "BLOCKED_MISSING_EXACT_SAME_DAY_FIELD",
+  "blocker": {
+    "missing_fields": [
+      "lead_time_days"
+    ],
+    "why_blocked": "The committed settled_v3_main_cohort artifact preserves only the coarse 0-1d / 2-3d / 4-7d lead bucket, so it cannot separate exact same-day rows from next-day rows inside 0-1d.",
+    "minimum_additional_input": "Re-run from the complete settled V3 export with lead_time_days preserved for each row."
+  },
+  "available_fallback_context": {
+    "cohort_label": "0-1d proxy (not exact same-day)",
+    "rows_available": 193,
+    "research_rows_available": 125,
+    "proxy_contract_type_counts": [
+      {
+        "label": "range",
+        "count": 88
+      },
+      {
+        "label": "threshold",
+        "count": 37
+      }
+    ],
+    "proxy_model_disagreement_counts": [
+      {
+        "label": "10-19pp",
+        "count": 94
+      },
+      {
+        "label": "20pp+",
+        "count": 31
+      }
+    ],
+    "proxy_metrics_research_only": {
+      "all_same_day_contracts": {
+        "v3": {
+          "n": 125,
+          "wins": 12,
+          "losses": 113,
+          "realized_rate_pct": 9.6,
+          "brier": 0.1174,
+          "log_loss": 0.4179,
+          "log_loss_supported_n": 125,
+          "mean_abs_calibration_error_pp": 40.305,
+          "event_n": 64,
+          "event_level_brier": 0.0904,
+          "event_level_accuracy_pct": 90.62,
+          "paper_return_sensitivity_roi_pct": -87.11,
+          "calibration": [
+            {
+              "bucket": "00-09%",
+              "count": 0,
+              "mean_pred_pct": null,
+              "observed_rate_pct": null,
+              "calibration_error_pp": null
+            },
+            {
+              "bucket": "10-19%",
+              "count": 80,
+              "mean_pred_pct": 12.6,
+              "observed_rate_pct": 0.0,
+              "calibration_error_pp": -12.6
+            },
+            {
+              "bucket": "20-29%",
+              "count": 7,
+              "mean_pred_pct": 24.62,
+              "observed_rate_pct": 0.0,
+              "calibration_error_pp": -24.62
+            },
+            {
+              "bucket": "30-39%",
+              "count": 7,
+              "mean_pred_pct": 35.11,
+              "observed_rate_pct": 0.0,
+              "calibration_error_pp": -35.11
+            },
+            {
+              "bucket": "40-49%",
+              "count": 3,
+              "mean_pred_pct": 45.81,
+              "observed_rate_pct": 0.0,
+              "calibration_error_pp": -45.81
+            },
+            {
+              "bucket": "50-59%",
+              "count": 2,
+              "mean_pred_pct": 56.62,
+              "observed_rate_pct": 0.0,
+              "calibration_error_pp": -56.62
+            },
+            {
+              "bucket": "60-69%",
+              "count": 2,
+              "mean_pred_pct": 64.93,
+              "observed_rate_pct": 0.0,
+              "calibration_error_pp": -64.93
+            },
+            {
+              "bucket": "70-79%",
+              "count": 0,
+              "mean_pred_pct": null,
+              "observed_rate_pct": null,
+              "calibration_error_pp": null
+            },
+            {
+              "bucket": "80-89%",
+              "count": 14,
+              "mean_pred_pct": 87.89,
+              "observed_rate_pct": 50.0,
+              "calibration_error_pp": -37.89
+            },
+            {
+              "bucket": "90-100%",
+              "count": 10,
+              "mean_pred_pct": 94.86,
+              "observed_rate_pct": 50.0,
+              "calibration_error_pp": -44.86
+            }
+          ]
+        },
+        "kalshi_baseline": {
+          "coverage_n": 125,
+          "metrics": {
+            "n": 125,
+            "wins": 12,
+            "losses": 113,
+            "realized_rate_pct": 9.6,
+            "brier": 0.0143,
+            "log_loss": 0.0644,
+            "log_loss_supported_n": 125,
+            "mean_abs_calibration_error_pp": 22.173,
+            "event_n": 64,
+            "event_level_brier": 0.0161,
+            "event_level_accuracy_pct": 96.88,
+            "paper_return_sensitivity_roi_pct": -87.52,
+            "calibration": [
+              {
+                "bucket": "00-09%",
+                "count": 105,
+                "mean_pred_pct": 1.46,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -1.46
+              },
+              {
+                "bucket": "10-19%",
+                "count": 4,
+                "mean_pred_pct": 12.25,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -12.25
+              },
+              {
+                "bucket": "20-29%",
+                "count": 2,
+                "mean_pred_pct": 28.0,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -28.0
+              },
+              {
+                "bucket": "30-39%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              },
+              {
+                "bucket": "40-49%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              },
+              {
+                "bucket": "50-59%",
+                "count": 1,
+                "mean_pred_pct": 55.0,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -55.0
+              },
+              {
+                "bucket": "60-69%",
+                "count": 1,
+                "mean_pred_pct": 68.0,
+                "observed_rate_pct": 100.0,
+                "calibration_error_pp": 32.0
+              },
+              {
+                "bucket": "70-79%",
+                "count": 8,
+                "mean_pred_pct": 75.5,
+                "observed_rate_pct": 87.5,
+                "calibration_error_pp": 12.0
+              },
+              {
+                "bucket": "80-89%",
+                "count": 4,
+                "mean_pred_pct": 85.5,
+                "observed_rate_pct": 100.0,
+                "calibration_error_pp": 14.5
+              },
+              {
+                "bucket": "90-100%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              }
+            ]
+          }
+        },
+        "frozen_v31_50_50_blend": {
+          "coverage_n": 125,
+          "metrics": {
+            "n": 125,
+            "wins": 12,
+            "losses": 113,
+            "realized_rate_pct": 9.6,
+            "brier": 0.0434,
+            "log_loss": 0.1835,
+            "log_loss_supported_n": 125,
+            "mean_abs_calibration_error_pp": 25.91,
+            "event_n": 64,
+            "event_level_brier": 0.0372,
+            "event_level_accuracy_pct": 96.88,
+            "paper_return_sensitivity_roi_pct": -86.55,
+            "calibration": [
+              {
+                "bucket": "00-09%",
+                "count": 77,
+                "mean_pred_pct": 6.87,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -6.87
+              },
+              {
+                "bucket": "10-19%",
+                "count": 13,
+                "mean_pred_pct": 13.57,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -13.57
+              },
+              {
+                "bucket": "20-29%",
+                "count": 9,
+                "mean_pred_pct": 23.67,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -23.67
+              },
+              {
+                "bucket": "30-39%",
+                "count": 1,
+                "mean_pred_pct": 32.96,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -32.96
+              },
+              {
+                "bucket": "40-49%",
+                "count": 9,
+                "mean_pred_pct": 46.42,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -46.42
+              },
+              {
+                "bucket": "50-59%",
+                "count": 1,
+                "mean_pred_pct": 52.46,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -52.46
+              },
+              {
+                "bucket": "60-69%",
+                "count": 1,
+                "mean_pred_pct": 60.76,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -60.76
+              },
+              {
+                "bucket": "70-79%",
+                "count": 3,
+                "mean_pred_pct": 76.9,
+                "observed_rate_pct": 66.67,
+                "calibration_error_pp": -10.23
+              },
+              {
+                "bucket": "80-89%",
+                "count": 9,
+                "mean_pred_pct": 84.27,
+                "observed_rate_pct": 88.89,
+                "calibration_error_pp": 4.62
+              },
+              {
+                "bucket": "90-100%",
+                "count": 2,
+                "mean_pred_pct": 92.46,
+                "observed_rate_pct": 100.0,
+                "calibration_error_pp": 7.54
+              }
+            ]
+          }
+        }
+      },
+      "threshold_only_same_day": {
+        "v3": {
+          "n": 37,
+          "wins": 2,
+          "losses": 35,
+          "realized_rate_pct": 5.41,
+          "brier": 0.0999,
+          "log_loss": 0.3457,
+          "log_loss_supported_n": 37,
+          "mean_abs_calibration_error_pp": 34.747,
+          "event_n": 29,
+          "event_level_brier": 0.0919,
+          "event_level_accuracy_pct": 93.1,
+          "paper_return_sensitivity_roi_pct": -92.82,
+          "calibration": [
+            {
+              "bucket": "00-09%",
+              "count": 0,
+              "mean_pred_pct": null,
+              "observed_rate_pct": null,
+              "calibration_error_pp": null
+            },
+            {
+              "bucket": "10-19%",
+              "count": 14,
+              "mean_pred_pct": 14.05,
+              "observed_rate_pct": 0.0,
+              "calibration_error_pp": -14.05
+            },
+            {
+              "bucket": "20-29%",
+              "count": 7,
+              "mean_pred_pct": 24.62,
+              "observed_rate_pct": 0.0,
+              "calibration_error_pp": -24.62
+            },
+            {
+              "bucket": "30-39%",
+              "count": 7,
+              "mean_pred_pct": 35.11,
+              "observed_rate_pct": 0.0,
+              "calibration_error_pp": -35.11
+            },
+            {
+              "bucket": "40-49%",
+              "count": 3,
+              "mean_pred_pct": 45.81,
+              "observed_rate_pct": 0.0,
+              "calibration_error_pp": -45.81
+            },
+            {
+              "bucket": "50-59%",
+              "count": 2,
+              "mean_pred_pct": 56.62,
+              "observed_rate_pct": 0.0,
+              "calibration_error_pp": -56.62
+            },
+            {
+              "bucket": "60-69%",
+              "count": 2,
+              "mean_pred_pct": 64.93,
+              "observed_rate_pct": 0.0,
+              "calibration_error_pp": -64.93
+            },
+            {
+              "bucket": "70-79%",
+              "count": 0,
+              "mean_pred_pct": null,
+              "observed_rate_pct": null,
+              "calibration_error_pp": null
+            },
+            {
+              "bucket": "80-89%",
+              "count": 0,
+              "mean_pred_pct": null,
+              "observed_rate_pct": null,
+              "calibration_error_pp": null
+            },
+            {
+              "bucket": "90-100%",
+              "count": 2,
+              "mean_pred_pct": 97.91,
+              "observed_rate_pct": 100.0,
+              "calibration_error_pp": 2.09
+            }
+          ]
+        },
+        "kalshi_baseline": {
+          "coverage_n": 37,
+          "metrics": {
+            "n": 37,
+            "wins": 2,
+            "losses": 35,
+            "realized_rate_pct": 5.41,
+            "brier": 0.004,
+            "log_loss": 0.0366,
+            "log_loss_supported_n": 37,
+            "mean_abs_calibration_error_pp": 13.28,
+            "event_n": 29,
+            "event_level_brier": 0.005,
+            "event_level_accuracy_pct": 100.0,
+            "paper_return_sensitivity_roi_pct": -93.79,
+            "calibration": [
+              {
+                "bucket": "00-09%",
+                "count": 32,
+                "mean_pred_pct": 1.62,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -1.62
+              },
+              {
+                "bucket": "10-19%",
+                "count": 2,
+                "mean_pred_pct": 10.5,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -10.5
+              },
+              {
+                "bucket": "20-29%",
+                "count": 1,
+                "mean_pred_pct": 28.0,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -28.0
+              },
+              {
+                "bucket": "30-39%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              },
+              {
+                "bucket": "40-49%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              },
+              {
+                "bucket": "50-59%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              },
+              {
+                "bucket": "60-69%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              },
+              {
+                "bucket": "70-79%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              },
+              {
+                "bucket": "80-89%",
+                "count": 2,
+                "mean_pred_pct": 87.0,
+                "observed_rate_pct": 100.0,
+                "calibration_error_pp": 13.0
+              },
+              {
+                "bucket": "90-100%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              }
+            ]
+          }
+        },
+        "frozen_v31_50_50_blend": {
+          "coverage_n": 37,
+          "metrics": {
+            "n": 37,
+            "wins": 2,
+            "losses": 35,
+            "realized_rate_pct": 5.41,
+            "brier": 0.0312,
+            "log_loss": 0.1715,
+            "log_loss_supported_n": 37,
+            "mean_abs_calibration_error_pp": 21.903,
+            "event_n": 29,
+            "event_level_brier": 0.0304,
+            "event_level_accuracy_pct": 100.0,
+            "paper_return_sensitivity_roi_pct": -93.61,
+            "calibration": [
+              {
+                "bucket": "00-09%",
+                "count": 11,
+                "mean_pred_pct": 7.21,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -7.21
+              },
+              {
+                "bucket": "10-19%",
+                "count": 13,
+                "mean_pred_pct": 13.57,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -13.57
+              },
+              {
+                "bucket": "20-29%",
+                "count": 9,
+                "mean_pred_pct": 23.67,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -23.67
+              },
+              {
+                "bucket": "30-39%",
+                "count": 1,
+                "mean_pred_pct": 32.96,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -32.96
+              },
+              {
+                "bucket": "40-49%",
+                "count": 1,
+                "mean_pred_pct": 46.47,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -46.47
+              },
+              {
+                "bucket": "50-59%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              },
+              {
+                "bucket": "60-69%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              },
+              {
+                "bucket": "70-79%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              },
+              {
+                "bucket": "80-89%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              },
+              {
+                "bucket": "90-100%",
+                "count": 2,
+                "mean_pred_pct": 92.46,
+                "observed_rate_pct": 100.0,
+                "calibration_error_pp": 7.54
+              }
+            ]
+          }
+        }
+      },
+      "range_only_same_day": {
+        "v3": {
+          "n": 88,
+          "wins": 10,
+          "losses": 78,
+          "realized_rate_pct": 11.36,
+          "brier": 0.1247,
+          "log_loss": 0.4482,
+          "log_loss_supported_n": 88,
+          "mean_abs_calibration_error_pp": 35.597,
+          "event_n": 53,
+          "event_level_brier": 0.1174,
+          "event_level_accuracy_pct": 86.79,
+          "paper_return_sensitivity_roi_pct": -85.03,
+          "calibration": [
+            {
+              "bucket": "00-09%",
+              "count": 0,
+              "mean_pred_pct": null,
+              "observed_rate_pct": null,
+              "calibration_error_pp": null
+            },
+            {
+              "bucket": "10-19%",
+              "count": 66,
+              "mean_pred_pct": 12.3,
+              "observed_rate_pct": 0.0,
+              "calibration_error_pp": -12.3
+            },
+            {
+              "bucket": "20-29%",
+              "count": 0,
+              "mean_pred_pct": null,
+              "observed_rate_pct": null,
+              "calibration_error_pp": null
+            },
+            {
+              "bucket": "30-39%",
+              "count": 0,
+              "mean_pred_pct": null,
+              "observed_rate_pct": null,
+              "calibration_error_pp": null
+            },
+            {
+              "bucket": "40-49%",
+              "count": 0,
+              "mean_pred_pct": null,
+              "observed_rate_pct": null,
+              "calibration_error_pp": null
+            },
+            {
+              "bucket": "50-59%",
+              "count": 0,
+              "mean_pred_pct": null,
+              "observed_rate_pct": null,
+              "calibration_error_pp": null
+            },
+            {
+              "bucket": "60-69%",
+              "count": 0,
+              "mean_pred_pct": null,
+              "observed_rate_pct": null,
+              "calibration_error_pp": null
+            },
+            {
+              "bucket": "70-79%",
+              "count": 0,
+              "mean_pred_pct": null,
+              "observed_rate_pct": null,
+              "calibration_error_pp": null
+            },
+            {
+              "bucket": "80-89%",
+              "count": 14,
+              "mean_pred_pct": 87.89,
+              "observed_rate_pct": 50.0,
+              "calibration_error_pp": -37.89
+            },
+            {
+              "bucket": "90-100%",
+              "count": 8,
+              "mean_pred_pct": 94.1,
+              "observed_rate_pct": 37.5,
+              "calibration_error_pp": -56.6
+            }
+          ]
+        },
+        "kalshi_baseline": {
+          "coverage_n": 88,
+          "metrics": {
+            "n": 88,
+            "wins": 10,
+            "losses": 78,
+            "realized_rate_pct": 11.36,
+            "brier": 0.0186,
+            "log_loss": 0.0761,
+            "log_loss_supported_n": 88,
+            "mean_abs_calibration_error_pp": 22.626,
+            "event_n": 53,
+            "event_level_brier": 0.0184,
+            "event_level_accuracy_pct": 98.11,
+            "paper_return_sensitivity_roi_pct": -84.86,
+            "calibration": [
+              {
+                "bucket": "00-09%",
+                "count": 73,
+                "mean_pred_pct": 1.38,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -1.38
+              },
+              {
+                "bucket": "10-19%",
+                "count": 2,
+                "mean_pred_pct": 14.0,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -14.0
+              },
+              {
+                "bucket": "20-29%",
+                "count": 1,
+                "mean_pred_pct": 28.0,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -28.0
+              },
+              {
+                "bucket": "30-39%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              },
+              {
+                "bucket": "40-49%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              },
+              {
+                "bucket": "50-59%",
+                "count": 1,
+                "mean_pred_pct": 55.0,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -55.0
+              },
+              {
+                "bucket": "60-69%",
+                "count": 1,
+                "mean_pred_pct": 68.0,
+                "observed_rate_pct": 100.0,
+                "calibration_error_pp": 32.0
+              },
+              {
+                "bucket": "70-79%",
+                "count": 8,
+                "mean_pred_pct": 75.5,
+                "observed_rate_pct": 87.5,
+                "calibration_error_pp": 12.0
+              },
+              {
+                "bucket": "80-89%",
+                "count": 2,
+                "mean_pred_pct": 84.0,
+                "observed_rate_pct": 100.0,
+                "calibration_error_pp": 16.0
+              },
+              {
+                "bucket": "90-100%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              }
+            ]
+          }
+        },
+        "frozen_v31_50_50_blend": {
+          "coverage_n": 88,
+          "metrics": {
+            "n": 88,
+            "wins": 10,
+            "losses": 78,
+            "realized_rate_pct": 11.36,
+            "brier": 0.0486,
+            "log_loss": 0.1885,
+            "log_loss_supported_n": 88,
+            "mean_abs_calibration_error_pp": 30.217,
+            "event_n": 53,
+            "event_level_brier": 0.0455,
+            "event_level_accuracy_pct": 96.23,
+            "paper_return_sensitivity_roi_pct": -83.33,
+            "calibration": [
+              {
+                "bucket": "00-09%",
+                "count": 66,
+                "mean_pred_pct": 6.82,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -6.82
+              },
+              {
+                "bucket": "10-19%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              },
+              {
+                "bucket": "20-29%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              },
+              {
+                "bucket": "30-39%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              },
+              {
+                "bucket": "40-49%",
+                "count": 8,
+                "mean_pred_pct": 46.41,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -46.41
+              },
+              {
+                "bucket": "50-59%",
+                "count": 1,
+                "mean_pred_pct": 52.46,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -52.46
+              },
+              {
+                "bucket": "60-69%",
+                "count": 1,
+                "mean_pred_pct": 60.76,
+                "observed_rate_pct": 0.0,
+                "calibration_error_pp": -60.76
+              },
+              {
+                "bucket": "70-79%",
+                "count": 3,
+                "mean_pred_pct": 76.9,
+                "observed_rate_pct": 66.67,
+                "calibration_error_pp": -10.23
+              },
+              {
+                "bucket": "80-89%",
+                "count": 9,
+                "mean_pred_pct": 84.27,
+                "observed_rate_pct": 88.89,
+                "calibration_error_pp": 4.62
+              },
+              {
+                "bucket": "90-100%",
+                "count": 0,
+                "mean_pred_pct": null,
+                "observed_rate_pct": null,
+                "calibration_error_pp": null
+              }
+            ]
+          }
+        }
+      },
+      "exclude_range_counterfactual": {
+        "retained_contract_pct": 29.6,
+        "dropped_range_contracts": 88,
+        "retained_threshold_contracts": 37,
+        "all_same_day_n": 125
+      }
+    }
+  }
+}
