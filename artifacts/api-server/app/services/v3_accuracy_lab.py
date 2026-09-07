@@ -635,7 +635,9 @@ def build_settled_v3_accuracy_lab_report(
         chronology_checks.append(max(val_sort_dates) <= min(hold_sort_dates))
     if dev_sort_dates and hold_sort_dates and not val_sort_dates:
         chronology_checks.append(max(dev_sort_dates) <= min(hold_sort_dates))
-    if chronology_checks:
+    if undated_events_present:
+        leakage_checks["chronological_boundaries_non_decreasing"] = None
+    elif chronology_checks:
         leakage_checks["chronological_boundaries_non_decreasing"] = all(chronology_checks)
 
     return {

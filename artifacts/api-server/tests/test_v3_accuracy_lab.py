@@ -213,7 +213,7 @@ def test_leakage_check_flags_undated_partition_events():
     report = build_settled_v3_accuracy_lab_report(trades)
     leak = report["candidate_results"]["leakage_checks"]
     assert leak["undated_events_present"] is True
-    assert leak["chronological_boundaries_non_decreasing"] is True
+    assert leak["chronological_boundaries_non_decreasing"] is None
 
 
 def test_alpha_fit_can_choose_full_shrinkage_endpoint():
