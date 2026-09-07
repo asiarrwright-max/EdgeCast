@@ -513,14 +513,16 @@ def build_settled_v3_accuracy_lab_report(
     for row in rows:
         row["partition"] = partition_by_event.get(row["event_key"], "unknown")
 
-    research_rows = [r for r in rows if r["eligibility_class"] == "RESEARCH_ONLY" and r["actual"] is not None]
+    research_class_rows = [r for r in rows if r["eligibility_class"] == "RESEARCH_ONLY"]
+    research_rows = [r for r in research_class_rows if r["actual"] is not None]
     dev_research = [r for r in dev_rows if r["eligibility_class"] == "RESEARCH_ONLY" and r["actual"] is not None]
     val_research = [r for r in val_rows if r["eligibility_class"] == "RESEARCH_ONLY" and r["actual"] is not None]
     holdout_research = [r for r in holdout_rows if r["eligibility_class"] == "RESEARCH_ONLY" and r["actual"] is not None]
 
     baseline_metrics = _metrics(research_rows, "model_prob")
+    research_market_rows = [r for r in research_class_rows if r.get("market_prob") is not None]
     kalshi_baseline = _metrics(
-        [r for r in research_rows if r.get("market_prob") is not None],
+        [r for r in research_market_rows if r.get("actual") is not None],
         "market_prob",
     )
     evidence_class_metrics = {}
@@ -664,8 +666,11 @@ def build_settled_v3_accuracy_lab_report(
             "by_evidence_class": evidence_class_metrics,
             "research_population_metrics": baseline_metrics,
             "kalshi_baseline": {
-                "coverage_n": kalshi_baseline["n"],
-                "coverage_pct_of_research": round(kalshi_baseline["n"] / len(research_rows) * 100, 2) if research_rows else 0.0,
+                "coverage_n": len(research_market_rows),
+                "coverage_pct_of_research": (
+                    round(len(research_market_rows) / len(research_class_rows) * 100, 2)
+                    if research_class_rows else 0.0
+                ),
                 "metrics": kalshi_baseline,
             },
         },

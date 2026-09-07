@@ -134,10 +134,13 @@ def test_evidence_class_kalshi_coverage_counts_only_scored_rows():
         _trade(outcome="WIN", side_market_price=0.7, eligibility_status="RESEARCH_ONLY"),
         _trade(outcome="PENDING_SETTLEMENT", side_market_price=0.8, eligibility_status="RESEARCH_ONLY"),
     ]
-    metrics = build_settled_v3_accuracy_lab_report(trades)["baseline_reproduction"]["by_evidence_class"]
+    report = build_settled_v3_accuracy_lab_report(trades)
+    metrics = report["baseline_reproduction"]["by_evidence_class"]
     assert metrics["RESEARCH_ONLY"]["v3"]["n"] == 1
     assert metrics["RESEARCH_ONLY"]["kalshi_coverage_n"] == 1
     assert metrics["RESEARCH_ONLY"]["kalshi"]["n"] == 1
+    assert report["baseline_reproduction"]["kalshi_baseline"]["coverage_n"] == 2
+    assert report["baseline_reproduction"]["kalshi_baseline"]["metrics"]["n"] == 1
 
 
 def test_candidate_ranking_and_recommendation_exist():
