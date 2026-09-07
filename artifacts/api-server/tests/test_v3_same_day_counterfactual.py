@@ -53,11 +53,13 @@ def test_same_day_counterfactual_fails_closed_without_exact_lead_days():
     report = build_same_day_counterfactual_report([
         _row(contract_type="threshold", disagreement_bucket=None),  # type: ignore[arg-type]
         _row(contract_type="range", actual=0.0, model_prob=0.2, market_prob=0.4),
+        _row(eligibility_class="OFFICIAL", event_key="Denver|2026-08-02|high"),
     ])
     assert report["status"] == "BLOCKED_MISSING_EXACT_SAME_DAY_FIELD"
     assert report["blocker"]["missing_fields"] == ["lead_time_days"]
     assert report["available_fallback_context"]["cohort_label"] == "0-1d proxy (not exact same-day)"
     assert report["available_fallback_context"]["proxy_model_disagreement_counts"][1]["label"] == "unknown"
+    assert "OFFICIAL" in report["available_fallback_context"]["proxy_metrics_by_evidence_class"]
 
 
 def test_same_day_counterfactual_uses_exact_same_day_when_present():

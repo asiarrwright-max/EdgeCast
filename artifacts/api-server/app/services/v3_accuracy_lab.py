@@ -904,12 +904,23 @@ def build_same_day_counterfactual_report(
                 "preserved for each row."
             ),
         }
+        proxy_by_evidence_class = {
+            evidence_class: [
+                row for row in proxy_rows
+                if row.get("eligibility_class") == evidence_class
+            ]
+            for evidence_class in ("OFFICIAL", "RESEARCH_ONLY", "UNCLASSIFIED")
+        }
         report["available_fallback_context"] = {
             "cohort_label": "0-1d proxy (not exact same-day)",
             "rows_available": len(proxy_rows),
             "research_rows_available": len(proxy_research),
             "proxy_contract_type_counts": _count_by_label(proxy_research, "contract_type"),
             "proxy_model_disagreement_counts": _count_by_label(proxy_research, "disagreement_bucket"),
+            "proxy_metrics_by_evidence_class": {
+                evidence_class: _counterfactual_summary(rows)
+                for evidence_class, rows in proxy_by_evidence_class.items()
+            },
             "proxy_metrics_research_only": _counterfactual_summary(proxy_research),
         }
         return report
