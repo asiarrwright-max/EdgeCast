@@ -93,3 +93,17 @@ def test_same_day_counterfactual_uses_exact_same_day_when_present():
     assert report["same_day_by_evidence_class"]["OFFICIAL"]["v3"]["n"] == 1
     assert report["research_same_day_counterfactual"]["exclude_range_counterfactual"]["dropped_range_contracts"] == 1
     assert report["research_same_day_breakdowns"]["by_contract_type"][0]["label"] in {"range", "threshold"}
+
+
+def test_lead_time_distribution_uses_semantic_bucket_order():
+    report = build_same_day_counterfactual_report([
+        _row(lead_time_days=1, event_key="Denver|2026-08-01|high"),
+        _row(lead_time_days=0, event_date="2026-08-02", event_key="Denver|2026-08-02|high"),
+        _row(lead_time_days=2, event_date="2026-08-03", event_key="Denver|2026-08-03|high"),
+    ])
+    labels = [
+        row["bucket"]
+        for row in report["lead_time_distribution"]["exact_by_evidence_class"]["RESEARCH_ONLY"]
+        if row["n"] > 0
+    ]
+    assert labels == ["same_day", "1d", "2-3d"]

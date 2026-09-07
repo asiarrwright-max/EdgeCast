@@ -760,6 +760,13 @@ def _count_by_label(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]
     ]
 
 
+def _ordered_bucket_labels(order: list[str], counts: dict[tuple[str, str], int]) -> list[str]:
+    seen = {bucket for (_, bucket) in counts}
+    ordered = [label for label in order if label in seen]
+    extras = sorted(seen - set(order))
+    return ordered + extras
+
+
 def _counterfactual_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     threshold_rows = [r for r in rows if r.get("contract_type") == "threshold"]
     range_rows = [r for r in rows if r.get("contract_type") == "range"]
@@ -813,9 +820,13 @@ def build_same_day_counterfactual_report(
         exact_counts[(row["eligibility_class"], row["exact_lead_bucket"])] += 1
         coarse_counts[(row["eligibility_class"], row["coarse_lead_bucket"])] += 1
 
-    def _dist(counts: dict[tuple[str, str], int], total_map: dict[str, int]) -> dict[str, list[dict[str, Any]]]:
+    def _dist(
+        counts: dict[tuple[str, str], int],
+        total_map: dict[str, int],
+        order: list[str],
+    ) -> dict[str, list[dict[str, Any]]]:
         out: dict[str, list[dict[str, Any]]] = {}
-        labels = sorted({bucket for (_, bucket) in counts})
+        labels = _ordered_bucket_labels(order, counts)
         for evidence_class, total in sorted(total_map.items()):
             rows_out = []
             for bucket in labels:
@@ -838,8 +849,16 @@ def build_same_day_counterfactual_report(
         },
         "lead_time_distribution": {
             "exact_same_day_supported": exact_same_day_supported,
-            "exact_by_evidence_class": _dist(exact_counts, eligibility_counts),
-            "coarse_by_evidence_class": _dist(coarse_counts, eligibility_counts),
+            "exact_by_evidence_class": _dist(
+                exact_counts,
+                eligibility_counts,
+                ["same_day", "1d", "2-3d", "4d+", "unknown"],
+            ),
+            "coarse_by_evidence_class": _dist(
+                coarse_counts,
+                eligibility_counts,
+                ["0-1d", "2-3d", "4-7d", "8d+", "unknown"],
+            ),
         },
     }
 
