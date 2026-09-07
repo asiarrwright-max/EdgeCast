@@ -312,7 +312,7 @@ def _event_group_breakdown(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def _split_partitions(event_keys: list[str], event_dates: dict[str, date | None]) -> dict[str, set[str]]:
     sortable = sorted(
         event_keys,
-        key=lambda k: (event_dates.get(k) or date.min, k),
+        key=lambda k: (event_dates.get(k) or date.max, k),
     )
     n = len(sortable)
     if n == 0:
