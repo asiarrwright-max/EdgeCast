@@ -2,7 +2,7 @@
 
 Read-only report generated from committed settled V3 artifacts.
 
-- Generated at: `2026-09-07T00:09:56.619125+00:00`
+- Generated at: `2026-09-07T00:10:49.096521+00:00`
 - Exact same-day supported: `False`
 
 ## Blocker

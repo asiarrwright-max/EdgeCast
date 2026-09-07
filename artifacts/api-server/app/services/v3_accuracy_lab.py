@@ -347,7 +347,7 @@ def _with_prob(rows: list[dict[str, Any]], key: str, fn: Callable[[dict[str, Any
 def _fit_best_alpha(validation_rows: list[dict[str, Any]]) -> float:
     best_alpha = 0.5
     best_brier = float("inf")
-    for alpha in [i / 10.0 for i in range(0, 10)]:
+    for alpha in [i / 10.0 for i in range(0, 11)]:
         scored = _with_prob(
             validation_rows,
             "candidate_prob",
@@ -412,7 +412,7 @@ def _fit_disagreement_threshold(validation_rows: list[dict[str, Any]]) -> float:
 def _fit_market_blend_weight(validation_rows: list[dict[str, Any]]) -> float:
     best_w = 0.0
     best_brier = float("inf")
-    for w in (0.0, 0.25, 0.5):
+    for w in (0.0, 0.25, 0.5, 0.75, 1.0):
         scored = _with_prob(
             validation_rows,
             "candidate_prob",

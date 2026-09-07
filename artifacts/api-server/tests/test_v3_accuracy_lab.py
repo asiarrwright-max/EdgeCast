@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.services.v3_accuracy_lab import build_settled_v3_accuracy_lab_report
+from app.services.v3_accuracy_lab import (
+    _fit_best_alpha,
+    _fit_market_blend_weight,
+    build_settled_v3_accuracy_lab_report,
+)
 
 
 def _trade(
@@ -190,3 +194,19 @@ def test_candidate_recommendation_is_deterministic_for_fixed_input():
     ranked_b = [row["name"] for row in report_b["candidate_results"]["ranked_on_holdout"]]
     assert ranked_a == ranked_b
     assert report_a["recommendation"] == report_b["recommendation"]
+
+
+def test_alpha_fit_can_choose_full_shrinkage_endpoint():
+    rows = [
+        {"event_key": "a", "model_prob": 0.99, "actual": 0.0},
+        {"event_key": "b", "model_prob": 0.01, "actual": 1.0},
+    ]
+    assert _fit_best_alpha(rows) == 1.0
+
+
+def test_market_blend_fit_can_choose_full_market_weight():
+    rows = [
+        {"event_key": "a", "model_prob": 0.99, "market_prob": 0.0, "actual": 0.0},
+        {"event_key": "b", "model_prob": 0.01, "market_prob": 1.0, "actual": 1.0},
+    ]
+    assert _fit_market_blend_weight(rows) == 1.0

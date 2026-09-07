@@ -72,6 +72,14 @@ def _markdown(report: dict[str, object]) -> str:
 def main() -> None:
     base_dir = Path(__file__).parent.parent / "reports" / "settled_v3_complete"
     input_path = base_dir / "settled_v3_main_cohort.csv"
+    if not input_path.exists():
+        payload = {
+            "status": "BLOCKED_INCOMPLETE_SOURCE",
+            "missing_path": str(input_path),
+            "message": "Frozen settled_v3_main_cohort.csv artifact is required.",
+        }
+        print(json.dumps(payload, indent=2))
+        raise SystemExit("BLOCKED_INCOMPLETE_SOURCE: missing settled_v3_main_cohort.csv")
     with input_path.open(newline="", encoding="utf-8") as handle:
         rows = [_coerce(row) for row in csv.DictReader(handle)]
     report = build_same_day_counterfactual_report(
