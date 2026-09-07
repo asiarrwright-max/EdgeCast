@@ -107,3 +107,16 @@ def test_lead_time_distribution_uses_semantic_bucket_order():
         if row["n"] > 0
     ]
     assert labels == ["same_day", "1d", "2-3d"]
+
+
+def test_lead_time_distribution_keeps_full_bucket_schema_and_normalizes_evidence_class():
+    report = build_same_day_counterfactual_report([
+        _row(lead_time_days=0, eligibility_class="research_only"),
+        _row(lead_time_days=1, eligibility_class=None),
+    ])
+    exact = report["lead_time_distribution"]["exact_by_evidence_class"]
+    assert report["frozen_population"]["eligibility_counts"]["RESEARCH_ONLY"] == 1
+    assert report["frozen_population"]["eligibility_counts"]["UNCLASSIFIED"] == 1
+    assert [row["bucket"] for row in exact["RESEARCH_ONLY"][:5]] == [
+        "same_day", "1d", "2-3d", "4d+", "unknown"
+    ]

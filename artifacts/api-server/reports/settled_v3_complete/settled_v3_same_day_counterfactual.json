@@ -1,6 +1,6 @@
 {
   "classification": "GREEN_READ_ONLY_RESEARCH",
-  "generated_at": "2026-09-07T00:08:33.378874+00:00",
+  "generated_at": "2026-09-07T00:09:56.619125+00:00",
   "requested_same_day_definition": "target-date same-day observations only",
   "frozen_population": {
     "total_rows": 555,
@@ -15,6 +15,26 @@
     "exact_by_evidence_class": {
       "OFFICIAL": [
         {
+          "bucket": "same_day",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
+        {
+          "bucket": "1d",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
+        {
+          "bucket": "2-3d",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
+        {
+          "bucket": "4d+",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
+        {
           "bucket": "unknown",
           "n": 1,
           "pct_of_evidence_class": 100.0
@@ -22,12 +42,52 @@
       ],
       "RESEARCH_ONLY": [
         {
+          "bucket": "same_day",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
+        {
+          "bucket": "1d",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
+        {
+          "bucket": "2-3d",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
+        {
+          "bucket": "4d+",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
+        {
           "bucket": "unknown",
           "n": 445,
           "pct_of_evidence_class": 100.0
         }
       ],
       "UNCLASSIFIED": [
+        {
+          "bucket": "same_day",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
+        {
+          "bucket": "1d",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
+        {
+          "bucket": "2-3d",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
+        {
+          "bucket": "4d+",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
         {
           "bucket": "unknown",
           "n": 109,
@@ -46,6 +106,21 @@
           "bucket": "2-3d",
           "n": 1,
           "pct_of_evidence_class": 100.0
+        },
+        {
+          "bucket": "4-7d",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
+        {
+          "bucket": "8d+",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
+        {
+          "bucket": "unknown",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
         }
       ],
       "RESEARCH_ONLY": [
@@ -58,6 +133,21 @@
           "bucket": "2-3d",
           "n": 320,
           "pct_of_evidence_class": 71.91
+        },
+        {
+          "bucket": "4-7d",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
+        {
+          "bucket": "8d+",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
+        {
+          "bucket": "unknown",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
         }
       ],
       "UNCLASSIFIED": [
@@ -70,6 +160,21 @@
           "bucket": "2-3d",
           "n": 41,
           "pct_of_evidence_class": 37.61
+        },
+        {
+          "bucket": "4-7d",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
+        {
+          "bucket": "8d+",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
+        },
+        {
+          "bucket": "unknown",
+          "n": 0,
+          "pct_of_evidence_class": 0.0
         }
       ]
     }

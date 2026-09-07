@@ -762,7 +762,7 @@ def _count_by_label(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]
 
 def _ordered_bucket_labels(order: list[str], counts: dict[tuple[str, str], int]) -> list[str]:
     seen = {bucket for (_, bucket) in counts}
-    ordered = [label for label in order if label in seen]
+    ordered = list(order)
     extras = sorted(seen - set(order))
     return ordered + extras
 
@@ -799,15 +799,22 @@ def build_same_day_counterfactual_report(
     that *is* recoverable from the committed artifact.
     """
     as_of = as_of or datetime.now(timezone.utc)
-    available_fields = sorted({key for row in cohort_rows for key in row})
+    normalized_rows = [
+        {
+            **row,
+            "eligibility_class": _eligibility_class(row.get("eligibility_class")),
+        }
+        for row in cohort_rows
+    ]
+    available_fields = sorted({key for row in normalized_rows for key in row})
     exact_same_day_supported = "lead_time_days" in available_fields
 
     eligibility_counts: dict[str, int] = defaultdict(int)
-    for row in cohort_rows:
+    for row in normalized_rows:
         eligibility_counts[str(row.get("eligibility_class", "UNCLASSIFIED"))] += 1
 
     lead_distribution_rows: list[dict[str, Any]] = []
-    for row in cohort_rows:
+    for row in normalized_rows:
         lead_distribution_rows.append({
             "eligibility_class": str(row.get("eligibility_class", "UNCLASSIFIED")),
             "exact_lead_bucket": _lead_days_bucket(row.get("lead_time_days")),
@@ -844,7 +851,7 @@ def build_same_day_counterfactual_report(
         "generated_at": as_of.isoformat(),
         "requested_same_day_definition": "target-date same-day observations only",
         "frozen_population": {
-            "total_rows": len(cohort_rows),
+            "total_rows": len(normalized_rows),
             "eligibility_counts": dict(sorted(eligibility_counts.items())),
         },
         "lead_time_distribution": {
@@ -864,7 +871,7 @@ def build_same_day_counterfactual_report(
 
     if not exact_same_day_supported:
         proxy_rows = [
-            row for row in cohort_rows
+            row for row in normalized_rows
             if row.get("lead_time_bucket") == "0-1d"
         ]
         proxy_research = [
@@ -895,7 +902,7 @@ def build_same_day_counterfactual_report(
         return report
 
     exact_by_evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for row in cohort_rows:
+    for row in normalized_rows:
         exact_by_evidence[str(row.get("eligibility_class", "UNCLASSIFIED"))].append(row)
 
     same_day_research = [
