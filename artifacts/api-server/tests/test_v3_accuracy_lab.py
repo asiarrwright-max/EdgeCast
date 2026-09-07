@@ -137,3 +137,56 @@ def test_candidate_ranking_and_recommendation_exist():
         "more_research",
         "candidate_for_v3_1_shadow",
     }
+
+
+def _chronological_candidate_trades() -> list[SimpleNamespace]:
+    trades = []
+    for idx in range(1, 16):
+        outcome = "WIN" if idx % 2 == 0 else "LOSS"
+        trades.append(_trade(
+            city="Chicago" if idx % 3 == 0 else "Denver",
+            target_settlement_date=f"2026-08-{idx:02d}",
+            contract_type="range" if idx % 4 == 0 else "threshold",
+            outcome=outcome,
+            ec_side_probability=0.75 if outcome == "WIN" else 0.25,
+            side_market_price=0.6 if outcome == "WIN" else 0.4,
+            lead_time_days=1 + (idx % 6),
+            final_sigma=2.0 + (idx % 5),
+        ))
+    return trades
+
+
+def test_candidate_fit_params_ignore_holdout_only_changes():
+    trades_a = _chronological_candidate_trades()
+    trades_b = _chronological_candidate_trades()
+    for trade in trades_b[-3:]:
+        trade.outcome = "WIN" if trade.outcome == "LOSS" else "LOSS"
+        trade.ec_side_probability = 0.95 if trade.outcome == "WIN" else 0.05
+        trade.side_market_price = 0.9 if trade.outcome == "WIN" else 0.1
+
+    report_a = build_settled_v3_accuracy_lab_report(trades_a)
+    report_b = build_settled_v3_accuracy_lab_report(trades_b)
+
+    params_a = {
+        row["name"]: row["params"]
+        for row in report_a["candidate_results"]["ranked_on_holdout"]
+    }
+    params_b = {
+        row["name"]: row["params"]
+        for row in report_b["candidate_results"]["ranked_on_holdout"]
+    }
+
+    assert report_a["candidate_results"]["leakage_checks"]["candidate_fit_uses_holdout"] is False
+    assert report_b["candidate_results"]["leakage_checks"]["candidate_fit_uses_holdout"] is False
+    assert params_a == params_b
+
+
+def test_candidate_recommendation_is_deterministic_for_fixed_input():
+    trades = _chronological_candidate_trades()
+    report_a = build_settled_v3_accuracy_lab_report(trades)
+    report_b = build_settled_v3_accuracy_lab_report(trades)
+
+    ranked_a = [row["name"] for row in report_a["candidate_results"]["ranked_on_holdout"]]
+    ranked_b = [row["name"] for row in report_b["candidate_results"]["ranked_on_holdout"]]
+    assert ranked_a == ranked_b
+    assert report_a["recommendation"] == report_b["recommendation"]
