@@ -67,16 +67,25 @@ def _validate_args(args: argparse.Namespace) -> None:
 def _load_export(path: Path, manifest_path: Path | None) -> tuple[list[SimpleNamespace], dict]:
     if manifest_path is None:
         raise SystemExit("BLOCKED_INCOMPLETE_SOURCE: --manifest is required with --input")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"BLOCKED_INCOMPLETE_SOURCE: unable to read manifest: {exc}") from exc
     expected = manifest.get("complete_settled_v3_count")
     if not isinstance(expected, int) or expected < 0:
         raise SystemExit("BLOCKED_INCOMPLETE_SOURCE: manifest needs integer complete_settled_v3_count")
     suffix = path.suffix.lower()
     if suffix == ".csv":
-        with path.open(newline="", encoding="utf-8") as handle:
-            raw_rows = list(csv.DictReader(handle))
+        try:
+            with path.open(newline="", encoding="utf-8") as handle:
+                raw_rows = list(csv.DictReader(handle))
+        except OSError as exc:
+            raise SystemExit(f"BLOCKED_INCOMPLETE_SOURCE: unable to read CSV input: {exc}") from exc
     elif suffix == ".json":
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"BLOCKED_INCOMPLETE_SOURCE: unable to read JSON input: {exc}") from exc
         if isinstance(payload, list):
             raw_rows = payload
         elif isinstance(payload, dict) and isinstance(payload.get("rows"), list):

@@ -35,3 +35,12 @@ def test_load_export_rejects_json_without_list_rows(tmp_path: Path):
     input_path.write_text('{"rows": "bad"}', encoding="utf-8")
     with pytest.raises(SystemExit, match="list-valued rows"):
         _MODULE._load_export(input_path, manifest)
+
+
+def test_load_export_rejects_malformed_json_input(tmp_path: Path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('{"complete_settled_v3_count": 0}', encoding="utf-8")
+    input_path = tmp_path / "rows.json"
+    input_path.write_text("{bad json", encoding="utf-8")
+    with pytest.raises(SystemExit, match="unable to read JSON input"):
+        _MODULE._load_export(input_path, manifest)
