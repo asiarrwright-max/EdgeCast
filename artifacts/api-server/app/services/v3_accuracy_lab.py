@@ -922,12 +922,14 @@ def build_same_day_counterfactual_report(
             "cohort_label": "0-1d proxy (not exact same-day)",
             "rows_available": len(proxy_rows),
             "research_rows_available": len(proxy_research),
-            "proxy_contract_type_counts": _count_by_label(proxy_research, "contract_type"),
-            "proxy_model_disagreement_counts": _count_by_label(proxy_research, "disagreement_bucket"),
+            "proxy_contract_type_counts": _count_by_label(proxy_rows, "contract_type"),
+            "proxy_model_disagreement_counts": _count_by_label(proxy_rows, "disagreement_bucket"),
             "proxy_metrics_by_evidence_class": {
                 evidence_class: _counterfactual_summary(rows)
                 for evidence_class, rows in proxy_by_evidence_class.items()
             },
+            "research_proxy_contract_type_counts": _count_by_label(proxy_research, "contract_type"),
+            "research_proxy_model_disagreement_counts": _count_by_label(proxy_research, "disagreement_bucket"),
             "proxy_metrics_research_only": _counterfactual_summary(proxy_research),
         }
         return report

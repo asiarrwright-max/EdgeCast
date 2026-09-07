@@ -1,6 +1,6 @@
 {
   "classification": "GREEN_READ_ONLY_RESEARCH",
-  "generated_at": "2026-09-07T00:15:22.734432+00:00",
+  "generated_at": "2026-09-07T00:16:04.644114+00:00",
   "requested_same_day_definition": "target-date same-day observations only",
   "frozen_population": {
     "total_rows": 555,
@@ -194,21 +194,21 @@
     "proxy_contract_type_counts": [
       {
         "label": "range",
-        "count": 88
+        "count": 125
       },
       {
         "label": "threshold",
-        "count": 37
+        "count": 68
       }
     ],
     "proxy_model_disagreement_counts": [
       {
         "label": "10-19pp",
-        "count": 94
+        "count": 109
       },
       {
         "label": "20pp+",
-        "count": 31
+        "count": 84
       }
     ],
     "proxy_metrics_by_evidence_class": {
@@ -2631,6 +2631,26 @@
         }
       }
     },
+    "research_proxy_contract_type_counts": [
+      {
+        "label": "range",
+        "count": 88
+      },
+      {
+        "label": "threshold",
+        "count": 37
+      }
+    ],
+    "research_proxy_model_disagreement_counts": [
+      {
+        "label": "10-19pp",
+        "count": 94
+      },
+      {
+        "label": "20pp+",
+        "count": 31
+      }
+    ],
     "proxy_metrics_research_only": {
       "all_same_day_contracts": {
         "v3": {
