@@ -520,7 +520,10 @@ def build_settled_v3_accuracy_lab_report(
     evidence_class_metrics = {}
     for evidence_class in ("OFFICIAL", "RESEARCH_ONLY", "UNCLASSIFIED"):
         class_rows = [r for r in rows if r["eligibility_class"] == evidence_class]
-        class_market_rows = [r for r in class_rows if r.get("market_prob") is not None]
+        class_market_rows = [
+            r for r in class_rows
+            if r.get("market_prob") is not None and r.get("actual") is not None
+        ]
         evidence_class_metrics[evidence_class] = {
             "v3": _metrics(class_rows, "model_prob"),
             "kalshi": _metrics(class_market_rows, "market_prob"),
@@ -753,7 +756,8 @@ def _cohort_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def _count_by_label(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
     counts: dict[str, int] = defaultdict(int)
     for row in rows:
-        counts[str(row.get(key, "unknown"))] += 1
+        raw = row.get(key)
+        counts[str(raw or "unknown")] += 1
     return [
         {"label": label, "count": counts[label]}
         for label in sorted(counts)

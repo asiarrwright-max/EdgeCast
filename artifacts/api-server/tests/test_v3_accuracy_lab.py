@@ -116,6 +116,17 @@ def test_baseline_and_kalshi_metrics_present():
     assert kalshi["metrics"]["brier"] is not None
 
 
+def test_evidence_class_kalshi_coverage_counts_only_scored_rows():
+    trades = [
+        _trade(outcome="WIN", side_market_price=0.7, eligibility_status="RESEARCH_ONLY"),
+        _trade(outcome="PENDING_SETTLEMENT", side_market_price=0.8, eligibility_status="RESEARCH_ONLY"),
+    ]
+    metrics = build_settled_v3_accuracy_lab_report(trades)["baseline_reproduction"]["by_evidence_class"]
+    assert metrics["RESEARCH_ONLY"]["v3"]["n"] == 1
+    assert metrics["RESEARCH_ONLY"]["kalshi_coverage_n"] == 1
+    assert metrics["RESEARCH_ONLY"]["kalshi"]["n"] == 1
+
+
 def test_candidate_ranking_and_recommendation_exist():
     trades = []
     # Build enough chronological events for non-empty holdout.
