@@ -205,10 +205,9 @@ def _event_level_brier(rows: list[dict[str, Any]], prob_key: str) -> tuple[int, 
         return 0, None
     losses = []
     for event_rows in grouped.values():
-        losses.append(statistics.mean(
-            (float(row[prob_key]) - float(row["actual"])) ** 2
-            for row in event_rows
-        ))
+        mean_prob = statistics.mean(float(row[prob_key]) for row in event_rows)
+        mean_actual = statistics.mean(float(row["actual"]) for row in event_rows)
+        losses.append((mean_prob - mean_actual) ** 2)
     return len(losses), round(statistics.mean(losses), 4)
 
 

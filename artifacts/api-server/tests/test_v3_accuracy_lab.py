@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.services.v3_accuracy_lab import (
+    _event_level_brier,
     _fit_best_alpha,
     _fit_market_blend_weight,
     build_settled_v3_accuracy_lab_report,
@@ -98,6 +99,18 @@ def test_event_level_n_does_not_count_correlated_contracts_as_events():
     assert metrics["n"] == 3
     assert metrics["event_n"] == 2
     assert metrics["event_level_brier"] is not None
+
+
+def test_event_level_brier_scores_each_event_once():
+    event_n, brier = _event_level_brier([
+        {"event_key": "a", "candidate_prob": 0.9, "actual": 1.0},
+        {"event_key": "a", "candidate_prob": 0.1, "actual": 0.0},
+        {"event_key": "b", "candidate_prob": 0.8, "actual": 1.0},
+    ], "candidate_prob")
+    # Event a collapses to mean_prob=0.5, mean_actual=0.5 -> 0.0
+    # Event b contributes (0.8 - 1.0)^2 = 0.04
+    assert event_n == 2
+    assert brier == 0.02
 
 
 def test_baseline_and_kalshi_metrics_present():
