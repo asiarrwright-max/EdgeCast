@@ -62,9 +62,16 @@ def _parse_date(value: str | None) -> date | None:
         return None
 
 
+def _canonical_target_date_label(value: str | None) -> str:
+    parsed = _parse_date(value)
+    if parsed is not None:
+        return parsed.isoformat()
+    return str(value or "UNKNOWN_DATE")[:10]
+
+
 def _event_key(trade: Any) -> str:
     city = getattr(trade, "city", None) or "UNKNOWN_CITY"
-    target = str(getattr(trade, "target_settlement_date", None) or "UNKNOWN_DATE")[:10]
+    target = _canonical_target_date_label(getattr(trade, "target_settlement_date", None))
     variable = getattr(trade, "weather_variable", None) or "UNKNOWN_VAR"
     return f"{city}|{target}|{variable}"
 

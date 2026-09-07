@@ -89,7 +89,7 @@ def test_event_group_partitioning_is_chronological_and_disjoint():
 def test_event_level_n_does_not_count_correlated_contracts_as_events():
     trades = [
         _trade(target_settlement_date="2026-08-01", contract_type="threshold"),
-        _trade(target_settlement_date="2026-08-01", contract_type="range"),
+        _trade(target_settlement_date="2026-08-01T19:00:00Z", contract_type="range"),
         _trade(target_settlement_date="2026-08-02", contract_type="threshold"),
     ]
     metrics = build_settled_v3_accuracy_lab_report(trades)["baseline_reproduction"][
