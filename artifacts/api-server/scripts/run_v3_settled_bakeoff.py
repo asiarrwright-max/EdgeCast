@@ -59,6 +59,11 @@ def _arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _validate_args(args: argparse.Namespace) -> None:
+    if args.manifest is not None and args.input is None:
+        raise SystemExit("BLOCKED_INCOMPLETE_SOURCE: --manifest requires --input")
+
+
 def _load_export(path: Path, manifest_path: Path | None) -> tuple[list[SimpleNamespace], dict]:
     if manifest_path is None:
         raise SystemExit("BLOCKED_INCOMPLETE_SOURCE: --manifest is required with --input")
@@ -131,6 +136,7 @@ def _write_outputs(report: dict, manifest: dict, out_dir: Path) -> None:
 
 async def main() -> None:
     args = _arguments()
+    _validate_args(args)
     rows, manifest = _load_export(args.input, args.manifest) if args.input else await _load_database()
     report = build_settled_v3_accuracy_lab_report(rows, as_of=datetime.now(timezone.utc))
     if report["frozen_population"]["total_settled_v3_rows"] != manifest["complete_settled_v3_count"]:
