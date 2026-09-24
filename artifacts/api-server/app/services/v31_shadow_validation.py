@@ -15,7 +15,9 @@ import logging
 import math
 import statistics
 from collections import defaultdict
+from datetime import date, timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 
@@ -267,6 +269,77 @@ def _milestones(event_n: int) -> dict[str, Any]:
     }
 
 
+def _same_day_threshold(observation: V31ShadowObservation, trade: V3PaperTrade | None) -> bool | None:
+    """Require an exact decision date in the market's settlement timezone.
+
+    The integer lead_time_days on a snapshot uses UTC and can disagree with
+    the local calendar date.  Unknown timezone/date is excluded, never guessed.
+    """
+    if observation.contract_type != "threshold":
+        return False
+    timestamp = observation.decision_timestamp
+    date_string = observation.target_settlement_date
+    timezone_name = getattr(trade, "settlement_timezone", None)
+    if timestamp is None or not date_string or not timezone_name:
+        return None
+    try:
+        target = date.fromisoformat(str(date_string)[:10])
+        zone = ZoneInfo(timezone_name)
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        return timestamp.astimezone(zone).date() == target
+    except (ValueError, ZoneInfoNotFoundError):
+        return None
+
+
+def _focused_report(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Matched forward comparison and transparent paper cost sensitivity.
+
+    Seven percent of p(1-p) is a *scenario assumption* for general taker fees,
+    not a claim about the actual fee for a particular market or fill.  No
+    spread is double-counted: the source price is already the chosen-side ask.
+    """
+    populations: dict[str, Any] = {}
+    for population in EVIDENCE_CLASSES:
+        rows = [r for r in records if r["evidence_class"] == population]
+        focused = [r for r in rows if r["same_day_threshold"] is True]
+        settled = [r for r in focused if r["actual"] is not None]
+        executable = [r for r in settled if r["executable_at_decision"]]
+        # One contract per observation avoids importing production stake sizing.
+        gross = sum(r["actual"] - r["market_probability"] for r in executable)
+        assumed_fee = sum(math.ceil(100 * 0.07 * r["market_probability"]
+                                    * (1 - r["market_probability"]) - 1e-12) / 100
+                          for r in executable)
+        populations[population] = {
+            "observations": len(focused),
+            "open_or_unsettled": len(focused) - len(settled),
+            "settled": len(settled),
+            "distinct_settled_events": len({r["event_key"] for r in settled}),
+            "metrics_on_same_settled_rows": {
+                "v3": _metrics(settled, "v3_probability"),
+                "frozen_50_50_blend": _metrics(settled, "blend_probability"),
+                "kalshi": _metrics(settled, "market_probability"),
+            },
+            "paper_cost_scenario": {
+                "eligible_settled_contracts": len(executable),
+                "distinct_events": len({r["event_key"] for r in executable}),
+                "unit": "one hypothetical chosen-side contract per observation",
+                "gross_dollars": round(gross, 4),
+                "assumed_taker_fees_dollars": round(assumed_fee, 4),
+                "net_after_assumed_fees_dollars": round(gross - assumed_fee, 4),
+                "fee_assumption": "7% * price * (1-price), rounded up to a cent per contract; market-specific rules may differ",
+                "actual_fills_or_profit": False,
+            },
+            "milestones": _milestones(len({r["event_key"] for r in settled})),
+        }
+    return {
+        "definition": "threshold contract with target date equal to decision date in recorded settlement timezone",
+        "excluded_unknown_local_date": sum(r["same_day_threshold"] is None for r in records),
+        "scope": "Only V3 paper opportunities captured prospectively; skipped markets are not in this comparison.",
+        "populations": populations,
+    }
+
+
 def build_shadow_report(
     joined_rows: list[tuple[V31ShadowObservation, V3PaperTrade | None]],
 ) -> dict[str, Any]:
@@ -286,6 +359,12 @@ def build_shadow_report(
             "actual": _actual(outcome),
             "status": trade.status if trade is not None else "SOURCE_TRADE_MISSING",
             "outcome": outcome,
+            "same_day_threshold": _same_day_threshold(observation, trade),
+            "executable_at_decision": (
+                trade is not None and getattr(trade, "is_executable", None) is True
+                and evidence_class(observation.evidence_class) == "OFFICIAL"
+                and observation.market_side_probability is not None
+            ),
         })
 
     populations: dict[str, Any] = {}
@@ -315,6 +394,7 @@ def build_shadow_report(
         },
         "total_observations": len(records),
         "populations": populations,
+        "focused_same_day_threshold": _focused_report(records),
         "safety": {
             "shadow_only": True,
             "production_probability_changed": False,
