@@ -309,6 +309,24 @@ def _focused_report(records: list[dict[str, Any]]) -> dict[str, Any]:
         assumed_fee = sum(math.ceil(100 * 0.07 * r["market_probability"]
                                     * (1 - r["market_probability"]) - 1e-12) / 100
                           for r in executable)
+        city_breakdown: dict[str, Any] = {}
+        for city in sorted({r["city"] or "UNKNOWN_CITY" for r in focused}):
+            city_rows = [r for r in settled if (r["city"] or "UNKNOWN_CITY") == city]
+            city_executable = [r for r in city_rows if r["executable_at_decision"]]
+            city_gross = sum(r["actual"] - r["market_probability"] for r in city_executable)
+            city_fees = sum(math.ceil(100 * 0.07 * r["market_probability"]
+                                     * (1 - r["market_probability"]) - 1e-12) / 100
+                            for r in city_executable)
+            city_breakdown[city] = {
+                "observations": sum((r["city"] or "UNKNOWN_CITY") == city for r in focused),
+                "settled": len(city_rows),
+                "distinct_settled_events": len({r["event_key"] for r in city_rows}),
+                "v3_brier": _metrics(city_rows, "v3_probability")["brier"],
+                "blend_brier": _metrics(city_rows, "blend_probability")["brier"],
+                "kalshi_brier": _metrics(city_rows, "market_probability")["brier"],
+                "executable_settled_contracts": len(city_executable),
+                "net_after_assumed_fees_dollars": round(city_gross - city_fees, 4),
+            }
         populations[population] = {
             "observations": len(focused),
             "open_or_unsettled": len(focused) - len(settled),
@@ -319,6 +337,7 @@ def _focused_report(records: list[dict[str, Any]]) -> dict[str, Any]:
                 "frozen_50_50_blend": _metrics(settled, "blend_probability"),
                 "kalshi": _metrics(settled, "market_probability"),
             },
+            "by_city": city_breakdown,
             "paper_cost_scenario": {
                 "eligible_settled_contracts": len(executable),
                 "distinct_events": len({r["event_key"] for r in executable}),
@@ -351,6 +370,7 @@ def build_shadow_report(
             "v3_paper_trade_id": observation.v3_paper_trade_id,
             "market_ticker": observation.market_ticker,
             "event_key": observation.event_key,
+            "city": getattr(observation, "city", None),
             "evidence_class": evidence_class(observation.evidence_class),
             "v3_probability": observation.v3_side_probability,
             "market_probability": observation.market_side_probability,
