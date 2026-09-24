@@ -15,7 +15,7 @@ import logging
 import math
 import statistics
 from collections import defaultdict
-from datetime import date, timezone
+from datetime import date
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -280,13 +280,11 @@ def _same_day_threshold(observation: V31ShadowObservation, trade: V3PaperTrade |
     timestamp = observation.decision_timestamp
     date_string = observation.target_settlement_date
     timezone_name = getattr(trade, "settlement_timezone", None)
-    if timestamp is None or not date_string or not timezone_name:
+    if timestamp is None or timestamp.tzinfo is None or not date_string or not timezone_name:
         return None
     try:
         target = date.fromisoformat(str(date_string)[:10])
         zone = ZoneInfo(timezone_name)
-        if timestamp.tzinfo is None:
-            timestamp = timestamp.replace(tzinfo=timezone.utc)
         return timestamp.astimezone(zone).date() == target
     except (ValueError, ZoneInfoNotFoundError):
         return None
@@ -297,7 +295,8 @@ def _focused_report(records: list[dict[str, Any]]) -> dict[str, Any]:
 
     Seven percent of p(1-p) is a *scenario assumption* for general taker fees,
     not a claim about the actual fee for a particular market or fill.  No
-    spread is double-counted: the source price is already the chosen-side ask.
+    spread is double-counted for executable OFFICIAL rows, whose source price
+    is the chosen-side ask.
     """
     populations: dict[str, Any] = {}
     for population in EVIDENCE_CLASSES:
