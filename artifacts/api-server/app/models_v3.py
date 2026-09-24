@@ -580,6 +580,70 @@ class V3JitQuoteAudit(Base):
 
 
 # ---------------------------------------------------------------------------
+# V31ShadowObservation — frozen prospective probability comparison
+# ---------------------------------------------------------------------------
+
+class V31ShadowObservation(Base):
+    """Immutable decision-time inputs for the prospective V3.1 shadow cohort.
+
+    The candidate is frozen as the arithmetic mean of the V3 chosen-side
+    probability and the contemporaneous Kalshi chosen-side executable price.
+    This table is observational only: no value here is consumed by prediction,
+    eligibility, recommendation, settlement, readiness, or trading code.
+
+    Settlement outcomes remain authoritative on ``V3PaperTrade`` and are
+    joined read-only by the shadow report through ``v3_paper_trade_id``.  That
+    avoids a second mutable outcome while retaining an exact prospective link.
+    """
+
+    __tablename__ = "v31_shadow_observations"
+    __table_args__ = (
+        UniqueConstraint(
+            "v3_paper_trade_id",
+            name="uq_v31_shadow_source_trade",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    # Frozen protocol identity.  Changing either value requires a new cohort
+    # version; this v1 cohort must never be retrospectively retuned/backfilled.
+    candidate_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    v3_weight: Mapped[float] = mapped_column(Float, nullable=False)
+    market_weight: Mapped[float] = mapped_column(Float, nullable=False)
+
+    # Linkage and prospective event grouping.
+    v3_paper_trade_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    market_ticker: Mapped[str] = mapped_column(String(300), nullable=False, index=True)
+    event_key: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    collection_batch_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    decision_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Frozen decision-time probability inputs.  These are chosen-side
+    # probabilities, matching the exact Accuracy Lab candidate in PR #49.
+    direction: Mapped[str] = mapped_column(String(10), nullable=False)
+    v3_yes_probability: Mapped[float | None] = mapped_column(Float)
+    market_yes_probability: Mapped[float | None] = mapped_column(Float)
+    v3_side_probability: Mapped[float] = mapped_column(Float, nullable=False)
+    market_side_probability: Mapped[float] = mapped_column(Float, nullable=False)
+    blended_side_probability: Mapped[float] = mapped_column(Float, nullable=False)
+    model_market_disagreement: Mapped[float] = mapped_column(Float, nullable=False)
+
+    # Frozen cohort dimensions and evidence classification.
+    city: Mapped[str | None] = mapped_column(String(200), index=True)
+    station_id: Mapped[str | None] = mapped_column(String(50), index=True)
+    weather_variable: Mapped[str | None] = mapped_column(String(30))
+    contract_type: Mapped[str | None] = mapped_column(String(30), index=True)
+    target_settlement_date: Mapped[str | None] = mapped_column(String(50), index=True)
+    lead_time_days: Mapped[int | None] = mapped_column(Integer)
+    evidence_class: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    eligibility_reason: Mapped[str | None] = mapped_column(String(60))
+
+
+# ---------------------------------------------------------------------------
 # V3IngestionLog — per-run audit trail
 # ---------------------------------------------------------------------------
 
