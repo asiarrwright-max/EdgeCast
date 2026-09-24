@@ -161,6 +161,8 @@ def test_focused_report_matches_local_day_and_separates_scoring_from_cost_scenar
                          settlement_timezone=None)),
     ]
     focused = build_shadow_report(rows)["focused_same_day_threshold"]
+    assert focused["pilot_cities"] == ["Denver", "Minneapolis", "Dallas"]
+    assert focused["other_cities_still_recorded"] is True
     official = focused["populations"]["OFFICIAL"]
     research = focused["populations"]["RESEARCH_ONLY"]
     assert focused["excluded_unknown_local_date"] == 1
@@ -173,6 +175,7 @@ def test_focused_report_matches_local_day_and_separates_scoring_from_cost_scenar
     assert official["by_city"]["Chicago"]["kalshi_brier"] == pytest.approx(.49)
     assert official["by_city"]["Chicago"]["net_after_assumed_fees_dollars"] == pytest.approx(.68)
     assert research["settled"] == 1
+    assert research["pilot_three_city_comparison"]["settled"] == 1
     assert research["paper_cost_scenario"]["eligible_settled_contracts"] == 0
 
 
