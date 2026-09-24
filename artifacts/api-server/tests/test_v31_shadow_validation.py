@@ -36,8 +36,9 @@ def _trade(**overrides):
     return SimpleNamespace(**values)
 
 
-def _observation(obs_id: int, evidence: str, event: str, *, v3: float, market: float):
-    return SimpleNamespace(
+def _observation(obs_id: int, evidence: str, event: str, *, v3: float, market: float,
+                 **overrides):
+    values = dict(
         id=obs_id,
         v3_paper_trade_id=obs_id + 100,
         market_ticker=f"TICKER-{obs_id}",
@@ -46,7 +47,13 @@ def _observation(obs_id: int, evidence: str, event: str, *, v3: float, market: f
         v3_side_probability=v3,
         market_side_probability=market,
         blended_side_probability=(v3 + market) / 2,
+        contract_type="threshold",
+        city=event.split("|")[0],
+        target_settlement_date="2026-09-02",
+        decision_timestamp=datetime(2026, 9, 2, 15, tzinfo=timezone.utc),
     )
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
 def _settled(status: str, outcome: str | None):
@@ -130,6 +137,46 @@ def test_minimum_milestone_uses_event_n_not_correlated_contract_n():
     assert milestones["too_small_for_comparative_conclusion"] is True
     assert milestones["next"]["event_n"] == 25
     assert milestones["next"]["remaining_events"] == 5
+
+
+def test_focused_report_matches_local_day_and_separates_scoring_from_cost_scenario():
+    # 02:00 UTC is still September 1 in Chicago, despite UTC date September 2.
+    rows = [
+        (_observation(1, "OFFICIAL", "Chicago|2026-09-02|high", v3=.8, market=.3,
+                      decision_timestamp=datetime(2026, 9, 2, 2, tzinfo=timezone.utc)),
+         SimpleNamespace(outcome="WIN", status="SETTLED", is_executable=True,
+                         settlement_timezone="America/Chicago")),
+        (_observation(2, "OFFICIAL", "Chicago|2026-09-02|high", v3=.8, market=.3),
+         SimpleNamespace(outcome="WIN", status="SETTLED", is_executable=True,
+                         settlement_timezone="America/Chicago")),
+        (_observation(3, "RESEARCH_ONLY", "Denver|2026-09-02|high", v3=.7, market=.2),
+         SimpleNamespace(outcome="LOSS", status="SETTLED", is_executable=False,
+                         settlement_timezone="America/Denver")),
+        (_observation(4, "OFFICIAL", "Austin|2026-09-02|high", v3=.7, market=.2,
+                      contract_type="range"),
+         SimpleNamespace(outcome="LOSS", status="SETTLED", is_executable=True,
+                         settlement_timezone="America/Chicago")),
+        (_observation(5, "OFFICIAL", "Boston|2026-09-02|high", v3=.7, market=.2),
+         SimpleNamespace(outcome="WIN", status="SETTLED", is_executable=True,
+                         settlement_timezone=None)),
+    ]
+    focused = build_shadow_report(rows)["focused_same_day_threshold"]
+    assert focused["pilot_cities"] == ["Denver", "Minneapolis", "Dallas"]
+    assert focused["other_cities_still_recorded"] is True
+    official = focused["populations"]["OFFICIAL"]
+    research = focused["populations"]["RESEARCH_ONLY"]
+    assert focused["excluded_unknown_local_date"] == 1
+    assert official["observations"] == 1
+    assert official["metrics_on_same_settled_rows"]["v3"]["n"] == 1
+    assert official["metrics_on_same_settled_rows"]["kalshi"]["brier"] == pytest.approx(.49)
+    assert official["paper_cost_scenario"]["gross_dollars"] == pytest.approx(.70)
+    assert official["paper_cost_scenario"]["assumed_taker_fees_dollars"] == pytest.approx(.02)
+    assert official["by_city"]["Chicago"]["distinct_settled_events"] == 1
+    assert official["by_city"]["Chicago"]["kalshi_brier"] == pytest.approx(.49)
+    assert official["by_city"]["Chicago"]["net_after_assumed_fees_dollars"] == pytest.approx(.68)
+    assert research["settled"] == 1
+    assert research["pilot_three_city_comparison"]["settled"] == 1
+    assert research["paper_cost_scenario"]["eligible_settled_contracts"] == 0
 
 
 @pytest.mark.asyncio
