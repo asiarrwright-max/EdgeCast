@@ -48,6 +48,7 @@ def _observation(obs_id: int, evidence: str, event: str, *, v3: float, market: f
         market_side_probability=market,
         blended_side_probability=(v3 + market) / 2,
         contract_type="threshold",
+        city=event.split("|")[0],
         target_settlement_date="2026-09-02",
         decision_timestamp=datetime(2026, 9, 2, 15, tzinfo=timezone.utc),
     )
@@ -168,6 +169,9 @@ def test_focused_report_matches_local_day_and_separates_scoring_from_cost_scenar
     assert official["metrics_on_same_settled_rows"]["kalshi"]["brier"] == pytest.approx(.49)
     assert official["paper_cost_scenario"]["gross_dollars"] == pytest.approx(.70)
     assert official["paper_cost_scenario"]["assumed_taker_fees_dollars"] == pytest.approx(.02)
+    assert official["by_city"]["Chicago"]["distinct_settled_events"] == 1
+    assert official["by_city"]["Chicago"]["kalshi_brier"] == pytest.approx(.49)
+    assert official["by_city"]["Chicago"]["net_after_assumed_fees_dollars"] == pytest.approx(.68)
     assert research["settled"] == 1
     assert research["paper_cost_scenario"]["eligible_settled_contracts"] == 0
 
