@@ -30,6 +30,9 @@ CANDIDATE_VERSION = "v31-shadow-pr49-50v3-50market-v1"
 V3_WEIGHT = 0.50
 MARKET_WEIGHT = 0.50
 EVIDENCE_CLASSES = ("OFFICIAL", "RESEARCH_ONLY", "UNCLASSIFIED")
+# Predeclared pilot for reading the forward report. Chosen for the largest
+# historical threshold/0-1d coverage, not for demonstrated model edge.
+FOCUS_CITIES = ("Denver", "Minneapolis", "Dallas")
 
 # Prospective event counts are the governing milestones because multiple
 # correlated contracts can represent one weather event.  These are evidence-
@@ -327,6 +330,7 @@ def _focused_report(records: list[dict[str, Any]]) -> dict[str, Any]:
                 "executable_settled_contracts": len(city_executable),
                 "net_after_assumed_fees_dollars": round(city_gross - city_fees, 4),
             }
+        pilot_rows = [r for r in settled if r["city"] in FOCUS_CITIES]
         populations[population] = {
             "observations": len(focused),
             "open_or_unsettled": len(focused) - len(settled),
@@ -338,6 +342,13 @@ def _focused_report(records: list[dict[str, Any]]) -> dict[str, Any]:
                 "kalshi": _metrics(settled, "market_probability"),
             },
             "by_city": city_breakdown,
+            "pilot_three_city_comparison": {
+                "settled": len(pilot_rows),
+                "distinct_settled_events": len({r["event_key"] for r in pilot_rows}),
+                "v3_brier": _metrics(pilot_rows, "v3_probability")["brier"],
+                "blend_brier": _metrics(pilot_rows, "blend_probability")["brier"],
+                "kalshi_brier": _metrics(pilot_rows, "market_probability")["brier"],
+            },
             "paper_cost_scenario": {
                 "eligible_settled_contracts": len(executable),
                 "distinct_events": len({r["event_key"] for r in executable}),
@@ -352,6 +363,9 @@ def _focused_report(records: list[dict[str, Any]]) -> dict[str, Any]:
         }
     return {
         "definition": "threshold contract with target date equal to decision date in recorded settlement timezone",
+        "pilot_cities": list(FOCUS_CITIES),
+        "pilot_selection_basis": "historical threshold/0-1d event coverage, not evidence of an edge",
+        "other_cities_still_recorded": True,
         "excluded_unknown_local_date": sum(r["same_day_threshold"] is None for r in records),
         "scope": "Only V3 paper opportunities captured prospectively; skipped markets are not in this comparison.",
         "populations": populations,
